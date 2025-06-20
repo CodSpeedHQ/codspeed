@@ -141,6 +141,11 @@ pub async fn measure(
         }
     }
     cmd.arg(format!("--log-file={}", log_path.to_str().unwrap()).as_str());
+    cmd.args(
+        std::env::var("VALGRIND_FLAGS")
+            .unwrap_or_default()
+            .split_whitespace(),
+    );
 
     // Set the command to execute:
     let script_path = create_run_script()?;
