@@ -177,6 +177,7 @@ impl MemoryExecutor {
                         "codspeed-rust" => Version::new(4, 2, 0),
                         "codspeed-cpp" => Version::new(2, 1, 0),
                         "pytest-codspeed" => Version::new(4, 3, 0),
+                        "codspeed-node" => Version::new(5, 2, 0),
                         _ => {
                             panic!("{INVALID_INTEGRATION_ERROR}")
                         }
