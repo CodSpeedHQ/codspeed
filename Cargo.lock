@@ -1589,6 +1589,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "instrument-hooks-bindings"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "nix 0.30.1",
+]
+
+[[package]]
 name = "ipc-channel"
 version = "0.18.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1766,9 +1774,9 @@ dependencies = [
 
 [[package]]
 name = "libc"
-version = "0.2.178"
+version = "0.2.180"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37c93d8daa9d8a012fd8ab92f088405fb202ea0b6ab73ee2482ae66af4f42091"
+checksum = "bcc35a38544a891a5f7c865aca548a982ccb3b8650a5b06d0fd33a10283c56fc"
 
 [[package]]
 name = "libgit2-sys"

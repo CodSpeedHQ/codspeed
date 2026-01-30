@@ -86,7 +86,12 @@ rstest_reuse = "0.7.0"
 shell-quote = "0.7.2"
 
 [workspace]
-members = ["crates/runner-shared", "crates/memtrack", "crates/exec-harness"]
+members = [
+    "crates/runner-shared",
+    "crates/memtrack",
+    "crates/exec-harness",
+    "crates/instrument-hooks-bindings",
+]
 
 [workspace.dependencies]
 anyhow = "1.0"

@@ -10,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+        with:
+          submodules: true
       - uses: moonrepo/setup-rust@v1
         with:
           components: rustfmt, clippy
@@ -23,6 +25,7 @@ jobs:
       - uses: actions/checkout@v3
         with:
           lfs: true
+          submodules: true
 
       - name: "Install rust-toolchain.toml"
         run: rustup toolchain install
@@ -45,6 +48,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+        with:
+          submodules: true
       - uses: moonrepo/setup-rust@v1
       - name: Run tests
         run: cargo test -p exec-harness
@@ -55,6 +60,7 @@ jobs:
       - uses: actions/checkout@v3
         with:
           lfs: true
+          submodules: true
       - uses: moonrepo/setup-rust@v1
       - name: Install dependencies required for libbpf-sys (vendored feature)
         run: sudo apt-get update && sudo apt-get install -y autopoint bison flex
@@ -76,6 +82,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+        with:
+          submodules: true
 
       - name: "Install rust-toolchain.toml"
         run: rustup toolchain install
