@@ -888,12 +888,11 @@ name = "exec-harness"
 version = "1.1.0"
 dependencies = [
  "anyhow",
- "cargo_metadata",
  "cc",
  "clap",
- "codspeed",
  "env_logger",
  "humantime",
+ "instrument-hooks-bindings",
  "log",
  "object 0.36.7",
  "runner-shared",

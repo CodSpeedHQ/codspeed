@@ -1,16 +1,18 @@
+use crate::constants::INTEGRATION_NAME;
+use crate::constants::INTEGRATION_VERSION;
 use crate::prelude::*;
 
 use crate::BenchmarkCommand;
 use crate::constants;
 use crate::uri;
-use codspeed::instrument_hooks::InstrumentHooks;
+use instrument_hooks_bindings::InstrumentHooks;
 use std::process::Command;
 
 mod ld_preload_check;
 mod preload_lib_file;
 
 pub fn perform(commands: Vec<BenchmarkCommand>) -> Result<()> {
-    let hooks = InstrumentHooks::instance();
+    let hooks = InstrumentHooks::instance(INTEGRATION_NAME, INTEGRATION_VERSION);
 
     for benchmark_cmd in commands {
         let name_and_uri = uri::generate_name_and_uri(&benchmark_cmd.name, &benchmark_cmd.command);

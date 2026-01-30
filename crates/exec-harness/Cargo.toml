@@ -10,8 +10,8 @@ name = "exec-harness"
 path = "src/main.rs"
 
 [dependencies]
+instrument-hooks-bindings = { path = "../instrument-hooks-bindings" }
 anyhow = { workspace = true }
-codspeed = "4.2.0"
 log = { workspace = true }
 env_logger = { workspace = true }
 clap = { workspace = true }
@@ -23,7 +23,6 @@ tempfile = { workspace = true }
 object = { workspace = true }
 
 [build-dependencies]
-cargo_metadata = "0.19"
 cc = "1"
 
 [package.metadata.dist]

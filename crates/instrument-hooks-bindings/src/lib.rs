@@ -27,13 +27,13 @@ mod linux_impl {
 
         /// Returns a singleton instance of `InstrumentHooks`.
         #[inline(always)]
-        pub fn instance() -> &'static Self {
+        pub fn instance(integration: &str, version: &str) -> &'static Self {
             static INSTANCE: OnceLock<InstrumentHooks> = OnceLock::new();
             INSTANCE.get_or_init(|| {
                 let instance =
                     InstrumentHooks::new().expect("Failed to initialize InstrumentHooks");
                 instance
-                    .set_integration("codspeed-rust", env!("CARGO_PKG_VERSION"))
+                    .set_integration(integration, version)
                     .expect("Failed to set integration");
                 instance
             })
@@ -210,7 +210,7 @@ mod tests {
 
     #[test]
     fn test_instrument_hooks() {
-        let hooks = InstrumentHooks::instance();
+        let hooks = InstrumentHooks::instance("test_integration", "1.0.0");
         assert!(!hooks.is_instrumented() || hooks.start_benchmark().is_ok());
         assert!(hooks.set_executed_benchmark("test_uri").is_ok());
         assert!(hooks.set_integration("test_integration", "1.0.0").is_ok());

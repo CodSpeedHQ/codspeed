@@ -1,7 +1,8 @@
 use super::ExecutionOptions;
 use super::config::RoundOrTime;
+use crate::constants::{INTEGRATION_NAME, INTEGRATION_VERSION};
 use crate::prelude::*;
-use codspeed::instrument_hooks::InstrumentHooks;
+use instrument_hooks_bindings::InstrumentHooks;
 use std::process::Command;
 use std::time::Duration;
 
@@ -11,7 +12,7 @@ pub fn run_rounds(
     config: &ExecutionOptions,
 ) -> Result<Vec<u128>> {
     let warmup_time_ns = config.warmup_time_ns;
-    let hooks = InstrumentHooks::instance();
+    let hooks = InstrumentHooks::instance(INTEGRATION_NAME, INTEGRATION_VERSION);
 
     let do_one_round = || -> Result<(u64, u64)> {
         let mut child = Command::new(&command[0])

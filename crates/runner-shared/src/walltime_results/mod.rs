@@ -4,17 +4,12 @@ mod stats;
 pub use interfaces::*;
 
 impl WalltimeResults {
-    pub fn from_benchmarks(benchmarks: Vec<WalltimeBenchmark>) -> anyhow::Result<Self> {
+    pub fn new(creator: Creator, benchmarks: Vec<WalltimeBenchmark>) -> anyhow::Result<Self> {
         Ok(WalltimeResults {
             instrument: Instrument {
                 type_: "walltime".to_string(),
             },
-            creator: Creator {
-                // TODO(COD-1736): Stop impersonating codspeed-rust 🥸
-                name: "codspeed-rust".to_string(),
-                version: env!("CARGO_PKG_VERSION").to_string(),
-                pid: std::process::id(),
-            },
+            creator,
             benchmarks,
         })
     }

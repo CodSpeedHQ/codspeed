@@ -3,10 +3,13 @@ mod config;
 
 pub use config::ExecutionOptions;
 pub use config::WalltimeExecutionArgs;
+use runner_shared::walltime_results::Creator;
 use runner_shared::walltime_results::WalltimeBenchmark;
 pub use runner_shared::walltime_results::WalltimeResults;
 
 use crate::BenchmarkCommand;
+use crate::constants::INTEGRATION_NAME;
+use crate::constants::INTEGRATION_VERSION;
 use crate::prelude::*;
 use crate::uri::NameAndUri;
 use crate::uri::generate_name_and_uri;
@@ -42,8 +45,15 @@ pub fn perform(commands: Vec<BenchmarkCommand>) -> Result<()> {
         walltime_benchmarks.push(walltime_benchmark);
     }
 
-    let walltime_results = WalltimeResults::from_benchmarks(walltime_benchmarks)
-        .expect("Failed to create walltime results");
+    let walltime_results = WalltimeResults::new(
+        Creator {
+            name: INTEGRATION_NAME.to_string(),
+            version: INTEGRATION_VERSION.to_string(),
+            pid: std::process::id(),
+        },
+        walltime_benchmarks,
+    )
+    .expect("Failed to create walltime results");
 
     walltime_results
         .save_to_file(

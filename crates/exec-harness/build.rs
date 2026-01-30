@@ -3,16 +3,9 @@
 //! This script compiles the `libcodspeed_preload.so` shared library that is used
 //! to inject instrumentation into child processes via LD_PRELOAD.
 //!
-//! The library is built using the `core.c` and headers from the `codspeed` crate's
-//! `instrument-hooks` directory.
-//!
-//! # Environment Variables
-//!
-//! - `CODSPEED_INSTRUMENT_HOOKS_DIR`: Optional override for the instrument-hooks
-//!   source directory. If not set, the build script will locate it from the
-//!   `codspeed` crate in the cargo registry.
+//! The library is built using the `core.c` and headers from the `instrument-hooks-bindings`
+//! crate's `instrument-hooks` directory.
 
-use cargo_metadata::MetadataCommand;
 use std::env;
 use std::path::PathBuf;
 
@@ -25,7 +18,6 @@ struct PreloadConstants {
     /// Integration name reported to CodSpeed.
     integration_name: &'static str,
     /// Integration version reported to CodSpeed.
-    /// This should match the version of the `codspeed` crate dependency.
     integration_version: &'static str,
     /// Filename for the preload shared library.
     preload_lib_filename: &'static str,
@@ -58,11 +50,11 @@ fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
 
     // Try to get the instrument-hooks directory from the environment variable first,
-    // otherwise locate it from the codspeed crate
-    let instrument_hooks_dir = match env::var("CODSPEED_INSTRUMENT_HOOKS_DIR") {
-        Ok(dir) => PathBuf::from(dir),
-        Err(_) => find_codspeed_instrument_hooks_dir(),
-    };
+    // otherwise use the one from the instrument-hooks-bindings crate
+    let instrument_hooks_dir = manifest_dir
+        .parent()
+        .unwrap()
+        .join("instrument-hooks-bindings/instrument-hooks");
 
     // Build the preload shared library
     let paths = PreloadBuildPaths {
@@ -130,40 +122,12 @@ fn build_shared_library(paths: &PreloadBuildPaths, constants: &PreloadConstants)
     }
 }
 
-/// Find the instrument-hooks directory from the codspeed crate using cargo_metadata
-fn find_codspeed_instrument_hooks_dir() -> PathBuf {
-    let metadata = MetadataCommand::new()
-        .exec()
-        .expect("Failed to run cargo metadata");
-
-    // Find the codspeed package in the resolved dependencies
-    let codspeed_pkg = metadata
-        .packages
-        .iter()
-        .find(|p| p.name == "codspeed")
-        .expect("codspeed crate not found in dependencies");
-
-    let codspeed_dir = codspeed_pkg
-        .manifest_path
-        .parent()
-        .expect("Failed to get codspeed crate directory");
-
-    let instrument_hooks_dir = codspeed_dir.join("instrument-hooks");
-
-    if !instrument_hooks_dir.exists() {
-        panic!("instrument-hooks directory not found at {instrument_hooks_dir}");
-    }
-
-    instrument_hooks_dir.into_std_path_buf()
-}
-
 impl Default for PreloadConstants {
-    // TODO(COD-1736): Stop impersonating codspeed-rust 🥸
     fn default() -> Self {
         Self {
             uri_env: "CODSPEED_BENCH_URI",
-            integration_name: "codspeed-rust",
-            integration_version: "4.2.0",
+            integration_name: "exec-harness",
+            integration_version: env!("CARGO_PKG_VERSION"),
             preload_lib_filename: "libcodspeed_preload.so",
         }
     }
@@ -185,13 +149,13 @@ impl PreloadBuildPaths {
     fn check_sources_exist(&self) {
         if !self.core_c.exists() {
             panic!(
-                "core.c not found at {}. Make sure the codspeed crate is available.",
+                "core.c not found at {}. Make sure the instrument-hooks-bindings crate is available.",
                 self.core_c.display()
             );
         }
         if !self.includes_dir.exists() {
             panic!(
-                "includes directory not found at {}. Make sure the codspeed crate is available.",
+                "includes directory not found at {}. Make sure the instrument-hooks-bindings crate is available.",
                 self.includes_dir.display()
             );
         }
