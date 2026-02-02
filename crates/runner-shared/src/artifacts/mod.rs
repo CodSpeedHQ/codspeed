@@ -1,6 +1,8 @@
+use std::io::BufReader;
+
 use libc::pid_t;
 use log::debug;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 mod execution_timestamps;
 mod memtrack;
@@ -10,7 +12,7 @@ pub use memtrack::*;
 
 pub trait ArtifactExt
 where
-    Self: Sized + Serialize,
+    Self: Sized + Serialize + for<'de> Deserialize<'de>,
 {
     /// WARNING: This doesn't support generic types
     fn name() -> &'static str {
@@ -23,6 +25,11 @@ where
         } else {
             format!("{}.msgpack", Self::name())
         }
+    }
+
+    fn decode_from_reader<R: std::io::Read>(reader: R) -> anyhow::Result<Self> {
+        let reader = BufReader::new(reader);
+        rmp_serde::from_read(reader).map_err(anyhow::Error::from)
     }
 
     fn encode_to_writer<W: std::io::Write>(&self, mut writer: W) -> anyhow::Result<()> {

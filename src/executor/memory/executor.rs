@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use ipc_channel::ipc;
 use memtrack::MemtrackIpcClient;
 use memtrack::MemtrackIpcServer;
-use runner_shared::artifacts::{ArtifactExt, ExecutionTimestamps, MemtrackArtifact};
+use runner_shared::artifacts::{ArtifactExt, ExecutionTimestamps};
 use runner_shared::fifo::Command as FifoCommand;
 use runner_shared::fifo::IntegrationMode;
 use semver::Version;
@@ -121,28 +121,27 @@ impl Executor for MemoryExecutor {
     }
 
     async fn teardown(&self, execution_context: &ExecutionContext) -> Result<()> {
-        let files: Vec<_> = std::fs::read_dir(execution_context.profile_folder.join("results"))?
+        let results_dir = execution_context.profile_folder.join("results");
+        let has_benchmarks = std::fs::read_dir(&results_dir)?
             .filter_map(Result::ok)
-            // Filter out non-memtrack files:
+            // Filter out non-ExecutionTimestamps files:
             .filter(|entry| {
                 entry
                     .file_name()
                     .to_string_lossy()
-                    .contains(MemtrackArtifact::name())
+                    .contains(ExecutionTimestamps::name())
             })
-            .flat_map(|f| std::fs::File::open(f.path()))
-            .filter(|file| !MemtrackArtifact::is_empty(file))
-            .collect();
+            .filter_map(|entry| {
+                let file = std::fs::File::open(entry.path()).ok()?;
+                ExecutionTimestamps::decode_from_reader(file).ok()
+            })
+            .any(|artifact| !artifact.uri_by_ts.is_empty());
 
-        if files.is_empty() {
+        if !has_benchmarks {
             if !execution_context.config.allow_empty {
-                bail!(
-                    "No memtrack artifact files found. Does the integration support memory profiling?"
-                );
+                bail!("No memory results found in profile folder: {results_dir:?}.");
             } else {
-                info!(
-                    "No memtrack artifact files found. Does the integration support memory profiling?"
-                );
+                info!("No memory results found in profile folder: {results_dir:?}.");
             }
         }
 
