@@ -5,6 +5,31 @@
 
 
 
+## [4.10.4] - 2026-02-02
+
+### <!-- 0 -->🚀 Features
+- Check for repository existence before run in local runs by @GuillaumeLagrange in [#229](https://github.com/CodSpeedHQ/runner/pull/229)
+- Support pytest-codspeed memory profiling by @not-matthias in [#225](https://github.com/CodSpeedHQ/runner/pull/225)
+- Attach to different jemalloc prefixed functions by @not-matthias
+- Support tracking `libstdc++` by @not-matthias
+- Track `posix_memalign` by @not-matthias
+
+### <!-- 1 -->🐛 Bug Fixes
+- Check non-default allocators first by @not-matthias
+- Reset owernship by @not-matthias
+
+### <!-- 2 -->🏗️ Refactor
+- Use standard allocation API across allocators by @not-matthias in [#212](https://github.com/CodSpeedHQ/runner/pull/212)
+
+### <!-- 7 -->⚙️ Internals
+- Use snapshots for c tests by @not-matthias
+- Only run tests in CI by @not-matthias
+- Use single thread for tests to avoid opening too many files by @not-matthias
+- Add cpp allocator test by @not-matthias
+- Add rust allocator tests by @not-matthias
+- Allow tracking statically linked allocators in tests by @not-matthias
+
+
 ## [4.10.3] - 2026-01-29
 
 ### <!-- 1 -->🐛 Bug Fixes
@@ -882,6 +907,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[4.10.4]: https://github.com/CodSpeedHQ/runner/compare/v4.10.3..v4.10.4
 [4.10.3]: https://github.com/CodSpeedHQ/runner/compare/v4.10.2..v4.10.3
 [4.10.2]: https://github.com/CodSpeedHQ/runner/compare/v4.10.1..v4.10.2
 [4.10.1]: https://github.com/CodSpeedHQ/runner/compare/v4.10.0..v4.10.1
