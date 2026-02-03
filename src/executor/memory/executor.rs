@@ -178,6 +178,7 @@ impl MemoryExecutor {
                         "codspeed-cpp" => Version::new(2, 1, 0),
                         "pytest-codspeed" => Version::new(4, 3, 0),
                         "codspeed-node" => Version::new(5, 2, 0),
+                        "exec-harness" => Version::new(1, 0, 0),
                         _ => {
                             panic!("{INVALID_INTEGRATION_ERROR}")
                         }
