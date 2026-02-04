@@ -1,11 +1,12 @@
 use crate::api_client::FetchLocalRunBenchmarkResult;
 use crate::cli::run::helpers;
 use crate::executor::ExecutorName;
+use console::style;
 use std::collections::HashMap;
 use tabled::settings::object::{Columns, Rows};
 use tabled::settings::panel::Panel;
 use tabled::settings::style::HorizontalLine;
-use tabled::settings::{Alignment, Color, Modify, Style};
+use tabled::settings::{Alignment, Color, Modify, Padding, Style};
 use tabled::{Table, Tabled};
 
 fn format_with_thousands_sep(n: u64) -> String {
@@ -18,6 +19,30 @@ fn format_with_thousands_sep(n: u64) -> String {
         result.push(c);
     }
     result.chars().rev().collect()
+}
+
+/// Format StdDev with color coding based on value
+fn format_stdev_colored(stdev_pct: f64) -> String {
+    let formatted = format!("{stdev_pct:.2}%");
+    if stdev_pct <= 2.0 {
+        format!("{}", style(&formatted).green())
+    } else if stdev_pct <= 5.0 {
+        format!("{}", style(&formatted).yellow())
+    } else {
+        format!("{}", style(&formatted).red())
+    }
+}
+
+/// Format a percentage distribution value with color intensity
+fn format_distribution_pct(pct: f64) -> String {
+    let formatted = format!("{pct:.1}%");
+    if pct >= 70.0 {
+        format!("{}", style(&formatted).white().bold())
+    } else if pct >= 20.0 {
+        format!("{}", style(&formatted).white())
+    } else {
+        format!("{}", style(&formatted).dim())
+    }
 }
 
 #[derive(Tabled)]
@@ -62,7 +87,7 @@ struct MemoryRow {
     alloc_calls: String,
 }
 
-fn build_table_with_style<T: Tabled>(rows: &[T], instrument: &str) -> String {
+fn build_table_with_style<T: Tabled>(rows: &[T], instrument: &str, icon: &str) -> String {
     // Line after panel header: use ┬ to connect with columns below
     let header_line = HorizontalLine::full('─', '┬', '├', '┤');
     // Line after column headers: keep intersection
@@ -71,7 +96,7 @@ fn build_table_with_style<T: Tabled>(rows: &[T], instrument: &str) -> String {
     // Format title in bold CodSpeed orange (#FF8700)
     let codspeed_orange = Color::rgb_fg(255, 135, 0);
     let title_style = Color::BOLD | codspeed_orange;
-    let title = title_style.colorize(format!("{instrument} Instrument"));
+    let title = title_style.colorize(format!("{icon} {instrument}"));
 
     let mut table = Table::new(rows);
     table
@@ -83,10 +108,12 @@ fn build_table_with_style<T: Tabled>(rows: &[T], instrument: &str) -> String {
                 .horizontals([(1, header_line), (2, column_line)]),
         )
         .with(Modify::new(Rows::first()).with(Alignment::center()))
-        // Make column headers bold
+        // Make column headers bold and dimmed for visual hierarchy
         .with(Modify::new(Rows::new(1..2)).with(Color::BOLD))
         // Right-align numeric columns (all except first column)
-        .with(Modify::new(Columns::new(1..)).with(Alignment::right()));
+        .with(Modify::new(Columns::new(1..)).with(Alignment::right()))
+        // Add some padding for breathing room
+        .with(Modify::new(Columns::new(0..)).with(Padding::new(1, 1, 0, 0)));
     table.to_string()
 }
 
@@ -100,10 +127,13 @@ fn build_simulation_table(results: &[&FetchLocalRunBenchmarkResult]) -> String {
                 .and_then(|v| v.time_distribution.as_ref())
                 .map(|td| {
                     let total = result.value;
+                    let ir_pct = (td.ir / total) * 100.0;
+                    let l1m_pct = (td.l1m / total) * 100.0;
+                    let llm_pct = (td.llm / total) * 100.0;
                     (
-                        format!("{:.1}%", (td.ir / total) * 100.0),
-                        format!("{:.1}%", (td.l1m / total) * 100.0),
-                        format!("{:.1}%", (td.llm / total) * 100.0),
+                        format_distribution_pct(ir_pct),
+                        format_distribution_pct(l1m_pct),
+                        format_distribution_pct(llm_pct),
                         helpers::format_duration(td.sys, Some(2)),
                     )
                 })
@@ -118,7 +148,10 @@ fn build_simulation_table(results: &[&FetchLocalRunBenchmarkResult]) -> String {
 
             SimulationRow {
                 name: result.benchmark.name.clone(),
-                time: helpers::format_duration(result.value, Some(2)),
+                time: format!(
+                    "{}",
+                    style(helpers::format_duration(result.value, Some(2))).cyan()
+                ),
                 instructions,
                 cache,
                 memory,
@@ -126,7 +159,7 @@ fn build_simulation_table(results: &[&FetchLocalRunBenchmarkResult]) -> String {
             }
         })
         .collect();
-    build_table_with_style(&rows, "CPU Simulation")
+    build_table_with_style(&rows, "CPU Simulation", "\u{2699}")
 }
 
 fn build_walltime_table(results: &[&FetchLocalRunBenchmarkResult]) -> String {
@@ -134,15 +167,22 @@ fn build_walltime_table(results: &[&FetchLocalRunBenchmarkResult]) -> String {
         .iter()
         .map(|result| {
             let (time_best, iterations, rel_stdev, run_time) = if let Some(wt) = &result.walltime {
+                let stdev_pct = (wt.stdev / result.value) * 100.0;
                 (
-                    helpers::format_duration(result.value, Some(2)),
+                    format!(
+                        "{}",
+                        style(helpers::format_duration(result.value, Some(2))).cyan()
+                    ),
                     format_with_thousands_sep(wt.iterations as u64),
-                    format!("{:.2}%", (wt.stdev / result.value) * 100.0),
+                    format_stdev_colored(stdev_pct),
                     helpers::format_duration(wt.total_time, Some(2)),
                 )
             } else {
                 (
-                    helpers::format_duration(result.value, Some(2)),
+                    format!(
+                        "{}",
+                        style(helpers::format_duration(result.value, Some(2))).cyan()
+                    ),
                     "-".to_string(),
                     "-".to_string(),
                     "-".to_string(),
@@ -157,7 +197,7 @@ fn build_walltime_table(results: &[&FetchLocalRunBenchmarkResult]) -> String {
             }
         })
         .collect();
-    build_table_with_style(&rows, "Walltime")
+    build_table_with_style(&rows, "Walltime", "\u{23F1}")
 }
 
 fn build_memory_table(results: &[&FetchLocalRunBenchmarkResult]) -> String {
@@ -166,13 +206,19 @@ fn build_memory_table(results: &[&FetchLocalRunBenchmarkResult]) -> String {
         .map(|result| {
             let (peak_memory, total_allocated, alloc_calls) = if let Some(mem) = &result.memory {
                 (
-                    helpers::format_memory(mem.peak_memory as f64, Some(1)),
+                    format!(
+                        "{}",
+                        style(helpers::format_memory(mem.peak_memory as f64, Some(1))).cyan()
+                    ),
                     helpers::format_memory(mem.total_allocated as f64, Some(1)),
                     format_with_thousands_sep(mem.alloc_calls as u64),
                 )
             } else {
                 (
-                    helpers::format_memory(result.value, Some(1)),
+                    format!(
+                        "{}",
+                        style(helpers::format_memory(result.value, Some(1))).cyan()
+                    ),
                     "-".to_string(),
                     "-".to_string(),
                 )
@@ -185,7 +231,7 @@ fn build_memory_table(results: &[&FetchLocalRunBenchmarkResult]) -> String {
             }
         })
         .collect();
-    build_table_with_style(&rows, "Memory")
+    build_table_with_style(&rows, "Memory", "\u{2630}")
 }
 
 pub fn build_benchmark_table(results: &[FetchLocalRunBenchmarkResult]) -> String {
@@ -224,47 +270,36 @@ pub fn build_benchmark_table(results: &[FetchLocalRunBenchmarkResult]) -> String
 }
 
 pub fn build_detailed_summary(result: &FetchLocalRunBenchmarkResult) -> String {
+    let name = &result.benchmark.name;
     match result.benchmark.executor {
         ExecutorName::Valgrind => {
-            format!(
-                "{}: {}",
-                result.benchmark.name,
-                helpers::format_duration(result.value, Some(2))
-            )
+            let time = style(helpers::format_duration(result.value, Some(2))).cyan();
+            format!("{name}: {time}")
         }
         ExecutorName::WallTime => {
             if let Some(wt) = &result.walltime {
+                let time = style(helpers::format_duration(result.value, Some(2))).cyan();
+                let iters = format_with_thousands_sep(wt.iterations as u64);
+                let stdev_pct = (wt.stdev / result.value) * 100.0;
+                let stdev = format_stdev_colored(stdev_pct);
+                let total = helpers::format_duration(wt.total_time, Some(2));
                 format!(
-                    "{}: best {} ({} iterations, rel. stddev: {:.2}%, total {})",
-                    result.benchmark.name,
-                    helpers::format_duration(result.value, Some(2)),
-                    format_with_thousands_sep(wt.iterations as u64),
-                    (wt.stdev / result.value) * 100.0,
-                    helpers::format_duration(wt.total_time, Some(2))
+                    "{name}: best {time} ({iters} iterations, rel. stddev: {stdev}, total {total})"
                 )
             } else {
-                format!(
-                    "{}: {}",
-                    result.benchmark.name,
-                    helpers::format_duration(result.value, Some(2))
-                )
+                let time = style(helpers::format_duration(result.value, Some(2))).cyan();
+                format!("{name}: {time}")
             }
         }
         ExecutorName::Memory => {
             if let Some(mem) = &result.memory {
-                format!(
-                    "{}: peak {} (total allocated: {}, {} allocations)",
-                    result.benchmark.name,
-                    helpers::format_memory(mem.peak_memory as f64, Some(1)),
-                    helpers::format_memory(mem.total_allocated as f64, Some(1)),
-                    format_with_thousands_sep(mem.alloc_calls as u64)
-                )
+                let peak = style(helpers::format_memory(mem.peak_memory as f64, Some(1))).cyan();
+                let total = helpers::format_memory(mem.total_allocated as f64, Some(1));
+                let allocs = format_with_thousands_sep(mem.alloc_calls as u64);
+                format!("{name}: peak {peak} (total allocated: {total}, {allocs} allocations)")
             } else {
-                format!(
-                    "{}: {}",
-                    result.benchmark.name,
-                    helpers::format_memory(result.value, Some(1))
-                )
+                let mem = style(helpers::format_memory(result.value, Some(1))).cyan();
+                format!("{name}: {mem}")
             }
         }
     }
@@ -396,6 +431,7 @@ mod tests {
         };
 
         let summary = build_detailed_summary(&result);
+        let summary = console::strip_ansi_codes(&summary).to_string();
         insta::assert_snapshot!(summary, @"benchmark_fast: 1.23 ms");
     }
 
@@ -417,6 +453,7 @@ mod tests {
         };
 
         let summary = build_detailed_summary(&result);
+        let summary = console::strip_ansi_codes(&summary).to_string();
         insta::assert_snapshot!(summary, @"benchmark_wt: best 1.50 s (50 iterations, rel. stddev: 1.67%, total 1.50 s)");
     }
 
@@ -438,6 +475,7 @@ mod tests {
         };
 
         let summary = build_detailed_summary(&result);
+        let summary = console::strip_ansi_codes(&summary).to_string();
         insta::assert_snapshot!(summary, @"benchmark_mem: peak 1 MB (total allocated: 5 MB, 500 allocations)");
     }
 }
