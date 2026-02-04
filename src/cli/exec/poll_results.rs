@@ -25,7 +25,8 @@ pub async fn poll_results(
         }
 
         info!(
-            "\nTo see the full report, visit: {}",
+            "\n{} {}",
+            style("View full report:").dim(),
             style(response.run.url).blue().bold().underlined()
         );
     }

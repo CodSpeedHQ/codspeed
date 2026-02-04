@@ -18,19 +18,31 @@ pub async fn poll_results(
     if let Some(report) = report {
         if let Some(impact) = report.impact {
             let rounded_impact = (impact * 100.0).round();
-            let impact_text = if impact > 0.0 {
-                style(format!("+{rounded_impact}%")).green().bold()
+            let (arrow, impact_text) = if impact > 0.0 {
+                (
+                    style("\u{25B2}").green(),
+                    style(format!("+{rounded_impact}%")).green().bold(),
+                )
+            } else if impact < 0.0 {
+                (
+                    style("\u{25BC}").red(),
+                    style(format!("{rounded_impact}%")).red().bold(),
+                )
             } else {
-                style(format!("{rounded_impact}%")).red().bold()
+                (
+                    style("\u{25CF}").dim(),
+                    style(format!("{rounded_impact}%")).dim().bold(),
+                )
             };
 
-            info!(
-                "Impact: {} (allowed regression: -{}%)",
-                impact_text,
-                (response.allowed_regression * 100.0).round()
-            );
+            let allowed = (response.allowed_regression * 100.0).round();
+            info!("{arrow} Impact: {impact_text} (allowed regression: -{allowed}%)");
         } else {
-            info!("No impact detected, reason: {}", report.conclusion);
+            info!(
+                "{} No impact detected, reason: {}",
+                style("\u{25CB}").dim(),
+                report.conclusion
+            );
         }
     }
 
@@ -60,7 +72,8 @@ pub async fn poll_results(
         }
 
         info!(
-            "\nTo see the full report, visit: {}",
+            "\n{} {}",
+            style("View full report:").dim(),
             style(response.run.url).blue().bold().underlined()
         );
     }
