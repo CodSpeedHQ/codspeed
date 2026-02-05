@@ -54,6 +54,8 @@ pub fn perform_with_valgrind(commands: Vec<BenchmarkCommand>) -> Result<()> {
         cmd.args(&benchmark_cmd.command[1..]);
         // Use LD_PRELOAD to inject instrumentation into the child process
         cmd.env("LD_PRELOAD", preload_lib_path);
+        // Make sure python processes output perf maps. This is usually done by `pytest-codspeed`
+        cmd.env("PYTHONPERFSUPPORT", "1");
         cmd.env(constants::URI_ENV, &name_and_uri.uri);
 
         let status = cmd.status().context("Failed to execute command")?;
