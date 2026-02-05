@@ -105,9 +105,9 @@ impl PerfRunner {
             || config.command.contains("uv")
             || config.command.contains("python")
         {
-            // Max supported stack size is 64KiB, but this will increase the file size by a lot. In
-            // order to allow uploads and maintain accuracy, we limit this to 8KiB.
-            (UnwindingMode::Dwarf, Some(8 * 1024))
+            // Note that the higher the stack size, the larger the file, although it is mitigated
+            // by zstd compression
+            (UnwindingMode::Dwarf, Some(16 * 1024))
         } else {
             // Default to dwarf unwinding since it works well with most binaries.
             debug!("No call graph mode detected, defaulting to dwarf");
