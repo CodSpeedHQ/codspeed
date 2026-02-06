@@ -5,6 +5,16 @@
 
 
 
+## [4.10.5] - 2026-02-06
+
+### <!-- 0 -->🚀 Features
+- Support codspeed-node memory profiling by @not-matthias in [#228](https://github.com/CodSpeedHQ/runner/pull/228)
+
+### <!-- 1 -->🐛 Bug Fixes
+- Check benchmark URIs rather than memtrack events by @not-matthias in [#230](https://github.com/CodSpeedHQ/runner/pull/230)
+- Do not error out if no head report is present after local run by @GuillaumeLagrange in [#233](https://github.com/CodSpeedHQ/runner/pull/233)
+
+
 ## [4.10.4] - 2026-02-02
 
 ### <!-- 0 -->🚀 Features
@@ -907,6 +917,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[4.10.5]: https://github.com/CodSpeedHQ/runner/compare/v4.10.4..v4.10.5
 [4.10.4]: https://github.com/CodSpeedHQ/runner/compare/v4.10.3..v4.10.4
 [4.10.3]: https://github.com/CodSpeedHQ/runner/compare/v4.10.2..v4.10.3
 [4.10.2]: https://github.com/CodSpeedHQ/runner/compare/v4.10.1..v4.10.2
