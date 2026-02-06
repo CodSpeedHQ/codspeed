@@ -1,7 +1,7 @@
 use crate::prelude::*;
 use std::collections::HashSet;
-use std::fs;
 use std::path::{Path, PathBuf};
+use tokio::fs;
 
 pub async fn harvest_perf_maps_for_pids(
     profile_folder: &Path,
@@ -21,7 +21,7 @@ pub async fn harvest_perf_maps_for_pids(
     debug!("Found {} perf maps", perf_maps.len());
 
     for (src_path, dst_path) in perf_maps {
-        fs::copy(&src_path, &dst_path).map_err(|e| {
+        fs::copy(&src_path, &dst_path).await.map_err(|e| {
             anyhow!(
                 "Failed to copy perf map file: {:?} to {}: {}",
                 src_path.file_name(),
