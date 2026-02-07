@@ -1,4 +1,5 @@
 use crate::VERSION;
+use crate::executor::config::SimulationTool;
 use crate::prelude::*;
 use crate::run_environment::interfaces::RepositoryProvider;
 use crate::runner_mode::{RunnerMode, load_shell_session_mode};
@@ -56,6 +57,10 @@ pub struct ExecAndRunSharedArgs {
     /// If not provided, the mode will be loaded from the shell session (set via `codspeed use <mode>`).
     #[arg(short, long, value_enum, env = "CODSPEED_RUNNER_MODE")]
     pub mode: Option<RunnerMode>,
+
+    /// The Valgrind simulation tool to use (callgrind or tracegrind).
+    #[arg(long, value_enum, env = "CODSPEED_SIMULATION_TOOL", hide = true)]
+    pub simulation_tool: Option<SimulationTool>,
 
     /// Profile folder to use for the run.
     #[arg(long)]

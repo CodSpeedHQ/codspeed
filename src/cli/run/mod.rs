@@ -71,6 +71,7 @@ impl RunArgs {
                 provider: None,
                 working_directory: None,
                 mode: Some(RunnerMode::Simulation),
+                simulation_tool: None,
                 profile_folder: None,
                 skip_upload: false,
                 skip_run: false,

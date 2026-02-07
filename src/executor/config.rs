@@ -5,9 +5,20 @@ use crate::instruments::Instruments;
 use crate::prelude::*;
 use crate::run_environment::RepositoryProvider;
 use crate::runner_mode::RunnerMode;
+use clap::ValueEnum;
 use semver::Version;
 use std::path::PathBuf;
 use url::Url;
+
+/// The Valgrind tool to use for simulation mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
+pub enum SimulationTool {
+    /// Use Callgrind for aggregated text-based cost profiles (.out files)
+    #[default]
+    Callgrind,
+    /// Use Tracegrind for streaming binary event traces (.tgtrace files)
+    Tracegrind,
+}
 
 /// Execution configuration for running benchmarks.
 ///
@@ -29,6 +40,8 @@ pub struct Config {
     pub enable_perf: bool,
     /// Stack unwinding mode for perf (if enabled)
     pub perf_unwinding_mode: Option<UnwindingMode>,
+
+    pub simulation_tool: SimulationTool,
 
     pub profile_folder: Option<PathBuf>,
     pub skip_upload: bool,
@@ -84,6 +97,7 @@ impl Config {
             instruments: Instruments::test(),
             perf_unwinding_mode: None,
             enable_perf: false,
+            simulation_tool: SimulationTool::default(),
             profile_folder: None,
             skip_upload: false,
             skip_run: false,
@@ -122,6 +136,7 @@ impl TryFrom<RunArgs> for Config {
             perf_unwinding_mode: args.shared.perf_run_args.perf_unwinding_mode,
             enable_perf: args.shared.perf_run_args.enable_perf,
             command: args.command.join(" "),
+            simulation_tool: args.shared.simulation_tool.unwrap_or_default(),
             profile_folder: args.shared.profile_folder,
             skip_upload: args.shared.skip_upload,
             skip_run: args.shared.skip_run,
@@ -160,6 +175,7 @@ impl Config {
             perf_unwinding_mode: args.shared.perf_run_args.perf_unwinding_mode,
             enable_perf: args.shared.perf_run_args.enable_perf,
             command,
+            simulation_tool: args.shared.simulation_tool.unwrap_or_default(),
             profile_folder: args.shared.profile_folder,
             skip_upload: args.shared.skip_upload,
             skip_run: args.shared.skip_run,
@@ -195,6 +211,7 @@ mod tests {
                 provider: None,
                 working_directory: None,
                 mode: Some(RunnerMode::Simulation),
+                simulation_tool: None,
                 profile_folder: None,
                 skip_upload: false,
                 skip_run: false,
@@ -234,6 +251,7 @@ mod tests {
                 provider: Some(RepositoryProvider::GitLab),
                 working_directory: Some("/tmp".into()),
                 mode: Some(RunnerMode::Simulation),
+                simulation_tool: None,
                 profile_folder: Some("./codspeed.out".into()),
                 skip_upload: true,
                 skip_run: true,
@@ -317,6 +335,7 @@ mod tests {
                 provider: None,
                 working_directory: None,
                 mode: Some(RunnerMode::Simulation),
+                simulation_tool: None,
                 profile_folder: None,
                 skip_upload: false,
                 skip_run: false,

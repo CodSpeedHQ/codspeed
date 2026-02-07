@@ -1,5 +1,6 @@
 use crate::executor::Config;
 use crate::executor::RunnerMode;
+use crate::executor::config::SimulationTool;
 use crate::executor::helpers::env::get_base_injected_env;
 use crate::executor::helpers::get_bench_command::get_bench_command;
 use crate::executor::helpers::introspected_golang;
@@ -9,7 +10,6 @@ use crate::executor::valgrind::helpers::ignored_objects_path::get_objects_path_t
 use crate::executor::valgrind::helpers::python::is_free_threaded_python;
 use crate::instruments::mongo_tracer::MongoTracer;
 use crate::prelude::*;
-use lazy_static::lazy_static;
 use std::env;
 use std::fs::canonicalize;
 use std::io::Write;
@@ -19,35 +19,41 @@ use std::path::Path;
 use std::{env::consts::ARCH, process::Command};
 use tempfile::TempPath;
 
-lazy_static! {
-    static ref VALGRIND_BASE_ARGS: Vec<String> = {
-        let mut args = vec![];
-        args.extend(
-            [
-                "-q",
-                "--tool=callgrind",
-                "--trace-children=yes",
-                "--cache-sim=yes",
-                "--I1=32768,8,64",
-                "--D1=32768,8,64",
-                "--LL=8388608,16,64",
-                "--instr-atstart=no",
-                "--collect-systime=nsec",
-                "--compress-strings=no",
-                "--combine-dumps=yes",
-                "--dump-line=no",
-                "--read-inline-info=yes",
-            ]
-            .iter()
-            .map(|x| x.to_string()),
-        );
-        let children_skip_patterns = ["*esbuild"];
-        args.push(format!(
-            "--trace-children-skip={}",
-            children_skip_patterns.join(",")
-        ));
-        args
-    };
+/// Builds the Valgrind argument list for the given simulation tool.
+fn get_valgrind_args(tool: &SimulationTool) -> Vec<String> {
+    let mut args: Vec<String> = [
+        "-q",
+        "--trace-children=yes",
+        "--cache-sim=yes",
+        "--I1=32768,8,64",
+        "--D1=32768,8,64",
+        "--LL=8388608,16,64",
+        "--instr-atstart=no",
+        "--collect-systime=nsec",
+        "--read-inline-info=yes",
+    ]
+    .iter()
+    .map(|x| x.to_string())
+    .collect();
+
+    match tool {
+        SimulationTool::Callgrind => {
+            args.push("--tool=callgrind".to_string());
+            args.push("--compress-strings=no".to_string());
+            args.push("--combine-dumps=yes".to_string());
+            args.push("--dump-line=no".to_string());
+        }
+        SimulationTool::Tracegrind => {
+            args.push("--tool=tracegrind".to_string());
+        }
+    }
+
+    let children_skip_patterns = ["*esbuild"];
+    args.push(format!(
+        "--trace-children-skip={}",
+        children_skip_patterns.join(",")
+    ));
+    args
 }
 
 /// Creates the shell script on disk and returns the path to it.
@@ -82,6 +88,11 @@ pub async fn measure(
     profile_folder: &Path,
     mongo_tracer: &Option<MongoTracer>,
 ) -> Result<()> {
+    // Warn if using experimental Tracegrind
+    if config.simulation_tool == SimulationTool::Tracegrind {
+        warn!("Tracegrind is still experimental and may not work as expected");
+    }
+
     // Create the command
     let mut cmd = Command::new("setarch");
     cmd.arg(ARCH).arg("-R");
@@ -118,17 +129,33 @@ pub async fn measure(
         cmd.current_dir(abs_cwd);
     }
     // Configure valgrind
-    let profile_path = profile_folder.join("%p.out");
+    let valgrind_args = get_valgrind_args(&config.simulation_tool);
     let log_path = profile_folder.join("valgrind.log");
-    cmd.arg("valgrind")
-        .args(VALGRIND_BASE_ARGS.iter())
-        .args(
+    cmd.arg("valgrind").args(valgrind_args.iter());
+    if config.simulation_tool == SimulationTool::Callgrind {
+        cmd.args(
             get_objects_path_to_ignore()
                 .iter()
                 .map(|x| format!("--obj-skip={x}")),
-        )
-        .arg(format!("--callgrind-out-file={}", profile_path.to_str().unwrap()).as_str())
-        .arg(format!("--log-file={}", log_path.to_str().unwrap()).as_str());
+        );
+    }
+    match config.simulation_tool {
+        SimulationTool::Callgrind => {
+            let profile_path = profile_folder.join("%p.out");
+            cmd.arg(format!(
+                "--callgrind-out-file={}",
+                profile_path.to_str().unwrap()
+            ));
+        }
+        SimulationTool::Tracegrind => {
+            let profile_path = profile_folder.join("%p.tgtrace");
+            cmd.arg(format!(
+                "--tracegrind-out-file={}",
+                profile_path.to_str().unwrap()
+            ));
+        }
+    }
+    cmd.arg(format!("--log-file={}", log_path.to_str().unwrap()).as_str());
 
     // Set the command to execute:
     let script_path = create_run_script()?;
