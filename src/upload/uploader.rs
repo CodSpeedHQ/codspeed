@@ -301,7 +301,10 @@ pub async fn upload(
         profile_archive.content.size().await?
     );
     upload_profile_archive(&upload_data, profile_archive).await?;
-    info!("Performance data uploaded");
+    info!(
+        "{} Performance data uploaded",
+        style("\u{2714}").green().bold()
+    );
 
     Ok(UploadResult {
         run_id: upload_data.run_id,

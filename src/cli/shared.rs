@@ -1,23 +1,30 @@
 use crate::VERSION;
+use crate::local_logger::CODSPEED_U8_COLOR_CODE;
 use crate::prelude::*;
 use crate::run_environment::interfaces::RepositoryProvider;
 use crate::runner_mode::{RunnerMode, load_shell_session_mode};
 use clap::Args;
 use clap::ValueEnum;
+use console::style;
 use std::path::PathBuf;
 
 pub(crate) fn show_banner() {
-    let banner = format!(
-        r#"
-   ______            __ _____                         __
+    let logo = r#"   ______            __ _____                         __
   / ____/____   ____/ // ___/ ____   ___   ___   ____/ /
  / /    / __ \ / __  / \__ \ / __ \ / _ \ / _ \ / __  /
 / /___ / /_/ // /_/ / ___/ // /_/ //  __//  __// /_/ /
 \____/ \____/ \__,_/ /____// .___/ \___/ \___/ \__,_/
-  https://codspeed.io     /_/          runner v{VERSION}
-"#
-    );
-    println!("{banner}");
+                          /_/"#;
+
+    let version_tag = style(format!("v{VERSION}")).bold();
+    let url = style("codspeed.io").color256(CODSPEED_U8_COLOR_CODE);
+    let separator = style("─".repeat(52)).dim();
+
+    eprintln!();
+    eprintln!("{}", style(logo).color256(CODSPEED_U8_COLOR_CODE).bold());
+    eprintln!("  {separator}");
+    eprintln!("  {url}  {version_tag}");
+    eprintln!();
     debug!("codspeed v{VERSION}");
 }
 

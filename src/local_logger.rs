@@ -16,9 +16,13 @@ use crate::logger::{GroupEvent, JsonEvent, get_group_event, get_json_event};
 
 pub const CODSPEED_U8_COLOR_CODE: u8 = 208; // #FF8700
 
+/// Spinner tick characters - smooth animation for a polished feel
+const SPINNER_TICKS: &[&str] = &["  ", ". ", "..", " ."];
+
 lazy_static! {
     pub static ref SPINNER: Arc<Mutex<Option<ProgressBar>>> = Arc::new(Mutex::new(None));
     pub static ref IS_TTY: bool = std::io::IsTerminal::is_terminal(&std::io::stdout());
+    static ref CURRENT_GROUP_NAME: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 }
 
 /// Hide the progress bar temporarily, execute `f`, then redraw the progress bar.
@@ -67,26 +71,34 @@ impl Log for LocalLogger {
         if let Some(group_event) = get_group_event(record) {
             match group_event {
                 GroupEvent::Start(name) | GroupEvent::StartOpened(name) => {
-                    eprintln!(
-                        "\n{}",
-                        style(format!("►►► {name} "))
-                            .bold()
-                            .color256(CODSPEED_U8_COLOR_CODE)
-                    );
+                    let header = format_group_header(&name);
+                    eprintln!("\n{header}");
+
+                    // Store current group name for completion message
+                    if let Ok(mut current) = CURRENT_GROUP_NAME.lock() {
+                        *current = Some(name.clone());
+                    }
 
                     if *IS_TTY {
                         let spinner = ProgressBar::new_spinner();
+                        let tick_strings: Vec<String> = SPINNER_TICKS
+                            .iter()
+                            .map(|s| format!("{}", style(s).color256(CODSPEED_U8_COLOR_CODE).dim()))
+                            .collect();
+                        let tick_strs: Vec<&str> =
+                            tick_strings.iter().map(|s| s.as_str()).collect();
+
                         spinner.set_style(
                             ProgressStyle::with_template(
-                                format!(
-                                    "  {{spinner:>.{CODSPEED_U8_COLOR_CODE}}} {{wide_msg:.{CODSPEED_U8_COLOR_CODE}.bold}}"
-                                )
-                                .as_str(),
+                                &format!(
+                                    "  {{spinner}} {{wide_msg:.{CODSPEED_U8_COLOR_CODE}}} {{elapsed:.dim}}"
+                                ),
                             )
-                            .unwrap(),
+                            .unwrap()
+                            .tick_strings(&tick_strs),
                         );
                         spinner.set_message(format!("{name}..."));
-                        spinner.enable_steady_tick(Duration::from_millis(100));
+                        spinner.enable_steady_tick(Duration::from_millis(300));
                         SPINNER.lock().unwrap().replace(spinner);
                     } else {
                         eprintln!("{name}...");
@@ -95,8 +107,22 @@ impl Log for LocalLogger {
                 GroupEvent::End => {
                     if *IS_TTY {
                         let mut spinner = SPINNER.lock().unwrap();
-                        if let Some(spinner) = spinner.as_mut() {
-                            spinner.finish_and_clear();
+                        if let Some(pb) = spinner.as_mut() {
+                            let elapsed = pb.elapsed();
+                            pb.finish_and_clear();
+
+                            // Show completion message with checkmark
+                            if let Ok(mut current) = CURRENT_GROUP_NAME.lock() {
+                                if let Some(name) = current.take() {
+                                    let elapsed_str = format_elapsed(elapsed);
+                                    eprintln!(
+                                        "  {} {} {}",
+                                        style("\u{2714}").green().bold(),
+                                        style(name).dim(),
+                                        style(elapsed_str).dim(),
+                                    );
+                                }
+                            }
                         }
                     }
                 }
@@ -118,26 +144,62 @@ impl Log for LocalLogger {
     }
 }
 
+/// Format a group header with styled prefix
+fn format_group_header(name: &str) -> String {
+    let prefix = style("\u{25B6}").color256(CODSPEED_U8_COLOR_CODE).bold();
+    let title = style(name).bold();
+    format!("{prefix} {title}")
+}
+
+/// Format elapsed duration in a compact human-readable way
+fn format_elapsed(duration: Duration) -> String {
+    let secs = duration.as_secs();
+    let millis = duration.as_millis();
+
+    if secs >= 60 {
+        let mins = secs / 60;
+        let remaining_secs = secs % 60;
+        format!("{mins}m {remaining_secs}s")
+    } else if secs > 0 {
+        format!("{secs}.{:01}s", (millis % 1000) / 100)
+    } else {
+        format!("{millis}ms")
+    }
+}
+
 /// Print a log record to the console with the appropriate style
 fn print_record(record: &log::Record) {
-    let error_style = Style::new().red();
-    let info_style = Style::new().white();
-    let warn_style = Style::new().yellow();
-    let debug_style = Style::new().blue().dim();
-    let trace_style = Style::new().black().dim();
-
     match record.level() {
-        log::Level::Error => eprintln!("{}", error_style.apply_to(record.args())),
-        log::Level::Warn => eprintln!("{}", warn_style.apply_to(record.args())),
-        log::Level::Info => eprintln!("{}", info_style.apply_to(record.args())),
-        log::Level::Debug => eprintln!(
-            "{}",
-            debug_style.apply_to(format!("[DEBUG::{}] {}", record.target(), record.args())),
-        ),
-        log::Level::Trace => eprintln!(
-            "{}",
-            trace_style.apply_to(format!("[TRACE::{}] {}", record.target(), record.args()))
-        ),
+        log::Level::Error => {
+            let prefix = style("\u{2717}").red().bold();
+            let msg = Style::new().red().apply_to(record.args());
+            eprintln!("  {prefix} {msg}");
+        }
+        log::Level::Warn => {
+            let prefix = style("\u{25B2}").yellow();
+            let msg = Style::new().yellow().apply_to(record.args());
+            eprintln!("  {prefix} {msg}");
+        }
+        log::Level::Info => {
+            let msg = Style::new().white().apply_to(record.args());
+            eprintln!("  {msg}");
+        }
+        log::Level::Debug => {
+            let prefix = style("\u{00B7}").dim();
+            let msg = Style::new()
+                .blue()
+                .dim()
+                .apply_to(format!("{}", record.args()));
+            eprintln!("  {prefix} {msg}");
+        }
+        log::Level::Trace => {
+            let msg = Style::new().black().dim().apply_to(format!(
+                "[TRACE::{}] {}",
+                record.target(),
+                record.args()
+            ));
+            eprintln!("  {msg}");
+        }
     }
 }
 

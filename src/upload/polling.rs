@@ -25,10 +25,12 @@ pub async fn poll_run_report(
         run_id: upload_result.run_id.clone(),
     };
 
+    debug!("Waiting for results to be processed...");
+
     let response;
     loop {
         if start.elapsed() > RUN_PROCESSING_MAX_DURATION {
-            bail!("Polling results timed out");
+            bail!("Polling results timed out after 5 minutes. Please try again later.");
         }
 
         let fetch_result = api_client
