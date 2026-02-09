@@ -20,6 +20,7 @@ use runner_shared::artifacts::{ArtifactExt, ExecutionTimestamps};
 use runner_shared::fifo::Command as FifoCommand;
 use runner_shared::fifo::IntegrationMode;
 use semver::Version;
+use std::fs::canonicalize;
 use std::path::Path;
 use std::rc::Rc;
 use tempfile::NamedTempFile;
@@ -47,6 +48,12 @@ impl MemoryExecutor {
         cmd_builder.arg("--ipc-server");
         cmd_builder.arg(server_name);
         cmd_builder.arg(get_bench_command(&execution_context.config)?);
+
+        // Set working directory if specified
+        if let Some(cwd) = &execution_context.config.working_directory {
+            let abs_cwd = canonicalize(cwd)?;
+            cmd_builder.current_dir(abs_cwd);
+        }
 
         // Wrap command with environment forwarding
         let extra_env = get_base_injected_env(
