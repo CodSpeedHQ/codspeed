@@ -196,7 +196,7 @@ impl MemoryExecutor {
                     };
 
                     if cur_version < min_version {
-                        return Ok(Some(FifoCommand::Err));
+                        panic!("{INVALID_INTEGRATION_ERROR}")
                     }
                 }
                 FifoCommand::SetVersion(protocol_version) => {
