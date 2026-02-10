@@ -118,6 +118,7 @@ pub async fn measure(
         cmd.current_dir(abs_cwd);
     }
     // Configure valgrind
+    let valgrind_flags = env::var("VALGRIND_FLAGS").unwrap_or_default();
     let profile_path = profile_folder.join("%p.out");
     let log_path = profile_folder.join("valgrind.log");
     cmd.arg("valgrind")
@@ -128,7 +129,8 @@ pub async fn measure(
                 .map(|x| format!("--obj-skip={x}")),
         )
         .arg(format!("--callgrind-out-file={}", profile_path.to_str().unwrap()).as_str())
-        .arg(format!("--log-file={}", log_path.to_str().unwrap()).as_str());
+        .arg(format!("--log-file={}", log_path.to_str().unwrap()).as_str())
+        .args(valgrind_flags.split_whitespace());
 
     // Set the command to execute:
     let script_path = create_run_script()?;
