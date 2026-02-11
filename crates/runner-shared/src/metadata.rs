@@ -1,10 +1,15 @@
 use anyhow::Context;
+use libc::pid_t;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::io::BufWriter;
 use std::path::Path;
+use std::path::PathBuf;
 
-use crate::debug_info::ModuleDebugInfo;
+use crate::debug_info::{MappedProcessDebugInfo, ModuleDebugInfo};
 use crate::fifo::MarkerType;
+use crate::perf_map::MappedProcessModuleSymbols;
+use crate::unwind_data::MappedProcessUnwindData;
 
 #[derive(Serialize, Deserialize)]
 pub struct PerfMetadata {
@@ -25,9 +30,31 @@ pub struct PerfMetadata {
     #[deprecated(note = "Use ExecutionTimestamps in the 'artifacts' module instead")]
     pub markers: Vec<MarkerType>,
 
-    /// Debug info for all modules across all processes, mapping PID to module debug info
-    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
-    pub debug_info_by_pid: std::collections::HashMap<i32, Vec<ModuleDebugInfo>>,
+    /// Kept for backward compatibility, was used before deduplication of debug info entries.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    #[deprecated(note = "Use 'debug_info' + 'mapped_process_debug_info_by_pid' instead")]
+    pub debug_info_by_pid: HashMap<pid_t, Vec<ModuleDebugInfo>>,
+
+    /// Deduplicated debug info entries, keyed by semantic key
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub debug_info: HashMap<String, ModuleDebugInfo>,
+
+    /// Per-pid debug info references, mapping PID to list of debug info index + load bias
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub mapped_process_debug_info_by_pid: HashMap<pid_t, Vec<MappedProcessDebugInfo>>,
+
+    /// Per-pid unwind data references, mapping PID to list of unwind data index + mounting info
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub mapped_process_unwind_data_by_pid: HashMap<pid_t, Vec<MappedProcessUnwindData>>,
+
+    /// Per-pid symbol references, mapping PID to list of perf map index + load bias
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub mapped_process_module_symbols: HashMap<pid_t, Vec<MappedProcessModuleSymbols>>,
+
+    /// Mapping from semantic `path_key` to original binary path on host disk
+    /// Kept for traceability, and if we ever need to reconstruct the original paths from the keys
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub path_key_to_path: HashMap<String, PathBuf>,
 }
 
 impl PerfMetadata {
