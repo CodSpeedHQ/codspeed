@@ -185,18 +185,6 @@ pub fn relative_address_base(object_file: &object::File) -> u64 {
     object_file.relative_address_base()
 }
 
-pub fn compute_base_avma(
-    runtime_start_addr: u64,
-    runtime_end_addr: u64,
-    runtime_file_offset: u64,
-    object: &object::File,
-) -> anyhow::Result<u64> {
-    let bias = compute_load_bias(
-        runtime_start_addr,
-        runtime_end_addr,
-        runtime_file_offset,
-        object,
-    )?;
-    let base_svma = relative_address_base(object);
-    Ok(base_svma.wrapping_add(bias))
+pub fn compute_base_avma(base_svma: u64, load_bias: u64) -> u64 {
+    base_svma.wrapping_add(load_bias)
 }

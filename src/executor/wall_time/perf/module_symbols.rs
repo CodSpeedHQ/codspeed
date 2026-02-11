@@ -1,12 +1,10 @@
 use crate::executor::wall_time::perf::elf_helper;
-use crate::prelude::*;
-use libc::pid_t;
 use object::{Object, ObjectSymbol, ObjectSymbolTable};
+use runner_shared::module_symbols::SYMBOLS_MAP_SUFFIX;
 use std::{
-    collections::HashMap,
     fmt::Debug,
     io::{BufWriter, Write},
-    path::{Path, PathBuf},
+    path::Path,
 };
 
 #[derive(Hash, PartialEq, Eq, Clone)]
@@ -27,33 +25,26 @@ impl Debug for Symbol {
 }
 
 #[derive(Debug, Clone)]
+/// Symbols for a module, extracted from an ELF file.
+/// The addresses are raw ELF addresses, meaning they represent where the symbols request to be loaded in memory.
+/// To resolve actual addresses in the callstack during runtime, these addresses need to be
+/// adjusted by the `load_bias` which is applied when the module is actually loaded in memory for a
+/// specific process.
 pub struct ModuleSymbols {
-    load_bias: u64,
     symbols: Vec<Symbol>,
 }
 
 impl ModuleSymbols {
-    pub fn from_symbols(symbols: Vec<Symbol>) -> Self {
-        Self {
-            symbols,
-            load_bias: 0,
-        }
+    pub fn new(symbols: Vec<Symbol>) -> Self {
+        Self { symbols }
     }
 
     pub fn symbols(&self) -> &[Symbol] {
         &self.symbols
     }
 
-    pub fn load_bias(&self) -> u64 {
-        self.load_bias
-    }
-
-    pub fn new<P: AsRef<Path>>(
-        path: P,
-        runtime_start_addr: u64,
-        runtime_end_addr: u64,
-        runtime_offset: u64,
-    ) -> anyhow::Result<Self> {
+    /// Extract symbols from an ELF file (pid-agnostic, load_bias = 0).
+    pub fn from_elf<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
         let content = std::fs::read(path.as_ref())?;
         let object = object::File::parse(&*content)?;
 
@@ -126,16 +117,28 @@ impl ModuleSymbols {
             return Err(anyhow::anyhow!("No symbols found"));
         }
 
-        let load_bias = elf_helper::compute_load_bias(
+        Ok(Self { symbols })
+    }
+
+    /// Compute the load_bias for this module given runtime addresses.
+    /// This reads the ELF file again to find the matching PT_LOAD segment.
+    pub fn compute_load_bias<P: AsRef<Path>>(
+        path: P,
+        runtime_start_addr: u64,
+        runtime_end_addr: u64,
+        runtime_offset: u64,
+    ) -> anyhow::Result<u64> {
+        let content = std::fs::read(path.as_ref())?;
+        let object = object::File::parse(&*content)?;
+        elf_helper::compute_load_bias(
             runtime_start_addr,
             runtime_end_addr,
             runtime_offset,
             &object,
-        )?;
-
-        Ok(Self { load_bias, symbols })
+        )
     }
 
+    /// Write symbols to a file applying the given load_bias.
     pub fn append_to_file<P: AsRef<Path>>(&self, path: P) -> anyhow::Result<()> {
         let file = std::fs::OpenOptions::new()
             .create(true)
@@ -148,89 +151,17 @@ impl ModuleSymbols {
             writeln!(
                 writer,
                 "{:x} {:x} {}",
-                symbol.addr.wrapping_add(self.load_bias),
-                symbol.size,
-                symbol.name
+                symbol.addr, symbol.size, symbol.name
             )?;
         }
 
         Ok(())
     }
-}
 
-/// Represents all the modules inside a process and their symbols.
-pub struct ProcessSymbols {
-    pid: pid_t,
-    module_mappings: HashMap<PathBuf, Vec<(u64, u64)>>,
-    modules: HashMap<PathBuf, ModuleSymbols>,
-}
-
-impl ProcessSymbols {
-    pub fn new(pid: pid_t) -> Self {
-        Self {
-            pid,
-            module_mappings: HashMap::new(),
-            modules: HashMap::new(),
-        }
-    }
-
-    pub fn add_mapping<P: AsRef<Path>>(
-        &mut self,
-        pid: pid_t,
-        module_path: P,
-        start_addr: u64,
-        end_addr: u64,
-        file_offset: u64,
-    ) {
-        if self.pid != pid {
-            warn!("pid mismatch: {} != {}", self.pid, pid);
-            return;
-        }
-
-        let path = module_path.as_ref().to_path_buf();
-        match ModuleSymbols::new(module_path, start_addr, end_addr, file_offset) {
-            Ok(symbol) => {
-                self.modules.entry(path.clone()).or_insert(symbol);
-            }
-            Err(error) => {
-                debug!("Failed to load symbols for module {path:?}: {error}");
-            }
-        }
-
-        self.module_mappings
-            .entry(path.clone())
-            .or_default()
-            .push((start_addr, end_addr));
-    }
-
-    pub fn loaded_modules(&self) -> impl Iterator<Item = &PathBuf> {
-        self.modules.keys()
-    }
-
-    pub fn modules_with_symbols(&self) -> impl Iterator<Item = (&PathBuf, &ModuleSymbols)> {
-        self.modules.iter()
-    }
-
-    pub fn module_mapping<P: AsRef<std::path::Path>>(
-        &self,
-        module_path: P,
-    ) -> Option<&[(u64, u64)]> {
-        self.module_mappings
-            .get(module_path.as_ref())
-            .map(|bounds| bounds.as_slice())
-    }
-
-    pub fn save_to<P: AsRef<std::path::Path>>(&self, folder: P) -> anyhow::Result<()> {
-        if self.modules.is_empty() {
-            return Ok(());
-        }
-
-        let symbols_path = folder.as_ref().join(format!("perf-{}.map", self.pid));
-        for module in self.modules.values() {
-            module.append_to_file(&symbols_path)?;
-        }
-
-        Ok(())
+    /// Save symbols (at raw ELF addresses, no bias) to a keyed file.
+    pub fn save_to_keyed_file<P: AsRef<Path>>(&self, folder: P, key: &str) -> anyhow::Result<()> {
+        let path = folder.as_ref().join(format!("{key}.{SYMBOLS_MAP_SUFFIX}"));
+        self.append_to_file(path)
     }
 }
 
@@ -240,29 +171,14 @@ mod tests {
 
     #[test]
     fn test_golang_symbols() {
-        let (start_addr, end_addr, file_offset) =
-            (0x0000000000402000_u64, 0x000000000050f000_u64, 0x2000);
-        let module_symbols = ModuleSymbols::new(
-            "testdata/perf_map/go_fib.bin",
-            start_addr,
-            end_addr,
-            file_offset,
-        )
-        .unwrap();
+        let module_symbols = ModuleSymbols::from_elf("testdata/perf_map/go_fib.bin").unwrap();
         insta::assert_debug_snapshot!(module_symbols);
     }
 
     #[test]
     fn test_cpp_symbols() {
-        let (start_addr, end_addr, file_offset) =
-            (0x0000000000400000_u64, 0x0000000000459000_u64, 0x0);
-        let module_symbols = ModuleSymbols::new(
-            "testdata/perf_map/cpp_my_benchmark.bin",
-            start_addr,
-            end_addr,
-            file_offset,
-        )
-        .unwrap();
+        let module_symbols =
+            ModuleSymbols::from_elf("testdata/perf_map/cpp_my_benchmark.bin").unwrap();
         insta::assert_debug_snapshot!(module_symbols);
     }
 
@@ -282,34 +198,21 @@ mod tests {
         // 0x0000555555692000 0x000055555569d000 0xb000             0x13c000           r--p
         // 0x000055555569d000 0x000055555569f000 0x2000             0x146000           rw-p
         //
-        let module_symbols =
-            ModuleSymbols::new(MODULE_PATH, 0x00005555555a2000, 0x0000555555692000, 0x4d000)
-                .unwrap();
+        let module_symbols = ModuleSymbols::from_elf(MODULE_PATH).unwrap();
         insta::assert_debug_snapshot!(module_symbols);
     }
 
     #[test]
     fn test_the_algorithms_symbols() {
         const MODULE_PATH: &str = "testdata/perf_map/the_algorithms.bin";
-
-        let module_symbols = ModuleSymbols::new(
-            MODULE_PATH,
-            0x00005573e59fe000,
-            0x00005573e5b07000,
-            0x00052000,
-        )
-        .unwrap();
+        let module_symbols = ModuleSymbols::from_elf(MODULE_PATH).unwrap();
         insta::assert_debug_snapshot!(module_symbols);
     }
 
     #[test]
     fn test_ruff_symbols() {
         const MODULE_PATH: &str = "testdata/perf_map/ty_walltime";
-
-        let (start_addr, end_addr, file_offset) =
-            (0x0000555555e6d000_u64, 0x0000555556813000_u64, 0x918000);
-        let module_symbols =
-            ModuleSymbols::new(MODULE_PATH, start_addr, end_addr, file_offset).unwrap();
+        let module_symbols = ModuleSymbols::from_elf(MODULE_PATH).unwrap();
         insta::assert_debug_snapshot!(module_symbols);
     }
 }

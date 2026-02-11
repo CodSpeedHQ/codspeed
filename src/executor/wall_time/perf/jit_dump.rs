@@ -1,11 +1,11 @@
 use crate::{
-    executor::wall_time::perf::perf_map::{ModuleSymbols, Symbol},
+    executor::wall_time::perf::module_symbols::{ModuleSymbols, Symbol},
     prelude::*,
 };
 use linux_perf_data::jitdump::{JitDumpReader, JitDumpRecord};
-use runner_shared::unwind_data::UnwindData;
+use runner_shared::unwind_data::{ProcessUnwindData, UnwindData};
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
 };
 
@@ -39,19 +39,19 @@ impl JitDump {
         }
         debug!("Extracted {} JIT symbols", symbols.len());
 
-        Ok(ModuleSymbols::from_symbols(symbols))
+        Ok(ModuleSymbols::new(symbols))
     }
 
-    /// Parses the JIT dump file and converts it into a list of `UnwindData`.
+    /// Parses the JIT dump file and converts it into deduplicated unwind data + pid mappings.
     ///
     /// The JIT dump file contains synthetic `eh_frame` data for jitted functions. This can be parsed and
-    /// then converted to `UnwindData` which is used for stack unwinding.
+    /// then converted to `UnwindData` + `UnwindDataPidMappingWithFullPath` which is used for stack unwinding.
     ///
     /// See: https://github.com/python/cpython/blob/main/Python/perf_jit_trampoline.c
-    pub fn into_unwind_data(self) -> Result<Vec<UnwindData>> {
+    pub fn into_unwind_data(self) -> Result<Vec<(UnwindData, ProcessUnwindData)>> {
         let file = std::fs::File::open(self.path)?;
 
-        let mut jit_unwind_data = Vec::new();
+        let mut harvested_unwind_data = Vec::new();
         let mut current_unwind_info: Option<(Vec<u8>, Vec<u8>)> = None;
 
         let mut reader = JitDumpReader::new(file)?;
@@ -59,6 +59,13 @@ impl JitDump {
             // The first recording is always the unwind info, followed by the code load event
             // (see `perf_map_jit_write_entry` in https://github.com/python/cpython/blob/9743d069bd53e9d3a8f09df899ec1c906a79da24/Python/perf_jit_trampoline.c#L1163C13-L1163C37)
             match raw_record.parse()? {
+                JitDumpRecord::CodeUnwindingInfo(record) => {
+                    // Store unwind info for the next code loads
+                    current_unwind_info = Some((
+                        record.eh_frame.as_slice().to_vec(),
+                        record.eh_frame_hdr.as_slice().to_vec(),
+                    ));
+                }
                 JitDumpRecord::CodeLoad(record) => {
                     let name = record.function_name.as_slice();
                     let name = String::from_utf8_lossy(&name);
@@ -72,24 +79,24 @@ impl JitDump {
                         continue;
                     };
 
-                    jit_unwind_data.push(UnwindData {
-                        path: format!("jit_{name}"),
-                        timestamp: Some(raw_record.timestamp),
-                        avma_range: avma_start..avma_end,
-                        base_avma: 0,
+                    let path = format!("jit_{name}");
+
+                    let unwind_data = UnwindData {
+                        path,
+                        base_svma: 0,
                         eh_frame_hdr,
                         eh_frame_hdr_svma: 0..0,
                         eh_frame,
                         eh_frame_svma: 0..0,
-                        base_svma: 0,
-                    });
-                }
-                JitDumpRecord::CodeUnwindingInfo(record) => {
-                    // Store unwind info for the next code loads
-                    current_unwind_info = Some((
-                        record.eh_frame.as_slice().to_vec(),
-                        record.eh_frame_hdr.as_slice().to_vec(),
-                    ));
+                    };
+
+                    let process_unwind_data = ProcessUnwindData {
+                        timestamp: Some(raw_record.timestamp),
+                        avma_range: avma_start..avma_end,
+                        base_avma: 0,
+                    };
+
+                    harvested_unwind_data.push((unwind_data, process_unwind_data));
                 }
                 _ => {
                     warn!("Unhandled JIT dump record: {raw_record:?}");
@@ -97,15 +104,24 @@ impl JitDump {
             }
         }
 
-        Ok(jit_unwind_data)
+        Ok(harvested_unwind_data)
     }
 }
 
-/// Converts all the `jit-<pid>.dump` into unwind data and copies it to the profile folder.
-pub async fn harvest_perf_jit_for_pids(
+/// Converts all the `jit-<pid>.dump` into a perf-<pid>.map with symbols, and collects the unwind data
+///
+/// # Symbols
+/// Since a jit dump is by definition specific to a single pid, we append the harvested symbols
+/// into a perf-<pid>.map instead of writing a specific jit.symbols.map
+///
+/// # Unwind data
+/// Unwind data is generated as a list
+pub async fn save_symbols_and_harvest_unwind_data_for_pids(
     profile_folder: &Path,
     pids: &HashSet<libc::pid_t>,
-) -> Result<()> {
+) -> Result<HashMap<i32, Vec<(UnwindData, ProcessUnwindData)>>> {
+    let mut jit_unwind_data_by_path = HashMap::new();
+
     for pid in pids {
         let name = format!("jit-{pid}.dump");
         let path = PathBuf::from("/tmp").join(&name);
@@ -115,7 +131,6 @@ pub async fn harvest_perf_jit_for_pids(
         }
         debug!("Found JIT dump file: {path:?}");
 
-        // Append the symbols to the existing perf map file
         let symbols = match JitDump::new(path.clone()).into_perf_map() {
             Ok(symbols) => symbols,
             Err(error) => {
@@ -123,20 +138,20 @@ pub async fn harvest_perf_jit_for_pids(
                 continue;
             }
         };
+
+        // Also write to perf-<pid>.map for harvested Python perf maps compatibility
         symbols.append_to_file(profile_folder.join(format!("perf-{pid}.map")))?;
 
-        let unwind_data = match JitDump::new(path).into_unwind_data() {
-            Ok(unwind_data) => unwind_data,
+        let jit_unwind_data = match JitDump::new(path).into_unwind_data() {
+            Ok(data) => data,
             Err(error) => {
                 warn!("Failed to convert jit dump into unwind data: {error:?}");
                 continue;
             }
         };
 
-        for module in unwind_data {
-            module.save_to(profile_folder, *pid)?;
-        }
+        jit_unwind_data_by_path.insert(*pid, jit_unwind_data);
     }
 
-    Ok(())
+    Ok(jit_unwind_data_by_path)
 }

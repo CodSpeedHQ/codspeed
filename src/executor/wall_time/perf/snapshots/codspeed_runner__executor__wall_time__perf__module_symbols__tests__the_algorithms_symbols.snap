@@ -1,9 +1,8 @@
 ---
-source: src/executor/wall_time/perf/perf_map.rs
+source: src/executor/wall_time/perf/module_symbols.rs
 expression: module_symbols
 ---
 ModuleSymbols {
-    load_bias: 93956261720064,
     symbols: [
         Symbol { offset: 0, size: 20, name: _ZN3std3sys12thread_local11destructors4list5DTORS17hc534bbd2e2244af8E },
         Symbol { offset: 0, size: 20, name: __tls_get_addr },

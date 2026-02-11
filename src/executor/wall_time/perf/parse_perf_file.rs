@@ -1,19 +1,46 @@
-use super::perf_map::ProcessSymbols;
-use super::unwind_data::UnwindDataExt;
+use super::module_symbols::ModuleSymbols;
+use super::unwind_data::unwind_data_from_elf;
 use crate::prelude::*;
 use libc::pid_t;
 use linux_perf_data::PerfFileReader;
 use linux_perf_data::PerfFileRecord;
 use linux_perf_data::linux_perf_event_reader::EventRecord;
 use linux_perf_data::linux_perf_event_reader::RecordType;
+use runner_shared::unwind_data::ProcessUnwindData;
 use runner_shared::unwind_data::UnwindData;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::Path;
+use std::path::PathBuf;
+
+#[derive(Default)]
+pub struct LoadedModule {
+    /// Symbols extracted from the mapped ELF file
+    pub module_symbols: Option<ModuleSymbols>,
+    /// Unwind data extracted from the mapped ELF file
+    pub unwind_data: Option<UnwindData>,
+    /// Per-process mounting information
+    pub process_loaded_modules: HashMap<pid_t, ProcessLoadedModule>,
+}
+
+#[derive(Default)]
+pub struct ProcessLoadedModule {
+    /// Load bias used to adjust declared elf addresses to their actual runtime addresses
+    /// The bias is the difference between where the segment *actually* is in memory versus where the ELF file *preferred* it to be
+    pub symbols_load_bias: Option<u64>,
+    /// Unwind data specific to the process mounting, derived from both load bias and the actual unwind data
+    pub process_unwind_data: Option<ProcessUnwindData>,
+}
+
+impl LoadedModule {
+    pub fn pids(&self) -> impl Iterator<Item = pid_t> {
+        self.process_loaded_modules.keys().copied()
+    }
+}
 
 pub struct MemmapRecordsOutput {
-    pub symbols_by_pid: HashMap<pid_t, ProcessSymbols>,
-    pub unwind_data_by_pid: HashMap<pid_t, Vec<UnwindData>>,
+    /// Module symbols and the computed load bias for each pid that maps the ELF path.
+    pub loaded_modules_by_path: HashMap<PathBuf, LoadedModule>,
     pub tracked_pids: HashSet<pid_t>,
 }
 
@@ -25,8 +52,7 @@ pub fn parse_for_memmap2<P: AsRef<Path>>(
     perf_file_path: P,
     mut pid_filter: PidFilter,
 ) -> Result<MemmapRecordsOutput> {
-    let mut symbols_by_pid = HashMap::<pid_t, ProcessSymbols>::new();
-    let mut unwind_data_by_pid = HashMap::<pid_t, Vec<UnwindData>>::new();
+    let mut loaded_modules_by_path = HashMap::<PathBuf, LoadedModule>::new();
 
     // 1MiB buffer
     let reader = std::io::BufReader::with_capacity(
@@ -79,7 +105,7 @@ pub fn parse_for_memmap2<P: AsRef<Path>>(
                     continue;
                 }
 
-                process_mmap2_record(mmap2_record, &mut symbols_by_pid, &mut unwind_data_by_pid);
+                process_mmap2_record(mmap2_record, &mut loaded_modules_by_path);
             }
             _ => continue,
         }
@@ -87,13 +113,15 @@ pub fn parse_for_memmap2<P: AsRef<Path>>(
 
     // Retrieve the set of PIDs we ended up tracking after processing all records
     let tracked_pids: HashSet<pid_t> = match pid_filter {
-        PidFilter::All => symbols_by_pid.keys().copied().collect(),
+        PidFilter::All => loaded_modules_by_path
+            .iter()
+            .flat_map(|(_, loaded)| loaded.pids())
+            .collect(),
         PidFilter::TrackedPids(tracked) => tracked,
     };
 
     Ok(MemmapRecordsOutput {
-        symbols_by_pid,
-        unwind_data_by_pid,
+        loaded_modules_by_path,
         tracked_pids,
     })
 }
@@ -134,8 +162,7 @@ impl PidFilter {
 /// Process a single MMAP2 record and add it to the symbols and unwind data maps
 fn process_mmap2_record(
     record: linux_perf_data::linux_perf_event_reader::Mmap2Record,
-    symbols_by_pid: &mut HashMap<pid_t, ProcessSymbols>,
-    unwind_data_by_pid: &mut HashMap<pid_t, Vec<UnwindData>>,
+    loaded_modules_by_path: &mut HashMap<PathBuf, LoadedModule>,
 ) {
     // Check PROT_EXEC early to avoid string allocation for non-executable mappings
     if record.protection as i32 & libc::PROT_EXEC == 0 {
@@ -156,6 +183,7 @@ fn process_mmap2_record(
     }
 
     let record_path_string = String::from_utf8_lossy(path_slice).into_owned();
+    let record_path = PathBuf::from(&record_path_string);
     let end_addr = record.address + record.length;
 
     trace!(
@@ -167,36 +195,56 @@ fn process_mmap2_record(
         record_path_string,
         record.protection,
     );
-    symbols_by_pid
-        .entry(record.pid)
-        .or_insert(ProcessSymbols::new(record.pid))
-        .add_mapping(
-            record.pid,
-            &record_path_string,
-            record.address,
-            end_addr,
-            record.page_offset,
-        );
 
-    match UnwindData::new(
-        record_path_string.as_bytes(),
+    let load_bias = match ModuleSymbols::compute_load_bias(
+        &record_path,
+        record.address,
+        end_addr,
         record.page_offset,
+    ) {
+        Ok(load_bias) => load_bias,
+        Err(e) => {
+            debug!("Failed to compute load bias for {record_path_string}: {e}");
+            return;
+        }
+    };
+
+    let loaded_module = loaded_modules_by_path
+        .entry(record_path.clone())
+        .or_default();
+
+    let process_loaded_module = loaded_module
+        .process_loaded_modules
+        .entry(record.pid)
+        .or_default();
+
+    // Extract module symbols if it's no module symbol from path
+    if loaded_module.module_symbols.is_none() {
+        match ModuleSymbols::from_elf(&record_path) {
+            Ok(symbols) => loaded_module.module_symbols = Some(symbols),
+            Err(error) => {
+                debug!("Failed to load symbols for module {record_path_string}: {error}");
+            }
+        }
+    }
+
+    // Store load bias for this process mounting
+    process_loaded_module.symbols_load_bias = Some(load_bias);
+
+    // Extract unwind_data
+    match unwind_data_from_elf(
+        record_path_string.as_bytes(),
         record.address,
         end_addr,
         None,
+        load_bias,
     ) {
-        Ok(unwind_data) => {
-            unwind_data_by_pid
-                .entry(record.pid)
-                .or_default()
-                .push(unwind_data);
-            trace!(
-                "Added unwind data for {record_path_string} ({:x} - {:x})",
-                record.address, end_addr
-            );
+        Ok((unwind_data, process_unwind_data)) => {
+            loaded_module.unwind_data = Some(unwind_data);
+            process_loaded_module.process_unwind_data = Some(process_unwind_data);
         }
         Err(error) => {
-            debug!("Failed to create unwind data for module {record_path_string}: {error}");
+            debug!("Failed to load unwind data for module {record_path_string}: {error}");
         }
-    }
+    };
 }

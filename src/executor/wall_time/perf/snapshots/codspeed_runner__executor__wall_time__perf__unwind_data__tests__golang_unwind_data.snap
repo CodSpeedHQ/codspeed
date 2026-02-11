@@ -1,17 +1,21 @@
 ---
 source: src/executor/wall_time/perf/unwind_data.rs
-expression: "UnwindData::new(MODULE_PATH.as_bytes(), file_offset, start_addr, end_addr,\nNone)"
+expression: "unwind_data_from_elf(MODULE_PATH.as_bytes(), start_addr, end_addr, None,\nload_bias,)"
 ---
 Ok(
-    UnwindData {
-        path: "testdata/perf_map/go_fib.bin",
-        timestamp: None,
-        avma_range: 402000..50f000,
-        base_avma: 400000,
-        base_svma: 400000,
-        eh_frame_hdr_svma: 6498b0..649b94,
-        eh_frame_hdr_hash: f1f69beb959a08d7,
-        eh_frame_hash: a8727039dd21b51c,
-        eh_frame_svma: 649b98..64aa70,
-    },
+    (
+        UnwindData {
+            path: "testdata/perf_map/go_fib.bin",
+            base_svma: 400000,
+            eh_frame_hdr_svma: 6498b0..649b94,
+            eh_frame_hdr_hash: f1f69beb959a08d7,
+            eh_frame_hash: a8727039dd21b51c,
+            eh_frame_svma: 649b98..64aa70,
+        },
+        ProcessUnwindData {
+            timestamp: None,
+            avma_range: 402000..50f000,
+            base_avma: 400000,
+        },
+    ),
 )

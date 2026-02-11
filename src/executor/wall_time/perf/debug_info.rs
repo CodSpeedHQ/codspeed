@@ -1,14 +1,20 @@
-use crate::executor::wall_time::perf::perf_map::ModuleSymbols;
+use super::parse_perf_file::LoadedModule;
+use crate::executor::wall_time::perf::module_symbols::ModuleSymbols;
 use crate::prelude::*;
 use addr2line::{fallible_iterator::FallibleIterator, gimli};
 use object::{Object, ObjectSection};
+use rayon::prelude::*;
 use runner_shared::debug_info::{DebugInfo, ModuleDebugInfo};
 use std::path::Path;
 
 type EndianRcSlice = gimli::EndianRcSlice<gimli::RunTimeEndian>;
 
 pub trait ModuleDebugInfoExt {
-    fn from_symbols<P: AsRef<Path>>(path: P, symbols: &ModuleSymbols) -> anyhow::Result<Self>
+    fn from_symbols<P: AsRef<Path>>(
+        path: P,
+        symbols: &ModuleSymbols,
+        load_bias: u64,
+    ) -> anyhow::Result<Self>
     where
         Self: Sized;
 
@@ -36,12 +42,15 @@ pub trait ModuleDebugInfoExt {
 
 impl ModuleDebugInfoExt for ModuleDebugInfo {
     /// Create debug info from existing symbols by looking up file/line in DWARF
-    fn from_symbols<P: AsRef<Path>>(path: P, symbols: &ModuleSymbols) -> anyhow::Result<Self> {
+    fn from_symbols<P: AsRef<Path>>(
+        path: P,
+        symbols: &ModuleSymbols,
+        load_bias: u64,
+    ) -> anyhow::Result<Self> {
         let content = std::fs::read(path.as_ref())?;
         let object = object::File::parse(&*content)?;
 
         let ctx = Self::create_dwarf_context(&object).context("Failed to create DWARF context")?;
-        let load_bias = symbols.load_bias();
         let (mut min_addr, mut max_addr) = (None, None);
         let debug_infos = symbols
             .symbols()
@@ -96,34 +105,24 @@ impl ModuleDebugInfoExt for ModuleDebugInfo {
     }
 }
 
-/// Represents all the modules inside a process and their debug info.
-pub struct ProcessDebugInfo {
-    modules: Vec<ModuleDebugInfo>,
-}
-
-impl ProcessDebugInfo {
-    pub fn new(
-        process_symbols: &crate::executor::wall_time::perf::perf_map::ProcessSymbols,
-    ) -> Self {
-        let mut modules = Vec::new();
-        for (path, module_symbols) in process_symbols.modules_with_symbols() {
-            match ModuleDebugInfo::from_symbols(path, module_symbols) {
-                Ok(module_debug_info) => {
-                    modules.push(module_debug_info);
-                }
+/// Compute debug info once per unique ELF path from deduplicated symbols.
+/// Returns a map of path -> ModuleDebugInfo with `load_bias: 0` (load bias is per-pid).
+pub fn debug_info_by_path(
+    loaded_modules_by_path: &HashMap<PathBuf, LoadedModule>,
+) -> HashMap<PathBuf, ModuleDebugInfo> {
+    loaded_modules_by_path
+        .par_iter()
+        .filter_map(|(path, loaded_module)| {
+            let module_symbols = loaded_module.module_symbols.as_ref()?;
+            match ModuleDebugInfo::from_symbols(path, module_symbols, 0) {
+                Ok(module_debug_info) => Some((path.clone(), module_debug_info)),
                 Err(error) => {
                     trace!("Failed to load debug info for module {path:?}: {error}");
+                    None
                 }
             }
-        }
-
-        Self { modules }
-    }
-
-    /// Returns the debug info modules for this process
-    pub fn modules(self) -> Vec<ModuleDebugInfo> {
-        self.modules
-    }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -134,15 +133,20 @@ mod tests {
     fn test_golang_debug_info() {
         let (start_addr, end_addr, file_offset) =
             (0x0000000000402000_u64, 0x000000000050f000_u64, 0x2000);
-        let module_symbols = ModuleSymbols::new(
+        let module_symbols = ModuleSymbols::from_elf("testdata/perf_map/go_fib.bin").unwrap();
+        let load_bias = ModuleSymbols::compute_load_bias(
             "testdata/perf_map/go_fib.bin",
             start_addr,
             end_addr,
             file_offset,
         )
         .unwrap();
-        let module_debug_info =
-            ModuleDebugInfo::from_symbols("testdata/perf_map/go_fib.bin", &module_symbols).unwrap();
+        let module_debug_info = ModuleDebugInfo::from_symbols(
+            "testdata/perf_map/go_fib.bin",
+            &module_symbols,
+            load_bias,
+        )
+        .unwrap();
         insta::assert_debug_snapshot!(module_debug_info.debug_infos);
     }
 
@@ -150,7 +154,9 @@ mod tests {
     fn test_cpp_debug_info() {
         let (start_addr, end_addr, file_offset) =
             (0x0000000000400000_u64, 0x0000000000459000_u64, 0x0);
-        let module_symbols = ModuleSymbols::new(
+        let module_symbols =
+            ModuleSymbols::from_elf("testdata/perf_map/cpp_my_benchmark.bin").unwrap();
+        let load_bias = ModuleSymbols::compute_load_bias(
             "testdata/perf_map/cpp_my_benchmark.bin",
             start_addr,
             end_addr,
@@ -160,6 +166,7 @@ mod tests {
         let mut module_debug_info = ModuleDebugInfo::from_symbols(
             "testdata/perf_map/cpp_my_benchmark.bin",
             &module_symbols,
+            load_bias,
         )
         .unwrap();
 
@@ -172,11 +179,16 @@ mod tests {
     fn test_rust_divan_debug_info() {
         const MODULE_PATH: &str = "testdata/perf_map/divan_sleep_benches.bin";
 
-        let module_symbols =
-            ModuleSymbols::new(MODULE_PATH, 0x00005555555a2000, 0x0000555555692000, 0x4d000)
-                .unwrap();
+        let module_symbols = ModuleSymbols::from_elf(MODULE_PATH).unwrap();
+        let load_bias = ModuleSymbols::compute_load_bias(
+            MODULE_PATH,
+            0x00005555555a2000,
+            0x0000555555692000,
+            0x4d000,
+        )
+        .unwrap();
         let module_debug_info =
-            ModuleDebugInfo::from_symbols(MODULE_PATH, &module_symbols).unwrap();
+            ModuleDebugInfo::from_symbols(MODULE_PATH, &module_symbols, load_bias).unwrap();
         insta::assert_debug_snapshot!(module_debug_info.debug_infos);
     }
 
@@ -184,7 +196,8 @@ mod tests {
     fn test_the_algorithms_debug_info() {
         const MODULE_PATH: &str = "testdata/perf_map/the_algorithms.bin";
 
-        let module_symbols = ModuleSymbols::new(
+        let module_symbols = ModuleSymbols::from_elf(MODULE_PATH).unwrap();
+        let load_bias = ModuleSymbols::compute_load_bias(
             MODULE_PATH,
             0x00005573e59fe000,
             0x00005573e5b07000,
@@ -192,7 +205,7 @@ mod tests {
         )
         .unwrap();
         let module_debug_info =
-            ModuleDebugInfo::from_symbols(MODULE_PATH, &module_symbols).unwrap();
+            ModuleDebugInfo::from_symbols(MODULE_PATH, &module_symbols, load_bias).unwrap();
         insta::assert_debug_snapshot!(module_debug_info.debug_infos);
     }
 
@@ -202,10 +215,12 @@ mod tests {
 
         let (start_addr, end_addr, file_offset) =
             (0x0000555555e6d000_u64, 0x0000555556813000_u64, 0x918000);
-        let module_symbols =
-            ModuleSymbols::new(MODULE_PATH, start_addr, end_addr, file_offset).unwrap();
+        let module_symbols = ModuleSymbols::from_elf(MODULE_PATH).unwrap();
+        let load_bias =
+            ModuleSymbols::compute_load_bias(MODULE_PATH, start_addr, end_addr, file_offset)
+                .unwrap();
         let module_debug_info =
-            ModuleDebugInfo::from_symbols(MODULE_PATH, &module_symbols).unwrap();
+            ModuleDebugInfo::from_symbols(MODULE_PATH, &module_symbols, load_bias).unwrap();
         insta::assert_debug_snapshot!(module_debug_info.debug_infos);
     }
 }

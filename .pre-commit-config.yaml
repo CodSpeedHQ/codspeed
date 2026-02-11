@@ -11,6 +11,7 @@ repos:
       - id: check-yaml
       - id: check-toml
       - id: check-added-large-files
+        args: ["--maxkb=1000"]
   - repo: https://github.com/doublify/pre-commit-rust
     rev: v1.0
     hooks:

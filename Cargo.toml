@@ -10,7 +10,6 @@ default-run = "codspeed"
 name = "codspeed"
 path = "src/main.rs"
 
-
 [dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true, features = ["env", "color"] }

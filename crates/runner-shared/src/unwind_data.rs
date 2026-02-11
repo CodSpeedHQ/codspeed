@@ -8,9 +8,8 @@ use std::{hash::DefaultHasher, ops::Range};
 
 pub const UNWIND_FILE_EXT: &str = "unwind_data";
 
-pub type UnwindData = UnwindDataV2;
-
-impl UnwindDataV3 {
+pub type UnwindData = UnwindDataV3;
+impl UnwindData {
     pub fn parse(reader: &[u8]) -> anyhow::Result<Self> {
         let compat: UnwindDataCompat = bincode::deserialize(reader)?;
 
@@ -93,45 +92,6 @@ impl UnwindDataV2 {
             }
         }
     }
-
-    /// Will be removed once the backend has been deployed and we can merge the changes in the runner
-    pub fn save_to<P: AsRef<std::path::Path>>(&self, folder: P, pid: i32) -> anyhow::Result<()> {
-        let unwind_data_path = folder.as_ref().join(format!(
-            "{}_{:x}_{:x}_{}.{UNWIND_FILE_EXT}",
-            pid,
-            self.avma_range.start,
-            self.avma_range.end,
-            self.timestamp.unwrap_or_default()
-        ));
-        self.to_file(unwind_data_path)?;
-
-        Ok(())
-    }
-
-    pub fn to_file<P: AsRef<std::path::Path>>(&self, path: P) -> anyhow::Result<()> {
-        if let Ok(true) = std::fs::exists(path.as_ref()) {
-            // This happens in CI for the root `systemd-run` process which execs into bash which
-            // also execs into bash, each process reloading common libraries like `ld-linux.so`.
-            // We detect this when we harvest unwind_data by parsing the perf data (exec-harness).
-            // Until we properly handle the process tree and deduplicate unwind data, just debug
-            // log here
-            // Any relevant occurence should have other symptoms reported by users.
-            log::debug!(
-                "{} already exists, file will be truncated",
-                path.as_ref().display()
-            );
-            log::debug!("{} {:x?}", self.path, self.avma_range);
-        }
-
-        let compat = UnwindDataCompat::V2(self.clone());
-        let file = std::fs::File::create(path.as_ref())?;
-        const BUFFER_SIZE: usize = 256 * 1024 /* 256 KB */;
-
-        let writer = BufWriter::with_capacity(BUFFER_SIZE, file);
-        bincode::serialize_into(writer, &compat)?;
-
-        Ok(())
-    }
 }
 
 impl From<UnwindDataV1> for UnwindDataV2 {
@@ -175,7 +135,7 @@ impl From<UnwindDataV2> for UnwindDataV3 {
     }
 }
 
-impl Debug for UnwindData {
+impl Debug for UnwindDataV2 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let eh_frame_hdr_hash = {
             let mut hasher = DefaultHasher::new();
@@ -322,7 +282,7 @@ mod tests {
     #[test]
     fn test_parse_v3_as_v3() {
         // Parse V3 binary artifact as V3 using UnwindData::parse
-        let parsed_v3 = UnwindDataV3::parse(V3_BINARY).expect("Failed to parse V3 data as V3");
+        let parsed_v3 = UnwindData::parse(V3_BINARY).expect("Failed to parse V3 data as V3");
 
         // Should match expected V3 data
         let expected_v3 = create_sample_v3();

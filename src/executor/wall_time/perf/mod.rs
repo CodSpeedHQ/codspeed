@@ -4,15 +4,11 @@ use crate::cli::UnwindingMode;
 use crate::executor::Config;
 use crate::executor::helpers::command::CommandBuilder;
 use crate::executor::helpers::env::is_codspeed_debug_enabled;
-use crate::executor::helpers::harvest_perf_maps_for_pids::harvest_perf_maps_for_pids;
 use crate::executor::helpers::run_command_with_log_pipe::run_command_with_log_pipe_and_callback;
 use crate::executor::helpers::run_with_sudo::run_with_sudo;
 use crate::executor::helpers::run_with_sudo::wrap_with_sudo;
 use crate::executor::shared::fifo::FifoBenchmarkData;
 use crate::executor::shared::fifo::RunnerFifo;
-use crate::executor::valgrind::helpers::ignored_objects_path::get_objects_path_to_ignore;
-use crate::executor::wall_time::perf::debug_info::ProcessDebugInfo;
-use crate::executor::wall_time::perf::jit_dump::harvest_perf_jit_for_pids;
 use crate::executor::wall_time::perf::perf_executable::get_working_perf_executable;
 use crate::prelude::*;
 use anyhow::Context;
@@ -20,26 +16,26 @@ use fifo::PerfFifo;
 use parse_perf_file::MemmapRecordsOutput;
 use perf_executable::get_compression_flags;
 use perf_executable::get_event_flags;
-use rayon::prelude::*;
 use runner_shared::artifacts::ArtifactExt;
 use runner_shared::artifacts::ExecutionTimestamps;
-use runner_shared::debug_info::ModuleDebugInfo;
 use runner_shared::fifo::Command as FifoCommand;
 use runner_shared::fifo::IntegrationMode;
 use runner_shared::metadata::PerfMetadata;
 use std::path::Path;
 use std::path::PathBuf;
-use std::{cell::OnceCell, collections::HashMap, process::ExitStatus};
+use std::{cell::OnceCell, process::ExitStatus};
 
 mod jit_dump;
+mod naming;
 mod parse_perf_file;
+mod save_artifacts;
 mod setup;
 
 pub mod debug_info;
 pub mod elf_helper;
 pub mod fifo;
+pub mod module_symbols;
 pub mod perf_executable;
-pub mod perf_map;
 pub mod unwind_data;
 
 const PERF_METADATA_CURRENT_VERSION: u64 = 1;
@@ -268,7 +264,6 @@ pub struct BenchmarkData {
 pub enum BenchmarkDataSaveError {
     MissingIntegration,
     FailedToParsePerfFile,
-    FailedToHarvestPerfMaps,
     FailedToHarvestJitDumps,
 }
 
@@ -289,8 +284,7 @@ impl BenchmarkData {
             parse_perf_file::PidFilter::TrackedPids(self.fifo_data.bench_pids.clone())
         };
         let MemmapRecordsOutput {
-            symbols_by_pid,
-            unwind_data_by_pid,
+            loaded_modules_by_path,
             tracked_pids,
         } = {
             parse_perf_file::parse_for_memmap2(perf_file_path, pid_filter).map_err(|e| {
@@ -303,36 +297,19 @@ impl BenchmarkData {
         // maps from /tmp to the profile folder. We have to write our own perf
         // maps to these files AFTERWARDS, otherwise it'll be overwritten!
         debug!("Harvesting perf maps and jit dumps for pids: {tracked_pids:?}");
-        harvest_perf_maps_for_pids(path_ref, &tracked_pids)
-            .await
-            .map_err(|e| {
-                error!("Failed to harvest perf maps: {e}");
-                BenchmarkDataSaveError::FailedToHarvestPerfMaps
-            })?;
-        harvest_perf_jit_for_pids(path_ref, &tracked_pids)
-            .await
-            .map_err(|e| {
-                error!("Failed to harvest jit dumps: {e}");
-                BenchmarkDataSaveError::FailedToHarvestJitDumps
-            })?;
+        let jit_unwind_data_by_pid =
+            jit_dump::save_symbols_and_harvest_unwind_data_for_pids(path_ref, &tracked_pids)
+                .await
+                .map_err(|e| {
+                    error!("Failed to harvest jit dumps: {e}");
+                    BenchmarkDataSaveError::FailedToHarvestJitDumps
+                })?;
 
-        debug!("Saving symbols addresses");
-        symbols_by_pid.par_iter().for_each(|(_, proc_sym)| {
-            proc_sym.save_to(path_ref).unwrap();
-        });
-
-        // Collect debug info for each process by looking up file/line for symbols
-        debug!("Saving debug_info");
-        let debug_info_by_pid: HashMap<i32, Vec<ModuleDebugInfo>> = symbols_by_pid
-            .par_iter()
-            .map(|(pid, proc_sym)| (*pid, ProcessDebugInfo::new(proc_sym).modules()))
-            .collect();
-
-        unwind_data_by_pid.par_iter().for_each(|(pid, modules)| {
-            modules.iter().for_each(|module| {
-                module.save_to(path_ref, *pid).unwrap();
-            });
-        });
+        let artifacts = save_artifacts::save_artifacts(
+            path_ref,
+            &loaded_modules_by_path,
+            &jit_unwind_data_by_pid,
+        );
 
         debug!("Saving metadata");
         #[allow(deprecated)]
@@ -344,54 +321,17 @@ impl BenchmarkData {
                 .clone()
                 .ok_or(BenchmarkDataSaveError::MissingIntegration)?,
             uri_by_ts: self.marker_result.uri_by_ts.clone(),
-            ignored_modules: {
-                let mut to_ignore = vec![];
-
-                // Check if any of the ignored modules has been loaded in the process
-                for ignore_path in get_objects_path_to_ignore() {
-                    for proc in symbols_by_pid.values() {
-                        if let Some(mapping) = proc.module_mapping(&ignore_path) {
-                            let (Some((base_addr, _)), Some((_, end_addr))) = (
-                                mapping.iter().min_by_key(|(base_addr, _)| base_addr),
-                                mapping.iter().max_by_key(|(_, end_addr)| end_addr),
-                            ) else {
-                                continue;
-                            };
-
-                            to_ignore.push((ignore_path.clone(), *base_addr, *end_addr));
-                        }
-                    }
-                }
-
-                // When python is statically linked, we'll not find it in the ignored modules. Add it manually:
-                let python_modules = symbols_by_pid.values().filter_map(|proc| {
-                    proc.loaded_modules().find(|path| {
-                        path.file_name()
-                            .map(|name| name.to_string_lossy().starts_with("python"))
-                            .unwrap_or(false)
-                    })
-                });
-                for path in python_modules {
-                    if let Some(mapping) = symbols_by_pid
-                        .values()
-                        .find_map(|proc| proc.module_mapping(path))
-                    {
-                        let (Some((base_addr, _)), Some((_, end_addr))) = (
-                            mapping.iter().min_by_key(|(base_addr, _)| base_addr),
-                            mapping.iter().max_by_key(|(_, end_addr)| end_addr),
-                        ) else {
-                            continue;
-                        };
-                        to_ignore.push((path.to_string_lossy().into(), *base_addr, *end_addr));
-                    }
-                }
-
-                to_ignore
-            },
+            ignored_modules: artifacts.ignored_modules,
             markers: self.marker_result.markers.clone(),
-            debug_info_by_pid,
-            // Fill new fields to default for now
-            ..Default::default()
+            debug_info: artifacts.debug_info,
+            mapped_process_debug_info_by_pid: artifacts.mapped_process_debug_info_by_pid,
+            mapped_process_unwind_data_by_pid: artifacts.mapped_process_unwind_data_by_pid,
+            mapped_process_module_symbols: artifacts.symbol_pid_mappings_by_pid,
+            path_key_to_path: artifacts.key_to_path,
+            // Not yet implemented
+            ignored_modules_by_pid: Default::default(),
+            // Deprecated fields below are no longer used
+            debug_info_by_pid: Default::default(),
         };
         metadata.save_to(&path).unwrap();
 

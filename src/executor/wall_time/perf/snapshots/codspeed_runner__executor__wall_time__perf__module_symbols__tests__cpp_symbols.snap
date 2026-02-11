@@ -1,9 +1,8 @@
 ---
-source: src/executor/wall_time/perf/perf_map.rs
+source: src/executor/wall_time/perf/module_symbols.rs
 expression: module_symbols
 ---
 ModuleSymbols {
-    load_bias: 0,
     symbols: [
         Symbol { offset: 0, size: 4002f8, name: __gmon_start__ },
         Symbol { offset: 4002f8, size: 20, name: __abi_tag },
