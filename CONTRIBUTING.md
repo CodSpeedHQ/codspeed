@@ -96,3 +96,7 @@ This ensures only stable runner releases are marked as "latest" in GitHub.
 ## Known issue
 
 - If one of the crates is currenlty in beta version, for example the runner is in beta version 4.4.2-beta.1, any alpha release will fail for the any crate, saying that only minor, major or patch releases is supported.
+
+## Testing
+
+- Some tests require `sudo` access. They are skipped by default unless the `GITHUB_ACTIONS` env var is set.

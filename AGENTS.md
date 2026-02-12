@@ -17,20 +17,15 @@ cargo build
 # Build in release mode
 cargo build --release
 
-# Run tests (prefer nextest if available)
-cargo nextest run  # preferred if installed
-cargo test         # fallback if nextest is not available
+# Run tests
+cargo test
 
 # Run specific test
-cargo nextest run <test_name>  # with nextest
-cargo test <test_name>         # with cargo test
+cargo test <test_name>
 
 # Run tests with output
-cargo nextest run --nocapture  # with nextest
-cargo test -- --nocapture      # with cargo test
+cargo test -- -nocapture
 ```
-
-**Note**: Always check if `cargo nextest` is available first (with `cargo nextest --version` or `which cargo-nextest`). If available, use it instead of `cargo test` as it provides faster and more reliable test execution.
 
 ### Running the Application
 
@@ -99,7 +94,7 @@ The core functionality for running benchmarks:
 
 The project uses:
 
-- `cargo nextest` (preferred) or standard Rust `cargo test`
+- `cargo test`
 - `insta` for snapshot testing
 - `rstest` for parameterized tests
 - `temp-env` for environment variable testing
@@ -108,5 +103,4 @@ Test files include snapshots in `snapshots/` directories for various run environ
 
 **Important**:
 
-- Always prefer `cargo nextest run` over `cargo test` when running tests, as it provides better performance and reliability.
-- Some walltime executor tests require `sudo` access and will fail in non-interactive environments (e.g., `test_walltime_executor::*`). These failures are expected if sudo is not available.
+- Some tests require `sudo` access. They are skipped by default unless the `GITHUB_ACTIONS` env var is set.
