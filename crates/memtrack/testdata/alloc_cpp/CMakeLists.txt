@@ -50,6 +50,53 @@ if(NOT JEMALLOC_STATIC_LIB)
     message(STATUS "Static jemalloc not found, will fall back to dynamic linking")
 endif()
 
+# TCMalloc support via system gperftools package
+# gperftools provides libtcmalloc on most Linux distributions
+# (Ubuntu: libtcmalloc-minimal4, Fedora: gperftools-libs, NixOS: gperftools)
+find_package(Threads REQUIRED)
+
+# Search in common paths including NixOS store
+file(GLOB TCMALLOC_NIX_PATHS "/nix/store/*gperftools*/lib")
+
+# Find static library
+set(_old_suffixes ${CMAKE_FIND_LIBRARY_SUFFIXES})
+set(CMAKE_FIND_LIBRARY_SUFFIXES .a)
+find_library(TCMALLOC_STATIC_LIB
+    NAMES libtcmalloc_minimal.a libtcmalloc.a tcmalloc_minimal tcmalloc
+    HINTS ${TCMALLOC_NIX_PATHS}
+    DOC "Static TCMalloc library (from gperftools)"
+)
+set(CMAKE_FIND_LIBRARY_SUFFIXES ${_old_suffixes})
+
+if(NOT TCMALLOC_STATIC_LIB)
+    message(STATUS "Static TCMalloc not found, will fall back to dynamic linking")
+endif()
+
+# Find dynamic library
+find_package(PkgConfig)
+if(PKG_CONFIG_FOUND)
+    pkg_check_modules(TCMALLOC QUIET libtcmalloc_minimal libtcmalloc)
+endif()
+
+if(NOT TCMALLOC_FOUND)
+    find_library(TCMALLOC_LIBRARY
+        NAMES tcmalloc_minimal tcmalloc
+        HINTS ${TCMALLOC_NIX_PATHS}
+        DOC "TCMalloc library (from gperftools)"
+    )
+    if(TCMALLOC_LIBRARY)
+        set(TCMALLOC_FOUND TRUE)
+        set(TCMALLOC_LIBRARIES ${TCMALLOC_LIBRARY})
+    endif()
+endif()
+
+if(TCMALLOC_FOUND OR TCMALLOC_STATIC_LIB)
+    message(STATUS "Found TCMalloc: static=${TCMALLOC_STATIC_LIB}, dynamic=${TCMALLOC_LIBRARIES}")
+    set(TCMALLOC_AVAILABLE ON)
+else()
+    message(STATUS "TCMalloc not found, tcmalloc test targets will not link correctly")
+endif()
+
 # Target: alloc_cpp_system
 set(alloc_cpp_system_SOURCES
 	cmake.toml
@@ -168,4 +215,68 @@ target_link_libraries(alloc_cpp_mimalloc_dynamic PRIVATE
 get_directory_property(CMKR_VS_STARTUP_PROJECT DIRECTORY ${PROJECT_SOURCE_DIR} DEFINITION VS_STARTUP_PROJECT)
 if(NOT CMKR_VS_STARTUP_PROJECT)
 	set_property(DIRECTORY ${PROJECT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT alloc_cpp_mimalloc_dynamic)
+endif()
+
+# Target: alloc_cpp_tcmalloc_static
+set(alloc_cpp_tcmalloc_static_SOURCES
+	cmake.toml
+	"src/main.cpp"
+)
+
+add_executable(alloc_cpp_tcmalloc_static)
+
+target_sources(alloc_cpp_tcmalloc_static PRIVATE ${alloc_cpp_tcmalloc_static_SOURCES})
+source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${alloc_cpp_tcmalloc_static_SOURCES})
+
+target_compile_definitions(alloc_cpp_tcmalloc_static PRIVATE
+	USE_TCMALLOC=1
+)
+
+get_directory_property(CMKR_VS_STARTUP_PROJECT DIRECTORY ${PROJECT_SOURCE_DIR} DEFINITION VS_STARTUP_PROJECT)
+if(NOT CMKR_VS_STARTUP_PROJECT)
+	set_property(DIRECTORY ${PROJECT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT alloc_cpp_tcmalloc_static)
+endif()
+
+set(CMKR_TARGET alloc_cpp_tcmalloc_static)
+if(TCMALLOC_STATIC_LIB)
+    # Use --whole-archive to ensure malloc override symbols are included
+    target_link_options(alloc_cpp_tcmalloc_static PRIVATE "LINKER:--whole-archive")
+    target_link_libraries(alloc_cpp_tcmalloc_static PRIVATE ${TCMALLOC_STATIC_LIB})
+    target_link_options(alloc_cpp_tcmalloc_static PRIVATE "LINKER:--no-whole-archive")
+    target_link_libraries(alloc_cpp_tcmalloc_static PRIVATE Threads::Threads)
+elseif(TCMALLOC_LIBRARIES)
+    # Fallback to dynamic linking
+    target_link_libraries(alloc_cpp_tcmalloc_static PRIVATE ${TCMALLOC_LIBRARIES})
+else()
+    message(WARNING "TCMalloc not found, alloc_cpp_tcmalloc_static will not link correctly")
+endif()
+
+# Target: alloc_cpp_tcmalloc_dynamic
+set(alloc_cpp_tcmalloc_dynamic_SOURCES
+	cmake.toml
+	"src/main.cpp"
+)
+
+add_executable(alloc_cpp_tcmalloc_dynamic)
+
+target_sources(alloc_cpp_tcmalloc_dynamic PRIVATE ${alloc_cpp_tcmalloc_dynamic_SOURCES})
+source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${alloc_cpp_tcmalloc_dynamic_SOURCES})
+
+target_compile_definitions(alloc_cpp_tcmalloc_dynamic PRIVATE
+	USE_TCMALLOC=1
+)
+
+get_directory_property(CMKR_VS_STARTUP_PROJECT DIRECTORY ${PROJECT_SOURCE_DIR} DEFINITION VS_STARTUP_PROJECT)
+if(NOT CMKR_VS_STARTUP_PROJECT)
+	set_property(DIRECTORY ${PROJECT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT alloc_cpp_tcmalloc_dynamic)
+endif()
+
+set(CMKR_TARGET alloc_cpp_tcmalloc_dynamic)
+if(TCMALLOC_AVAILABLE)
+    target_link_libraries(alloc_cpp_tcmalloc_dynamic PRIVATE ${TCMALLOC_LIBRARIES})
+    if(TCMALLOC_INCLUDE_DIRS)
+        target_include_directories(alloc_cpp_tcmalloc_dynamic PRIVATE ${TCMALLOC_INCLUDE_DIRS})
+    endif()
+else()
+    message(WARNING "TCMalloc not found, alloc_cpp_tcmalloc_dynamic will not link correctly")
 endif()

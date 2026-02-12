@@ -12,6 +12,9 @@
 #include <mimalloc.h>
 #endif
 
+// USE_TCMALLOC: Uses gperftools libtcmalloc via dynamic linking
+// No header include needed - tcmalloc overrides malloc/free symbols
+
 // Prevent compiler from optimizing away allocations
 // Similar to Rust's core::hint::black_box
 template<typename T>

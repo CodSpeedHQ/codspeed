@@ -50,6 +50,8 @@ fn compile_cpp_project(project_dir: &Path, target: &str) -> anyhow::Result<std::
 #[case("alloc_cpp_jemalloc_dynamic")]
 #[case("alloc_cpp_mimalloc_static")]
 #[case("alloc_cpp_mimalloc_dynamic")]
+#[case("alloc_cpp_tcmalloc_static")]
+#[case("alloc_cpp_tcmalloc_dynamic")]
 #[test_log::test]
 fn test_cpp_alloc_tracking(#[case] target: &str) -> Result<(), Box<dyn std::error::Error>> {
     let project_path = Path::new("testdata/alloc_cpp");
