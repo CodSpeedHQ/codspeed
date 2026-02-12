@@ -4,6 +4,19 @@ use std::path::{Path, PathBuf};
 
 use crate::allocators::{AllocatorKind, AllocatorLib};
 
+impl AllocatorKind {
+    /// Returns the symbol names used to detect this allocator in binaries.
+    pub fn symbols(&self) -> &'static [&'static str] {
+        match self {
+            AllocatorKind::Libc => &["malloc", "free"],
+            AllocatorKind::LibCpp => &["_Znwm", "_Znam", "_ZdlPv", "_ZdaPv"],
+            AllocatorKind::Jemalloc => &["_rjem_malloc", "je_malloc", "je_malloc_default"],
+            AllocatorKind::Mimalloc => &["mi_malloc_aligned", "mi_malloc", "mi_free"],
+            AllocatorKind::Tcmalloc => &["tc_malloc", "tc_free", "tc_version"],
+        }
+    }
+}
+
 /// Walk upward and downward from current directory to find build directories.
 /// Returns all found build directories in order of preference.
 fn find_build_dirs() -> Vec<PathBuf> {

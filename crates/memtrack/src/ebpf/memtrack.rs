@@ -291,6 +291,11 @@ impl MemtrackBpf {
                 let _ = self.attach_libcpp_probes(lib_path);
                 self.attach_mimalloc_probes(lib_path)
             }
+            AllocatorKind::Tcmalloc => {
+                // Try C++ operators (tcmalloc exports these for C++ programs)
+                let _ = self.attach_libcpp_probes(lib_path);
+                self.attach_tcmalloc_probes(lib_path)
+            }
         }
     }
 
@@ -402,6 +407,22 @@ impl MemtrackBpf {
         self.try_attach_calloc(lib_path, "mi_zalloc");
         self.try_attach_calloc(lib_path, "mi_zalloc_aligned");
         self.try_attach_realloc(lib_path, "mi_realloc_aligned");
+
+        Ok(())
+    }
+
+    /// Attach TCMalloc probes ( tc_* API).
+    ///
+    /// See:
+    /// - https://github.com/google/tcmalloc/blob/master/docs/reference.md
+    /// - https://github.com/gperftools/gperftools/blob/a47243150ec41097602730ff8779fafcc172d1fb/src/tcmalloc.cc#L178-L190
+
+    fn attach_tcmalloc_probes(&mut self, lib_path: &Path) -> Result<()> {
+        self.attach_standard_probes(lib_path, &["tc_"], &[])?;
+
+        self.try_attach_free(lib_path, "free_sized");
+        self.try_attach_free(lib_path, "free_aligned_sized");
+        self.try_attach_free(lib_path, "sdallocx");
 
         Ok(())
     }

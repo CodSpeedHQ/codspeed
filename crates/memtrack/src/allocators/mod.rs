@@ -19,8 +19,18 @@ pub enum AllocatorKind {
     Jemalloc,
     /// mimalloc - Microsoft's allocator
     Mimalloc,
+    /// TCMalloc - Google's thread-caching malloc
+    ///
+    /// Two variants exist:
+    /// - **gperftools** (github.com/gperftools/gperftools): Original ~2005 release.
+    ///   Exports both standard symbols (malloc/free) AND tc_* prefixed symbols.
+    /// - **google/tcmalloc** (github.com/google/tcmalloc): Modern ~2020 rewrite.
+    ///   Exports ONLY standard symbols (malloc/free/etc.) - no tc_* prefix.
+    ///
+    /// We'll always try to attach to both the standard and `tc_*` API. If the newer rewrite is
+    /// used, we'll only attach to the standard API.
+    Tcmalloc,
     // Future allocators:
-    // Tcmalloc,
     // Hoard,
     // Rpmalloc,
 }
@@ -33,6 +43,7 @@ impl AllocatorKind {
         &[
             AllocatorKind::Jemalloc,
             AllocatorKind::Mimalloc,
+            AllocatorKind::Tcmalloc,
             AllocatorKind::LibCpp,
             AllocatorKind::Libc,
         ]
@@ -45,22 +56,13 @@ impl AllocatorKind {
             AllocatorKind::LibCpp => "libc++",
             AllocatorKind::Jemalloc => "jemalloc",
             AllocatorKind::Mimalloc => "mimalloc",
+            AllocatorKind::Tcmalloc => "tcmalloc",
         }
     }
 
     /// Returns true if this allocator is required (must be found).
     pub fn is_required(&self) -> bool {
         matches!(self, AllocatorKind::Libc)
-    }
-
-    /// Returns the symbol names used to detect this allocator in binaries.
-    pub fn symbols(&self) -> &'static [&'static str] {
-        match self {
-            AllocatorKind::Libc => &["malloc", "free"],
-            AllocatorKind::LibCpp => &["_Znwm", "_Znam", "_ZdlPv", "_ZdaPv"],
-            AllocatorKind::Jemalloc => &["_rjem_malloc", "je_malloc", "je_malloc_default"],
-            AllocatorKind::Mimalloc => &["mi_malloc_aligned", "mi_malloc", "mi_free"],
-        }
     }
 }
 

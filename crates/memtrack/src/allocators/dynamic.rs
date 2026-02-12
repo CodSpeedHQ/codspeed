@@ -46,6 +46,25 @@ fn get_allocator_paths(lib: &AllocatorKind) -> &'static [&'static str] {
             // NixOS
             "/nix/store/*mimalloc*/lib/libmimalloc.so*",
         ],
+        AllocatorKind::Tcmalloc => &[
+            // gperftools tcmalloc variants
+            // Debian, Ubuntu: Standard Linux multiarch paths
+            "/lib/*-linux-gnu/libtcmalloc.so*",
+            "/lib/*-linux-gnu/libtcmalloc_minimal.so*",
+            "/lib/*-linux-gnu/libtcmalloc_debug.so*",
+            "/lib/*-linux-gnu/libtcmalloc_and_profiler.so*",
+            "/usr/lib/*-linux-gnu/libtcmalloc.so*",
+            "/usr/lib/*-linux-gnu/libtcmalloc_minimal.so*",
+            "/usr/lib/*-linux-gnu/libtcmalloc_debug.so*",
+            "/usr/lib/*-linux-gnu/libtcmalloc_and_profiler.so*",
+            // RHEL, Fedora, CentOS, Arch
+            "/lib*/libtcmalloc*.so*",
+            "/usr/lib*/libtcmalloc*.so*",
+            "/usr/local/lib*/libtcmalloc*.so*",
+            // NixOS
+            "/nix/store/*tcmalloc*/lib/libtcmalloc*.so*",
+            "/nix/store/*gperftools*/lib/libtcmalloc*.so*",
+        ],
     }
 }
 
