@@ -314,12 +314,17 @@ impl MemtrackBpf {
         for prefix in &prefixes_with_base {
             for suffix in &suffixes_with_base {
                 self.try_attach_malloc(lib_path, &format!("{prefix}malloc{suffix}"));
+                self.try_attach_malloc(lib_path, &format!("{prefix}valloc{suffix}"));
+                self.try_attach_malloc(lib_path, &format!("{prefix}pvalloc{suffix}"));
                 self.try_attach_calloc(lib_path, &format!("{prefix}calloc{suffix}"));
                 self.try_attach_realloc(lib_path, &format!("{prefix}realloc{suffix}"));
                 self.try_attach_aligned_alloc(lib_path, &format!("{prefix}aligned_alloc{suffix}"));
                 self.try_attach_memalign(lib_path, &format!("{prefix}memalign{suffix}"));
                 self.try_attach_memalign(lib_path, &format!("{prefix}posix_memalign{suffix}"));
                 self.try_attach_free(lib_path, &format!("{prefix}free{suffix}"));
+                self.try_attach_free(lib_path, &format!("{prefix}free_sized{suffix}"));
+                self.try_attach_free(lib_path, &format!("{prefix}free_aligned_sized{suffix}"));
+                self.try_attach_free(lib_path, &format!("{prefix}cfree{suffix}"));
             }
         }
 
