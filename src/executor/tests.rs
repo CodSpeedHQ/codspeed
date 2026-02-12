@@ -1,9 +1,6 @@
 use super::Config;
 use crate::executor::ExecutionContext;
 use crate::executor::Executor;
-use crate::executor::memory::executor::MemoryExecutor;
-use crate::executor::valgrind::executor::ValgrindExecutor;
-use crate::executor::wall_time::executor::WallTimeExecutor;
 use crate::runner_mode::RunnerMode;
 use crate::system::SystemInfo;
 use rstest_reuse::{self, *};
@@ -109,16 +106,6 @@ const ENV_TESTS: [(&str, &str); 8] = [
 #[case(TESTS[5])]
 fn test_cases(#[case] cmd: &str) {}
 
-// Exec-harness currently does not support the inline multi command scripts
-#[template]
-#[rstest::rstest]
-#[case(TESTS[0])]
-#[case(TESTS[1])]
-#[case(TESTS[2])]
-fn exec_harness_test_cases() -> Vec<&'static str> {
-    EXEC_HARNESS_COMMANDS.to_vec()
-}
-
 #[template]
 #[rstest::rstest]
 #[case(ENV_TESTS[0])]
@@ -182,6 +169,7 @@ async fn acquire_bpf_instrumentation_lock() -> SemaphorePermit<'static> {
 
 mod valgrind {
     use super::*;
+    use crate::executor::valgrind::executor::ValgrindExecutor;
 
     async fn get_valgrind_executor() -> (SemaphorePermit<'static>, &'static ValgrindExecutor) {
         static VALGRIND_EXECUTOR: OnceCell<ValgrindExecutor> = OnceCell::const_new();
@@ -240,8 +228,10 @@ mod valgrind {
     }
 }
 
+#[test_with::env(GITHUB_ACTIONS)]
 mod walltime {
     use super::*;
+    use crate::executor::wall_time::executor::WallTimeExecutor;
 
     async fn get_walltime_executor() -> (SemaphorePermit<'static>, WallTimeExecutor) {
         static WALLTIME_INIT: OnceCell<()> = OnceCell::const_new();
@@ -358,6 +348,16 @@ fi
         })
         .await;
     }
+    //
+    // Exec-harness currently does not support the inline multi command scripts
+    #[template]
+    #[rstest::rstest]
+    #[case(TESTS[0])]
+    #[case(TESTS[1])]
+    #[case(TESTS[2])]
+    fn exec_harness_test_cases() -> Vec<&'static str> {
+        EXEC_HARNESS_COMMANDS.to_vec()
+    }
 
     // Ensure that the walltime executor works with the exec-harness
     #[apply(exec_harness_test_cases)]
@@ -391,8 +391,10 @@ fi
     }
 }
 
+#[test_with::env(GITHUB_ACTIONS)]
 mod memory {
     use super::*;
+    use crate::executor::memory::executor::MemoryExecutor;
 
     async fn get_memory_executor() -> (
         SemaphorePermit<'static>,
