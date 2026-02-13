@@ -282,17 +282,20 @@ impl MemtrackBpf {
                 self.attach_libcpp_probes(lib_path)
             }
             AllocatorKind::Jemalloc => {
-                // Try C++ operators (jemalloc exports these for C++ programs)
+                // Jemalloc exposes libc/libcpp compatible allocator functions:
+                let _ = self.attach_libc_probes(lib_path);
                 let _ = self.attach_libcpp_probes(lib_path);
                 self.attach_jemalloc_probes(lib_path)
             }
             AllocatorKind::Mimalloc => {
-                // Try C++ operators (mimalloc exports these for C++ programs)
+                // Mimalloc exposes libc/libcpp compatible allocator functions:
+                let _ = self.attach_libc_probes(lib_path);
                 let _ = self.attach_libcpp_probes(lib_path);
                 self.attach_mimalloc_probes(lib_path)
             }
             AllocatorKind::Tcmalloc => {
-                // Try C++ operators (tcmalloc exports these for C++ programs)
+                // Tcmalloc exposes libc/libcpp compatible allocator functions:
+                let _ = self.attach_libc_probes(lib_path);
                 let _ = self.attach_libcpp_probes(lib_path);
                 self.attach_tcmalloc_probes(lib_path)
             }
@@ -416,7 +419,6 @@ impl MemtrackBpf {
     /// See:
     /// - https://github.com/google/tcmalloc/blob/master/docs/reference.md
     /// - https://github.com/gperftools/gperftools/blob/a47243150ec41097602730ff8779fafcc172d1fb/src/tcmalloc.cc#L178-L190
-
     fn attach_tcmalloc_probes(&mut self, lib_path: &Path) -> Result<()> {
         self.attach_standard_probes(lib_path, &["tc_"], &[])?;
 
