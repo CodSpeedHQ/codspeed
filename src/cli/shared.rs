@@ -75,6 +75,16 @@ pub struct ExecAndRunSharedArgs {
     )]
     pub skip_upload: bool,
 
+    /// Skips polling for the results after upload.
+    /// This is useful for local runs where the user doesn't want to wait for the results to be available on the server.
+    #[arg(
+        long,
+        default_value = "false",
+        hide = true,
+        env = "CODSPEED_SKIP_POLLING"
+    )]
+    pub skip_polling: bool,
+
     /// Used internally to upload the results after running the benchmarks in a sandbox environment
     /// with no internet access
     #[arg(long, default_value = "false", hide = true)]

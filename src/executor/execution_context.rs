@@ -31,6 +31,10 @@ impl ExecutionContext {
         self.provider.get_run_environment() == RunEnvironment::Local
     }
 
+    pub fn should_poll_results(&self) -> bool {
+        self.is_local() && !self.config.skip_polling
+    }
+
     pub async fn new(
         mut config: Config,
         codspeed_config: &CodSpeedConfig,

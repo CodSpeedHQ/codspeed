@@ -74,6 +74,7 @@ impl RunArgs {
                 simulation_tool: None,
                 profile_folder: None,
                 skip_upload: false,
+                skip_polling: false,
                 skip_run: false,
                 skip_setup: false,
                 allow_empty: false,

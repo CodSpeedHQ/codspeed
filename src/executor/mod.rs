@@ -150,7 +150,7 @@ where
         start_group!("Uploading results");
         let upload_result = crate::upload::upload(execution_context, executor.name()).await?;
 
-        if execution_context.is_local() {
+        if execution_context.should_poll_results() {
             poll_results(&upload_result).await?;
         }
         end_group!();
