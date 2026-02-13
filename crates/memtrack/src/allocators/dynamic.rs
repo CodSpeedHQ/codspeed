@@ -49,8 +49,6 @@ pub fn find_all() -> anyhow::Result<Vec<AllocatorLib>> {
     let mut seen_paths: HashSet<PathBuf> = HashSet::new();
 
     for kind in AllocatorKind::all() {
-        let mut found_any = false;
-
         for pattern in kind.search_patterns() {
             let paths = glob::glob(&pattern)
                 .ok()
@@ -69,14 +67,8 @@ pub fn find_all() -> anyhow::Result<Vec<AllocatorLib>> {
             for path in paths {
                 if seen_paths.insert(path.clone()) {
                     results.push(AllocatorLib { kind: *kind, path });
-                    found_any = true;
                 }
             }
-        }
-
-        // FIXME: Do we still need this?
-        if kind.is_required() && !found_any {
-            anyhow::bail!("Could not find required allocator: {}", kind.name());
         }
     }
 

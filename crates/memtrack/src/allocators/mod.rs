@@ -59,11 +59,6 @@ impl AllocatorKind {
             AllocatorKind::Tcmalloc => "tcmalloc",
         }
     }
-
-    /// Returns true if this allocator is required (must be found).
-    pub fn is_required(&self) -> bool {
-        matches!(self, AllocatorKind::Libc)
-    }
 }
 
 /// Discovered allocator library with its kind and path.
