@@ -321,7 +321,8 @@ impl BenchmarkData {
                 .clone()
                 .ok_or(BenchmarkDataSaveError::MissingIntegration)?,
             uri_by_ts: self.marker_result.uri_by_ts.clone(),
-            ignored_modules: artifacts.ignored_modules,
+            ignored_modules: Default::default(),
+            ignored_modules_by_pid: artifacts.ignored_modules_by_pid,
             markers: self.marker_result.markers.clone(),
             debug_info: artifacts.debug_info,
             mapped_process_debug_info_by_pid: artifacts.mapped_process_debug_info_by_pid,

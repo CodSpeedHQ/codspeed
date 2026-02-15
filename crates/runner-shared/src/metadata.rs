@@ -24,7 +24,12 @@ pub struct PerfMetadata {
     pub uri_by_ts: Vec<(u64, String)>,
 
     /// Modules that should be ignored and removed from the folded trace and callgraph (e.g. python interpreter)
+    #[deprecated(note = "Use 'ignored_modules_by_pid' instead")]
     pub ignored_modules: Vec<(String, u64, u64)>,
+
+    /// Per-pid modules that should be ignored, with runtime address ranges derived from symbol bounds + load bias
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub ignored_modules_by_pid: HashMap<pid_t, Vec<(String, u64, u64)>>,
 
     /// Marker for certain regions in the profiling data
     #[deprecated(note = "Use ExecutionTimestamps in the 'artifacts' module instead")]
