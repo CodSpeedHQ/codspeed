@@ -69,6 +69,15 @@ impl GenericFifo {
 pub struct FifoBenchmarkData {
     /// Name and version of the integration
     pub integration: Option<(String, String)>,
+    pub bench_pids: HashSet<pid_t>,
+}
+
+impl FifoBenchmarkData {
+    pub fn is_exec_harness(&self) -> bool {
+        self.integration
+            .as_ref()
+            .is_some_and(|(name, _)| name == "exec-harness")
+    }
 }
 
 pub struct RunnerFifo {
@@ -254,7 +263,10 @@ impl RunnerFifo {
                     );
                     let marker_result =
                         ExecutionTimestamps::new(&bench_order_by_timestamp, &markers);
-                    let fifo_data = FifoBenchmarkData { integration };
+                    let fifo_data = FifoBenchmarkData {
+                        integration,
+                        bench_pids,
+                    };
                     return Ok((marker_result, fifo_data, exit_status));
                 }
                 Err(e) => return Err(anyhow::Error::from(e)),

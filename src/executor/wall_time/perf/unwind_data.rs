@@ -5,120 +5,109 @@ use anyhow::{Context, bail};
 use debugid::CodeId;
 use object::Object;
 use object::ObjectSection;
+use runner_shared::unwind_data::ProcessUnwindData;
 use runner_shared::unwind_data::UnwindData;
 use std::ops::Range;
 
-pub trait UnwindDataExt {
-    fn new(
-        path_slice: &[u8],
-        runtime_file_offset: u64,
-        runtime_start_addr: u64,
-        runtime_end_addr: u64,
-        build_id: Option<&[u8]>,
-    ) -> anyhow::Result<Self>
-    where
-        Self: Sized;
-}
+// Based on: https://github.com/mstange/linux-perf-stuff/blob/22ca6531b90c10dd2a4519351c843b8d7958a451/src/main.rs#L747-L893
+pub fn unwind_data_from_elf(
+    path_slice: &[u8],
+    runtime_start_addr: u64,
+    runtime_end_addr: u64,
+    build_id: Option<&[u8]>,
+    load_bias: u64,
+) -> anyhow::Result<(UnwindData, ProcessUnwindData)> {
+    let avma_range = runtime_start_addr..runtime_end_addr;
 
-impl UnwindDataExt for UnwindData {
-    // Based on this: https://github.com/mstange/linux-perf-stuff/blob/22ca6531b90c10dd2a4519351c843b8d7958a451/src/main.rs#L747-L893
-    fn new(
-        path_slice: &[u8],
-        runtime_file_offset: u64,
-        runtime_start_addr: u64,
-        runtime_end_addr: u64,
-        build_id: Option<&[u8]>,
-    ) -> anyhow::Result<Self> {
-        let avma_range = runtime_start_addr..runtime_end_addr;
+    let path = String::from_utf8_lossy(path_slice).to_string();
+    let Some(file) = std::fs::File::open(&path).ok() else {
+        bail!("Could not open file {path}");
+    };
 
-        let path = String::from_utf8_lossy(path_slice).to_string();
-        let Some(file) = std::fs::File::open(&path).ok() else {
-            bail!("Could not open file {path}");
-        };
+    let mmap = unsafe { memmap2::MmapOptions::new().map(&file)? };
+    let file = object::File::parse(&mmap[..])?;
 
-        let mmap = unsafe { memmap2::MmapOptions::new().map(&file)? };
-        let file = object::File::parse(&mmap[..])?;
-
-        // Verify the build id (if we have one)
-        match (build_id, file.build_id()) {
-            (Some(build_id), Ok(Some(file_build_id))) => {
-                if build_id != file_build_id {
-                    let file_build_id = CodeId::from_binary(file_build_id);
-                    let expected_build_id = CodeId::from_binary(build_id);
-                    bail!(
-                        "File {path:?} has non-matching build ID {file_build_id} (expected {expected_build_id})"
-                    );
-                }
+    // Verify the build id (if we have one)
+    match (build_id, file.build_id()) {
+        (Some(build_id), Ok(Some(file_build_id))) => {
+            if build_id != file_build_id {
+                let file_build_id = CodeId::from_binary(file_build_id);
+                let expected_build_id = CodeId::from_binary(build_id);
+                bail!(
+                    "File {path:?} has non-matching build ID {file_build_id} (expected {expected_build_id})"
+                );
             }
-            (Some(_), Err(_)) | (Some(_), Ok(None)) => {
-                bail!("File {path:?} does not contain a build ID, but we expected it to have one");
-            }
-            _ => {
-                // No build id to check
-            }
-        };
-
-        let base_avma = elf_helper::compute_base_avma(
-            runtime_start_addr,
-            runtime_end_addr,
-            runtime_file_offset,
-            &file,
-        )?;
-        let base_svma = elf_helper::relative_address_base(&file);
-        let eh_frame = file.section_by_name(".eh_frame");
-        let eh_frame_hdr = file.section_by_name(".eh_frame_hdr");
-
-        fn section_data<'a>(section: &impl ObjectSection<'a>) -> Option<Vec<u8>> {
-            section.data().ok().map(|data| data.to_owned())
         }
-
-        let eh_frame_data = eh_frame.as_ref().and_then(section_data);
-        let eh_frame_hdr_data = eh_frame_hdr.as_ref().and_then(section_data);
-
-        fn svma_range<'a>(section: &impl ObjectSection<'a>) -> Range<u64> {
-            section.address()..section.address() + section.size()
+        (Some(_), Err(_)) | (Some(_), Ok(None)) => {
+            bail!("File {path:?} does not contain a build ID, but we expected it to have one");
         }
+        _ => {
+            // No build id to check
+        }
+    };
 
-        Ok(UnwindData {
-            path,
-            timestamp: None,
-            avma_range,
-            base_avma,
-            base_svma,
-            eh_frame_hdr: eh_frame_hdr_data.context("Failed to find eh_frame hdr data")?,
-            eh_frame_hdr_svma: eh_frame_hdr
-                .as_ref()
-                .map(svma_range)
-                .context("Failed to find eh_frame hdr section")?,
-            eh_frame: eh_frame_data.context("Failed to find eh_frame data")?,
-            eh_frame_svma: eh_frame
-                .as_ref()
-                .map(svma_range)
-                .context("Failed to find eh_frame section")?,
-        })
+    let base_svma = elf_helper::relative_address_base(&file);
+    let base_avma = elf_helper::compute_base_avma(base_svma, load_bias);
+    let eh_frame = file.section_by_name(".eh_frame");
+    let eh_frame_hdr = file.section_by_name(".eh_frame_hdr");
+
+    fn section_data<'a>(section: &impl ObjectSection<'a>) -> Option<Vec<u8>> {
+        section.data().ok().map(|data| data.to_owned())
     }
+
+    let eh_frame_data = eh_frame.as_ref().and_then(section_data);
+    let eh_frame_hdr_data = eh_frame_hdr.as_ref().and_then(section_data);
+
+    fn svma_range<'a>(section: &impl ObjectSection<'a>) -> Range<u64> {
+        section.address()..section.address() + section.size()
+    }
+
+    let v3 = UnwindData {
+        path: path.clone(),
+        base_svma,
+        eh_frame_hdr: eh_frame_hdr_data.context("Failed to find eh_frame hdr data")?,
+        eh_frame_hdr_svma: eh_frame_hdr
+            .as_ref()
+            .map(svma_range)
+            .context("Failed to find eh_frame hdr section")?,
+        eh_frame: eh_frame_data.context("Failed to find eh_frame data")?,
+        eh_frame_svma: eh_frame
+            .as_ref()
+            .map(svma_range)
+            .context("Failed to find eh_frame section")?,
+    };
+
+    let mapping = ProcessUnwindData {
+        // We do not support timestamp in elf unwind data for now
+        timestamp: None,
+        avma_range,
+        base_avma,
+    };
+
+    Ok((v3, mapping))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    macro_rules! assert_elf_load_bias {
-        ($start_addr:expr, $end_addr:expr, $file_offset:expr, $module_path:expr, $expected_load_bias:expr) => {
-            let expected_load_bias = $expected_load_bias as u64;
-
-            let file_data = std::fs::read($module_path).expect("Failed to read test binary");
-            let object = object::File::parse(&file_data[..]).expect("Failed to parse test binary");
-            let load_bias =
-                elf_helper::compute_load_bias($start_addr, $end_addr, $file_offset, &object)
-                    .unwrap();
-            println!("Load bias for {}: 0x{:x}", $module_path, load_bias);
-            assert_eq!(
-                load_bias, expected_load_bias,
-                "Invalid load bias: {:x} != {:x}",
-                load_bias, expected_load_bias
-            );
-        };
+    fn assert_and_get_load_bias(
+        start_addr: u64,
+        end_addr: u64,
+        file_offset: u64,
+        module_path: &str,
+        expected_load_bias: u64,
+    ) -> u64 {
+        let file_data = std::fs::read(module_path).expect("Failed to read test binary");
+        let object = object::File::parse(&file_data[..]).expect("Failed to parse test binary");
+        let load_bias =
+            elf_helper::compute_load_bias(start_addr, end_addr, file_offset, &object).unwrap();
+        println!("Load bias for {module_path}: 0x{load_bias:x}");
+        assert_eq!(
+            load_bias, expected_load_bias,
+            "Invalid load bias: {load_bias:x} != {expected_load_bias:x}"
+        );
+        load_bias
     }
 
     // Note: You can double-check the values by getting the /proc/<pid>/maps via gdb:
@@ -145,13 +134,14 @@ mod tests {
 
         let (start_addr, end_addr, file_offset) =
             (0x0000000000402000_u64, 0x000000000050f000_u64, 0x2000);
-        assert_elf_load_bias!(start_addr, end_addr, file_offset, MODULE_PATH, 0x0);
-        insta::assert_debug_snapshot!(UnwindData::new(
+        let load_bias =
+            assert_and_get_load_bias(start_addr, end_addr, file_offset, MODULE_PATH, 0x0);
+        insta::assert_debug_snapshot!(unwind_data_from_elf(
             MODULE_PATH.as_bytes(),
-            file_offset,
             start_addr,
             end_addr,
-            None
+            None,
+            load_bias,
         ));
     }
 
@@ -166,14 +156,15 @@ mod tests {
 
         let (start_addr, end_addr, file_offset) =
             (0x0000000000400000_u64, 0x0000000000459000_u64, 0x0);
-        assert_elf_load_bias!(start_addr, end_addr, file_offset, MODULE_PATH, 0x0);
+        let load_bias =
+            assert_and_get_load_bias(start_addr, end_addr, file_offset, MODULE_PATH, 0x0);
 
-        insta::assert_debug_snapshot!(UnwindData::new(
+        insta::assert_debug_snapshot!(unwind_data_from_elf(
             MODULE_PATH.as_bytes(),
-            file_offset,
             start_addr,
             end_addr,
             None,
+            load_bias,
         ));
     }
 
@@ -183,19 +174,19 @@ mod tests {
 
         let (start_addr, end_addr, file_offset) =
             (0x00005555555a2000_u64, 0x0000555555692000_u64, 0x4d000);
-        assert_elf_load_bias!(
+        let load_bias = assert_and_get_load_bias(
             start_addr,
             end_addr,
             file_offset,
             MODULE_PATH,
-            0x555555554000
+            0x555555554000,
         );
-        insta::assert_debug_snapshot!(UnwindData::new(
+        insta::assert_debug_snapshot!(unwind_data_from_elf(
             MODULE_PATH.as_bytes(),
-            file_offset,
             start_addr,
             end_addr,
-            None
+            None,
+            load_bias,
         ));
     }
 
@@ -211,19 +202,19 @@ mod tests {
         const MODULE_PATH: &str = "testdata/perf_map/the_algorithms.bin";
 
         let (start_addr, end_addr, file_offset) = (0x00005555555a7000, 0x00005555556b0000, 0x52000);
-        assert_elf_load_bias!(
+        let load_bias = assert_and_get_load_bias(
             start_addr,
             end_addr,
             file_offset,
             MODULE_PATH,
-            0x555555554000
+            0x555555554000,
         );
-        insta::assert_debug_snapshot!(UnwindData::new(
+        insta::assert_debug_snapshot!(unwind_data_from_elf(
             MODULE_PATH.as_bytes(),
-            file_offset,
             start_addr,
             end_addr,
-            None
+            None,
+            load_bias,
         ));
     }
 
@@ -239,20 +230,20 @@ mod tests {
         const MODULE_PATH: &str = "testdata/perf_map/ty_walltime";
         let (start_addr, end_addr, file_offset) =
             (0x0000555555e6d000_u64, 0x0000555556813000_u64, 0x918000);
-        assert_elf_load_bias!(
+        let load_bias = assert_and_get_load_bias(
             start_addr,
             end_addr,
             file_offset,
             MODULE_PATH,
-            0x555555554000
+            0x555555554000,
         );
 
-        insta::assert_debug_snapshot!(UnwindData::new(
+        insta::assert_debug_snapshot!(unwind_data_from_elf(
             MODULE_PATH.as_bytes(),
-            file_offset,
             start_addr,
             end_addr,
-            None
+            None,
+            load_bias,
         ));
     }
 }

@@ -21,6 +21,13 @@ impl std::fmt::Debug for DebugInfo {
     }
 }
 
+/// Per-pid mounting info referencing a deduplicated debug info entry.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct MappedProcessDebugInfo {
+    pub debug_info_key: String,
+    pub load_bias: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModuleDebugInfo {
     /// The path to the object file on disk (e.g. `/usr/lib/libc.so.6`)
