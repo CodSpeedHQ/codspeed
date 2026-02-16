@@ -5,7 +5,9 @@ use addr2line::{fallible_iterator::FallibleIterator, gimli};
 use object::{Object, ObjectSection};
 use rayon::prelude::*;
 use runner_shared::debug_info::{DebugInfo, ModuleDebugInfo};
+use std::collections::HashMap;
 use std::path::Path;
+use std::path::PathBuf;
 
 type EndianRcSlice = gimli::EndianRcSlice<gimli::RunTimeEndian>;
 

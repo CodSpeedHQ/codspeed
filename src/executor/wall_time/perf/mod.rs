@@ -321,17 +321,16 @@ impl BenchmarkData {
                 .clone()
                 .ok_or(BenchmarkDataSaveError::MissingIntegration)?,
             uri_by_ts: self.marker_result.uri_by_ts.clone(),
-            ignored_modules: artifacts.ignored_modules,
+            ignored_modules_by_pid: artifacts.ignored_modules_by_pid,
             markers: self.marker_result.markers.clone(),
             debug_info: artifacts.debug_info,
             mapped_process_debug_info_by_pid: artifacts.mapped_process_debug_info_by_pid,
             mapped_process_unwind_data_by_pid: artifacts.mapped_process_unwind_data_by_pid,
             mapped_process_module_symbols: artifacts.symbol_pid_mappings_by_pid,
             path_key_to_path: artifacts.key_to_path,
-            // Not yet implemented
-            ignored_modules_by_pid: Default::default(),
             // Deprecated fields below are no longer used
             debug_info_by_pid: Default::default(),
+            ignored_modules: Default::default(),
         };
         metadata.save_to(&path).unwrap();
 

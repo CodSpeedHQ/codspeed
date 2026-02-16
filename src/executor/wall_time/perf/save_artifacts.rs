@@ -16,7 +16,7 @@ pub struct SavedArtifacts {
     pub debug_info: HashMap<String, ModuleDebugInfo>,
     pub mapped_process_debug_info_by_pid: HashMap<pid_t, Vec<MappedProcessDebugInfo>>,
     pub mapped_process_unwind_data_by_pid: HashMap<pid_t, Vec<MappedProcessUnwindData>>,
-    pub ignored_modules: Vec<(String, u64, u64)>,
+    pub ignored_modules_by_pid: HashMap<pid_t, Vec<(String, u64, u64)>>,
     pub key_to_path: HashMap<String, PathBuf>,
 }
 
@@ -43,7 +43,7 @@ pub fn save_artifacts(
         &mut path_to_key,
     );
 
-    let ignored_modules = collect_ignored_modules(mounted_modules_by_path);
+    let ignored_modules_by_pid = collect_ignored_modules(loaded_modules_by_path);
 
     let key_to_path = path_to_key
         .into_iter()
@@ -55,7 +55,7 @@ pub fn save_artifacts(
         debug_info,
         mapped_process_debug_info_by_pid,
         mapped_process_unwind_data_by_pid,
-        ignored_modules,
+        ignored_modules_by_pid,
         key_to_path,
     }
 }
@@ -247,10 +247,11 @@ fn save_unwind_data(
 }
 
 /// Collect ignored modules by finding known-ignored and python modules in the mounted modules.
+/// Returns per-pid entries with runtime address ranges derived from symbol bounds + load bias.
 fn collect_ignored_modules(
-    mounted_modules_by_path: &HashMap<PathBuf, MountedModule>,
-) -> Vec<(String, u64, u64)> {
-    let mut to_ignore = vec![];
+    loaded_modules_by_path: &HashMap<PathBuf, LoadedModule>,
+) -> HashMap<pid_t, Vec<(String, u64, u64)>> {
+    let mut by_pid: HashMap<pid_t, Vec<(String, u64, u64)>> = HashMap::new();
 
     let ignore_paths = get_objects_path_to_ignore();
 
@@ -269,16 +270,25 @@ fn collect_ignored_modules(
             continue;
         }
 
-        for pm in m.process_mounted_module.values() {
-            if let Some(ref pud) = pm.process_unwind_data {
-                to_ignore.push((
+        let addr_bounds = loaded_module
+            .module_symbols
+            .as_ref()
+            .and_then(|ms| ms.addr_bounds());
+
+        let Some((elf_start, elf_end)) = addr_bounds else {
+            continue;
+        };
+
+        for (&pid, pm) in &loaded_module.process_loaded_modules {
+            if let Some(load_bias) = pm.symbols_load_bias {
+                by_pid.entry(pid).or_default().push((
                     path_str.to_string(),
-                    pud.avma_range.start,
-                    pud.avma_range.end,
+                    elf_start + load_bias,
+                    elf_end + load_bias,
                 ));
             }
         }
     }
 
-    to_ignore
+    by_pid
 }

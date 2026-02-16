@@ -43,6 +43,18 @@ impl ModuleSymbols {
         &self.symbols
     }
 
+    /// Returns `(min_addr, max_addr_end)` covering all symbols, or `None` if empty.
+    pub fn addr_bounds(&self) -> Option<(u64, u64)> {
+        let first = self.symbols.first()?;
+        Some(
+            self.symbols
+                .iter()
+                .fold((first.addr, first.addr + first.size), |(min, max), s| {
+                    (min.min(s.addr), max.max(s.addr + s.size))
+                }),
+        )
+    }
+
     /// Extract symbols from an ELF file (pid-agnostic, load_bias = 0).
     pub fn from_elf<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
         let content = std::fs::read(path.as_ref())?;
