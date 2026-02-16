@@ -15,15 +15,14 @@ pub fn run_rounds(
     let hooks = InstrumentHooks::instance(INTEGRATION_NAME, INTEGRATION_VERSION);
 
     let do_one_round = || -> Result<(u64, u64)> {
+        let bench_round_start_ts_ns = InstrumentHooks::current_timestamp();
         let mut child = Command::new(&command[0])
             .args(&command[1..])
             .spawn()
             .context("Failed to execute command")?;
-        let bench_round_start_ts_ns = InstrumentHooks::current_timestamp();
         let status = child
             .wait()
             .context("Failed to wait for command to finish")?;
-
         let bench_round_end_ts_ns = InstrumentHooks::current_timestamp();
 
         if !status.success() {
