@@ -385,6 +385,8 @@ impl BenchmarkData {
             },
             markers: self.marker_result.markers.clone(),
             debug_info_by_pid,
+            // Fill new fields to default for now
+            ..Default::default()
         };
         metadata.save_to(&path).unwrap();
 
