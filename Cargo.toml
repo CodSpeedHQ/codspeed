@@ -59,7 +59,7 @@ linux-perf-data = { git = "https://github.com/CodSpeedHQ/linux-perf-data.git", r
 ] } # feat: support zstd compressed records
 debugid = "0.8.0"
 memmap2 = "0.9.5"
-nix = { version = "0.29.0", features = ["fs", "time", "user"] }
+nix = { version = "0.31.1", features = ["fs", "time", "user"] }
 futures = "0.3.31"
 runner-shared = { path = "crates/runner-shared" }
 memtrack = { path = "crates/memtrack", default-features = false }
