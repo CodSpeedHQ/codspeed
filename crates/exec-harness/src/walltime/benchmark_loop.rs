@@ -4,6 +4,7 @@ use crate::constants::{INTEGRATION_NAME, INTEGRATION_VERSION};
 use crate::prelude::*;
 use instrument_hooks_bindings::InstrumentHooks;
 use std::process::Command;
+use std::process::Stdio;
 use std::time::Duration;
 
 pub fn run_rounds(
@@ -16,13 +17,13 @@ pub fn run_rounds(
 
     let do_one_round = || -> Result<(u64, u64)> {
         let bench_round_start_ts_ns = InstrumentHooks::current_timestamp();
-        let mut child = Command::new(&command[0])
+        let status = Command::new(&command[0])
             .args(&command[1..])
-            .spawn()
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
             .context("Failed to execute command")?;
-        let status = child
-            .wait()
-            .context("Failed to wait for command to finish")?;
+
         let bench_round_end_ts_ns = InstrumentHooks::current_timestamp();
 
         if !status.success() {
