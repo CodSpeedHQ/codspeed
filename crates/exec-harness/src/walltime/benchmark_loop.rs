@@ -16,9 +16,7 @@ pub fn run_rounds(
 
     let do_one_round = || -> Result<(u64, u64)> {
         let bench_round_start_ts_ns = InstrumentHooks::current_timestamp();
-        let status = Command::new("nice")
-            .args(["-n", "-20"])
-            .arg(&command[0])
+        let status = Command::new(&command[0])
             .args(&command[1..])
             .status()
             .context("Failed to execute command")?;

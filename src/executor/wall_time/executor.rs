@@ -131,6 +131,7 @@ impl WallTimeExecutor {
         // - We have to pass the environment variables because `--scope` only inherits the system and not the user environment variables.
         cmd_builder.arg("--slice=codspeed.slice");
         cmd_builder.arg("--scope");
+        cmd_builder.arg("--nice=-20");
         cmd_builder.arg("--same-dir");
         cmd_builder.arg(format!("--uid={}", nix::unistd::Uid::current().as_raw()));
         cmd_builder.arg(format!("--gid={}", nix::unistd::Gid::current().as_raw()));
