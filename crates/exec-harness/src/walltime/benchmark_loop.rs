@@ -4,7 +4,6 @@ use crate::constants::{INTEGRATION_NAME, INTEGRATION_VERSION};
 use crate::prelude::*;
 use instrument_hooks_bindings::InstrumentHooks;
 use std::process::Command;
-use std::process::Stdio;
 use std::time::Duration;
 
 pub fn run_rounds(
@@ -21,8 +20,6 @@ pub fn run_rounds(
             .args(["-n", "-20"])
             .arg(&command[0])
             .args(&command[1..])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
             .status()
             .context("Failed to execute command")?;
 
