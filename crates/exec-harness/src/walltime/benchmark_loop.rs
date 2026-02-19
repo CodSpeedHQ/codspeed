@@ -3,7 +3,7 @@ use super::config::RoundOrTime;
 use crate::constants::{INTEGRATION_NAME, INTEGRATION_VERSION};
 use crate::prelude::*;
 use instrument_hooks_bindings::InstrumentHooks;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 pub fn run_rounds(
@@ -18,6 +18,8 @@ pub fn run_rounds(
         let bench_round_start_ts_ns = InstrumentHooks::current_timestamp();
         let status = Command::new(&command[0])
             .args(&command[1..])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
             .status()
             .context("Failed to execute command")?;
 
