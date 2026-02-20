@@ -1,6 +1,7 @@
 use crate::executor::Config;
 use crate::executor::ExecutionContext;
 use crate::executor::ExecutorName;
+use crate::executor::Orchestrator;
 use crate::run_environment::RunEnvironment;
 use crate::upload::{UploadError, profile_archive::ProfileArchiveContent};
 use crate::{
@@ -51,7 +52,7 @@ async fn calculate_folder_size(path: &std::path::Path) -> Result<u64> {
 /// For WallTime, we check the folder size and create either a compressed or uncompressed tar archive
 /// based on the MAX_UNCOMPRESSED_PROFILE_SIZE_BYTES threshold.
 async fn create_profile_archive(
-    execution_context: &ExecutionContext,
+    profile_folder: &std::path::Path,
     executor_name: ExecutorName,
 ) -> Result<ProfileArchive> {
     let time_start = std::time::Instant::now();
@@ -60,8 +61,7 @@ async fn create_profile_archive(
             debug!("Creating compressed tar archive for Valgrind");
             let enc = GzipEncoder::new(Vec::new());
             let mut tar = Builder::new(enc);
-            tar.append_dir_all(".", execution_context.profile_folder.clone())
-                .await?;
+            tar.append_dir_all(".", profile_folder).await?;
             let mut gzip_encoder = tar.into_inner().await?;
             gzip_encoder.shutdown().await?;
             let data = gzip_encoder.into_inner();
@@ -69,8 +69,7 @@ async fn create_profile_archive(
         }
         ExecutorName::Memory | ExecutorName::WallTime => {
             // Check folder size to decide on compression
-            let folder_size_bytes =
-                calculate_folder_size(&execution_context.profile_folder).await?;
+            let folder_size_bytes = calculate_folder_size(profile_folder).await?;
             let should_compress = folder_size_bytes >= MAX_UNCOMPRESSED_PROFILE_SIZE_BYTES;
 
             let temp_file = tempfile::NamedTempFile::new()?;
@@ -90,8 +89,7 @@ async fn create_profile_archive(
                 );
                 let enc = GzipEncoder::new(file);
                 let mut tar = Builder::new(enc);
-                tar.append_dir_all(".", execution_context.profile_folder.clone())
-                    .await?;
+                tar.append_dir_all(".", profile_folder).await?;
                 let mut gzip_encoder = tar.into_inner().await?;
                 gzip_encoder.shutdown().await?;
                 gzip_encoder.into_inner().sync_all().await?;
@@ -104,8 +102,7 @@ async fn create_profile_archive(
                     bytes_to_mib(MAX_UNCOMPRESSED_PROFILE_SIZE_BYTES)
                 );
                 let mut tar = Builder::new(file);
-                tar.append_dir_all(".", execution_context.profile_folder.clone())
-                    .await?;
+                tar.append_dir_all(".", profile_folder).await?;
                 tar.into_inner().await?.sync_all().await?;
 
                 ProfileArchive::new_uncompressed_on_disk(persistent_path)?
@@ -249,30 +246,23 @@ pub struct UploadResult {
 }
 
 pub async fn upload(
-    execution_context: &mut ExecutionContext,
+    orchestrator: &Orchestrator,
+    execution_context: &ExecutionContext,
     executor_name: ExecutorName,
 ) -> Result<UploadResult> {
-    let profile_archive = create_profile_archive(execution_context, executor_name.clone()).await?;
+    let profile_archive =
+        create_profile_archive(&execution_context.profile_folder, executor_name.clone()).await?;
 
     debug!(
         "Run Environment provider detected: {:?}",
-        execution_context.provider.get_run_environment()
+        orchestrator.provider.get_run_environment()
     );
 
-    if !execution_context.is_local() {
-        // If relevant, set the OIDC token for authentication
-        // Note: OIDC tokens can expire quickly, so we set it just before the upload
-        execution_context
-            .provider
-            .set_oidc_token(&mut execution_context.config)
-            .await?;
-    }
-
-    let upload_metadata = execution_context
+    let upload_metadata = orchestrator
         .provider
         .get_upload_metadata(
             &execution_context.config,
-            &execution_context.system_info,
+            &orchestrator.system_info,
             &profile_archive,
             executor_name,
         )
@@ -324,7 +314,7 @@ mod tests {
     #[ignore]
     #[tokio::test]
     async fn test_upload() {
-        let config = Config {
+        let mut config = Config {
             command: "pytest tests/ --codspeed".into(),
             upload_url: Url::parse("change me").unwrap(),
             token: Some("change me".into()),
@@ -365,11 +355,12 @@ mod tests {
             async {
                 let codspeed_config = CodSpeedConfig::default();
                 let api_client = CodSpeedAPIClient::create_test_client();
-                let mut execution_context =
-                    ExecutionContext::new(config, &codspeed_config, &api_client)
-                        .await
-                        .expect("Failed to create ExecutionContext for test");
-                upload(&mut execution_context, ExecutorName::Valgrind)
+                let orchestrator = Orchestrator::new(&mut config, &codspeed_config, &api_client)
+                    .await
+                    .expect("Failed to create Orchestrator for test");
+                let execution_context =
+                    ExecutionContext::new(config).expect("Failed to create ExecutionContext");
+                upload(&orchestrator, &execution_context, ExecutorName::Valgrind)
                     .await
                     .unwrap();
             },

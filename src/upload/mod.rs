@@ -1,4 +1,5 @@
 mod interfaces;
+pub mod poll_results;
 mod polling;
 mod profile_archive;
 mod run_index_state;

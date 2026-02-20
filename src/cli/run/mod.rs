@@ -8,12 +8,12 @@ use crate::project_config::ProjectConfig;
 use crate::project_config::merger::ConfigMerger;
 use crate::run_environment::interfaces::RepositoryProvider;
 use crate::upload::UploadResult;
+use crate::upload::poll_results::{PollResultsOptions, poll_results};
 use clap::{Args, ValueEnum};
 use std::path::Path;
 
 pub mod helpers;
 pub mod logger;
-mod poll_results;
 
 #[derive(Args, Debug)]
 pub struct RunArgs {
@@ -70,7 +70,7 @@ impl RunArgs {
                 repository: None,
                 provider: None,
                 working_directory: None,
-                mode: Some(RunnerMode::Simulation),
+                mode: vec![RunnerMode::Simulation],
                 simulation_tool: None,
                 profile_folder: None,
                 skip_upload: false,
@@ -141,30 +141,23 @@ pub async fn run(
 
     match run_target {
         RunTarget::SingleCommand(args) => {
-            let config = Config::try_from(args)?;
+            let mut config = Config::try_from(args)?;
 
-            // Create execution context
-            let mut execution_context =
-                executor::ExecutionContext::new(config, codspeed_config, api_client).await?;
+            let orchestrator =
+                executor::Orchestrator::new(&mut config, codspeed_config, api_client).await?;
 
-            if !execution_context.is_local() {
+            if !orchestrator.is_local() {
                 super::show_banner();
             }
-            debug!("config: {:#?}", execution_context.config);
+            debug!("config: {config:#?}");
 
-            // Execute benchmarks
-            let executor = executor::get_executor_from_mode(&execution_context.config.mode);
-
+            let poll_opts = PollResultsOptions::for_run(output_json);
             let poll_results_fn = async |upload_result: &UploadResult| {
-                poll_results::poll_results(api_client, upload_result, output_json).await
+                poll_results(api_client, upload_result, &poll_opts).await
             };
-            executor::execute_benchmarks(
-                executor.as_ref(),
-                &mut execution_context,
-                setup_cache_dir,
-                poll_results_fn,
-            )
-            .await?;
+            orchestrator
+                .execute(&mut config, setup_cache_dir, poll_results_fn)
+                .await?;
         }
 
         RunTarget::ConfigTargets {

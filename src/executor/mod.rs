@@ -5,6 +5,7 @@ mod execution_context;
 mod helpers;
 mod interfaces;
 mod memory;
+pub mod orchestrator;
 mod shared;
 #[cfg(test)]
 mod tests;
@@ -15,12 +16,12 @@ use crate::instruments::mongo_tracer::{MongoTracer, install_mongodb_tracer};
 use crate::prelude::*;
 use crate::runner_mode::RunnerMode;
 use crate::system::SystemInfo;
-use crate::upload::UploadResult;
 use async_trait::async_trait;
 pub use config::Config;
 pub use execution_context::ExecutionContext;
 pub use helpers::profile_folder::create_profile_folder;
 pub use interfaces::ExecutorName;
+pub use orchestrator::Orchestrator;
 
 use memory::executor::MemoryExecutor;
 use std::path::Path;
@@ -81,20 +82,17 @@ pub trait Executor {
     async fn teardown(&self, execution_context: &ExecutionContext) -> Result<()>;
 }
 
-/// Execute benchmarks with the given configuration
-/// This is the core execution logic shared between `run` and `exec` commands
-pub async fn execute_benchmarks<F>(
+/// Run a single executor: setup → run → teardown → persist logs.
+/// Does NOT upload.
+pub async fn run_executor(
     executor: &dyn Executor,
-    execution_context: &mut ExecutionContext,
+    orchestrator: &Orchestrator,
+    execution_context: &ExecutionContext,
     setup_cache_dir: Option<&Path>,
-    poll_results: F,
-) -> Result<()>
-where
-    F: AsyncFn(&UploadResult) -> Result<()>,
-{
+) -> Result<()> {
     if !execution_context.config.skip_setup {
         executor
-            .setup(&execution_context.system_info, setup_cache_dir)
+            .setup(&orchestrator.system_info, setup_cache_dir)
             .await?;
 
         // TODO: refactor and move directly in the Instruments struct as a `setup` method
@@ -129,34 +127,12 @@ where
         debug!("Tearing down the executor");
         executor.teardown(execution_context).await?;
 
-        execution_context
+        orchestrator
             .logger
-            .persist_log_to_profile_folder(execution_context)?;
+            .persist_log_to_profile_folder(&execution_context.profile_folder)?;
     } else {
         debug!("Skipping the run of the benchmarks");
     };
-
-    // Handle upload and polling
-    if !execution_context.config.skip_upload {
-        if !execution_context.is_local() {
-            // If relevant, set the OIDC token for authentication
-            // Note: OIDC tokens can expire quickly, so we set it just before the upload
-            execution_context
-                .provider
-                .set_oidc_token(&mut execution_context.config)
-                .await?;
-        }
-
-        start_group!("Uploading results");
-        let upload_result = crate::upload::upload(execution_context, executor.name()).await?;
-
-        if execution_context.is_local() {
-            poll_results(&upload_result).await?;
-        }
-        end_group!();
-    } else {
-        debug!("Skipping upload of performance data");
-    }
 
     Ok(())
 }

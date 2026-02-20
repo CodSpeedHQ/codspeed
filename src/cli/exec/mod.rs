@@ -7,11 +7,11 @@ use crate::prelude::*;
 use crate::project_config::ProjectConfig;
 use crate::project_config::merger::ConfigMerger;
 use crate::upload::UploadResult;
+use crate::upload::poll_results::{PollResultsOptions, poll_results};
 use clap::Args;
 use std::path::Path;
 
 pub mod multi_targets;
-mod poll_results;
 
 /// We temporarily force this name for all exec runs
 pub const DEFAULT_REPOSITORY_NAME: &str = "local-runs";
@@ -91,20 +91,19 @@ pub async fn run(
 /// result polling. It is used by both `codspeed exec` directly and by `codspeed run` when
 /// executing targets defined in codspeed.yaml.
 pub async fn execute_with_harness(
-    config: crate::executor::Config,
+    mut config: crate::executor::Config,
     api_client: &CodSpeedAPIClient,
     codspeed_config: &CodSpeedConfig,
     setup_cache_dir: Option<&Path>,
 ) -> Result<()> {
-    let mut execution_context =
-        executor::ExecutionContext::new(config, codspeed_config, api_client).await?;
+    let orchestrator =
+        executor::Orchestrator::new(&mut config, codspeed_config, api_client).await?;
 
-    if !execution_context.is_local() {
+    if !orchestrator.is_local() {
         super::show_banner();
     }
 
-    debug!("config: {:#?}", execution_context.config);
-    let executor = executor::get_executor_from_mode(&execution_context.config.mode);
+    debug!("config: {config:#?}");
 
     let get_exec_harness_installer_url = || {
         format!(
@@ -120,17 +119,14 @@ pub async fn execute_with_harness(
     )
     .await?;
 
+    let poll_opts = PollResultsOptions::for_exec();
     let poll_results_fn = async |upload_result: &UploadResult| {
-        poll_results::poll_results(api_client, upload_result).await
+        poll_results(api_client, upload_result, &poll_opts).await
     };
 
-    executor::execute_benchmarks(
-        executor.as_ref(),
-        &mut execution_context,
-        setup_cache_dir,
-        poll_results_fn,
-    )
-    .await?;
+    orchestrator
+        .execute(&mut config, setup_cache_dir, poll_results_fn)
+        .await?;
 
     Ok(())
 }

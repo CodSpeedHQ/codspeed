@@ -152,7 +152,7 @@ mod tests {
             repository: None,
             provider: None,
             working_directory: Some("./cli-dir".to_string()),
-            mode: Some(RunnerMode::Walltime),
+            mode: vec![RunnerMode::Walltime],
             simulation_tool: None,
             profile_folder: None,
             skip_upload: false,
@@ -185,7 +185,7 @@ mod tests {
             repository: None,
             provider: None,
             working_directory: None,
-            mode: Some(RunnerMode::Walltime),
+            mode: vec![RunnerMode::Walltime],
             simulation_tool: None,
             profile_folder: None,
             skip_upload: false,
@@ -209,7 +209,7 @@ mod tests {
         // Config working_directory should be used
         assert_eq!(merged.working_directory, Some("./config-dir".to_string()));
         // Mode stays as CLI value
-        assert_eq!(merged.mode, Some(RunnerMode::Walltime));
+        assert_eq!(merged.mode, vec![RunnerMode::Walltime]);
     }
 
     #[test]
@@ -220,7 +220,7 @@ mod tests {
             repository: None,
             provider: None,
             working_directory: Some("./dir".to_string()),
-            mode: Some(RunnerMode::Simulation),
+            mode: vec![RunnerMode::Simulation],
             simulation_tool: None,
             profile_folder: None,
             skip_upload: false,
@@ -238,7 +238,7 @@ mod tests {
 
         // Should be identical to CLI
         assert_eq!(merged.working_directory, Some("./dir".to_string()));
-        assert_eq!(merged.mode, Some(RunnerMode::Simulation));
+        assert_eq!(merged.mode, vec![RunnerMode::Simulation]);
     }
 
     #[test]

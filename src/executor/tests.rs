@@ -1,6 +1,7 @@
 use super::Config;
 use crate::executor::ExecutionContext;
 use crate::executor::Executor;
+use crate::executor::Orchestrator;
 use crate::runner_mode::RunnerMode;
 use crate::system::SystemInfo;
 use rstest_reuse::{self, *};
@@ -118,7 +119,7 @@ fn test_cases(#[case] cmd: &str) {}
 #[case(ENV_TESTS[7])]
 fn env_test_cases(#[case] env_case: (&str, &str)) {}
 
-async fn create_test_setup(config: Config) -> (ExecutionContext, TempDir) {
+async fn create_test_setup(config: Config) -> (Orchestrator, ExecutionContext, TempDir) {
     use crate::api_client::CodSpeedAPIClient;
     use crate::config::CodSpeedConfig;
     use crate::executor::config::RepositoryOverride;
@@ -146,12 +147,18 @@ async fn create_test_setup(config: Config) -> (ExecutionContext, TempDir) {
         codspeed_config_with_token.auth.token = Some("test-token".to_string());
     }
 
-    let execution_context =
-        ExecutionContext::new(config_with_folder, &codspeed_config_with_token, &api_client)
-            .await
-            .expect("Failed to create ExecutionContext for test");
+    let orchestrator = Orchestrator::new(
+        &mut config_with_folder,
+        &codspeed_config_with_token,
+        &api_client,
+    )
+    .await
+    .expect("Failed to create Orchestrator for test");
 
-    (execution_context, temp_dir)
+    let execution_context =
+        ExecutionContext::new(config_with_folder).expect("Failed to create ExecutionContext");
+
+    (orchestrator, execution_context, temp_dir)
 }
 
 // Uprobes set by memtrack, lead to crashes in valgrind because they work by setting breakpoints on the first
@@ -189,7 +196,7 @@ mod valgrind {
 
     fn valgrind_config(command: &str) -> Config {
         Config {
-            mode: RunnerMode::Simulation,
+            modes: vec![RunnerMode::Simulation],
             command: command.to_string(),
             ..Config::test()
         }
@@ -203,7 +210,7 @@ mod valgrind {
         let config = valgrind_config(cmd);
         // Unset GITHUB_ACTIONS to force LocalProvider which supports repository_override
         temp_env::async_with_vars(&[("GITHUB_ACTIONS", None::<&str>)], async {
-            let (execution_context, _temp_dir) = create_test_setup(config).await;
+            let (_orchestrator, execution_context, _temp_dir) = create_test_setup(config).await;
             executor.run(&execution_context, &None).await.unwrap();
         })
         .await;
@@ -220,7 +227,7 @@ mod valgrind {
             async {
                 let cmd = env_var_validation_script(env_var, env_value);
                 let config = valgrind_config(&cmd);
-                let (execution_context, _temp_dir) = create_test_setup(config).await;
+                let (_orchestrator, execution_context, _temp_dir) = create_test_setup(config).await;
                 executor.run(&execution_context, &None).await.unwrap();
             },
         )
@@ -257,7 +264,7 @@ mod walltime {
 
     fn walltime_config(command: &str, enable_perf: bool) -> Config {
         Config {
-            mode: RunnerMode::Walltime,
+            modes: vec![RunnerMode::Walltime],
             command: command.to_string(),
             enable_perf,
             ..Config::test()
@@ -273,7 +280,7 @@ mod walltime {
         let config = walltime_config(cmd, enable_perf);
         // Unset GITHUB_ACTIONS to force LocalProvider which supports repository_override
         temp_env::async_with_vars(&[("GITHUB_ACTIONS", None::<&str>)], async {
-            let (execution_context, _temp_dir) = create_test_setup(config).await;
+            let (_orchestrator, execution_context, _temp_dir) = create_test_setup(config).await;
             executor.run(&execution_context, &None).await.unwrap();
         })
         .await;
@@ -294,7 +301,7 @@ mod walltime {
             async {
                 let cmd = env_var_validation_script(env_var, env_value);
                 let config = walltime_config(&cmd, enable_perf);
-                let (execution_context, _temp_dir) = create_test_setup(config).await;
+                let (_orchestrator, execution_context, _temp_dir) = create_test_setup(config).await;
                 executor.run(&execution_context, &None).await.unwrap();
             },
         )
@@ -327,7 +334,7 @@ fi
 
         // Unset GITHUB_ACTIONS to force LocalProvider which supports repository_override
         temp_env::async_with_vars(&[("GITHUB_ACTIONS", None::<&str>)], async {
-            let (execution_context, _temp_dir) = create_test_setup(config).await;
+            let (_orchestrator, execution_context, _temp_dir) = create_test_setup(config).await;
             executor.run(&execution_context, &None).await.unwrap();
         })
         .await;
@@ -342,7 +349,7 @@ fi
         let config = walltime_config("exit 1", enable_perf);
         // Unset GITHUB_ACTIONS to force LocalProvider which supports repository_override
         temp_env::async_with_vars(&[("GITHUB_ACTIONS", None::<&str>)], async {
-            let (execution_context, _temp_dir) = create_test_setup(config).await;
+            let (_orchestrator, execution_context, _temp_dir) = create_test_setup(config).await;
             let result = executor.run(&execution_context, &None).await;
             assert!(result.is_err(), "Command should fail");
         })
@@ -384,7 +391,7 @@ fi
         temp_env::async_with_vars(&[("GITHUB_ACTIONS", None::<&str>)], async {
             let config = walltime_config(&wrapped_command, true);
             dbg!(&config);
-            let (execution_context, _temp_dir) = create_test_setup(config).await;
+            let (_orchestrator, execution_context, _temp_dir) = create_test_setup(config).await;
             executor.run(&execution_context, &None).await.unwrap();
         })
         .await;
@@ -425,7 +432,7 @@ mod memory {
 
     fn memory_config(command: &str) -> Config {
         Config {
-            mode: RunnerMode::Memory,
+            modes: vec![RunnerMode::Memory],
             command: command.to_string(),
             ..Config::test()
         }
@@ -439,7 +446,7 @@ mod memory {
         // Unset GITHUB_ACTIONS to force LocalProvider which supports repository_override
         temp_env::async_with_vars(&[("GITHUB_ACTIONS", None::<&str>)], async {
             let config = memory_config(cmd);
-            let (execution_context, _temp_dir) = create_test_setup(config).await;
+            let (_orchestrator, execution_context, _temp_dir) = create_test_setup(config).await;
             executor.run(&execution_context, &None).await.unwrap();
         })
         .await;
@@ -456,7 +463,7 @@ mod memory {
             async {
                 let cmd = env_var_validation_script(env_var, env_value);
                 let config = memory_config(&cmd);
-                let (execution_context, _temp_dir) = create_test_setup(config).await;
+                let (_orchestrator, execution_context, _temp_dir) = create_test_setup(config).await;
                 executor.run(&execution_context, &None).await.unwrap();
             },
         )
@@ -479,7 +486,7 @@ fi
 "#
         );
         let config = memory_config(&cmd);
-        let (execution_context, _temp_dir) = create_test_setup(config).await;
+        let (_orchestrator, execution_context, _temp_dir) = create_test_setup(config).await;
         let (_permit, _lock, executor) = get_memory_executor().await;
 
         temp_env::async_with_vars(&[("PATH", Some(&modified_path))], async {

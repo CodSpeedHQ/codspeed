@@ -27,7 +27,7 @@ pub enum SimulationTool {
 /// for controlling the execution flow. It is typically constructed from command-line
 /// arguments via [`RunArgs`] and combined with [`CodSpeedConfig`] to create an
 /// [`ExecutionContext`].
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Config {
     pub upload_url: Url,
     pub token: Option<String>,
@@ -35,7 +35,7 @@ pub struct Config {
     pub working_directory: Option<String>,
     pub command: String,
 
-    pub mode: RunnerMode,
+    pub modes: Vec<RunnerMode>,
     pub instruments: Instruments,
     pub enable_perf: bool,
     /// Stack unwinding mode for perf (if enabled)
@@ -53,7 +53,7 @@ pub struct Config {
     pub go_runner_version: Option<Version>,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RepositoryOverride {
     pub owner: String,
     pub repository: String,
@@ -81,6 +81,13 @@ impl Config {
     pub fn set_token(&mut self, token: Option<String>) {
         self.token = token;
     }
+
+    /// Create a clone of this config pinned to a single mode.
+    pub fn for_mode(&self, mode: &RunnerMode) -> Config {
+        let mut c = self.clone();
+        c.modes = vec![mode.clone()];
+        c
+    }
 }
 
 #[cfg(test)]
@@ -93,7 +100,7 @@ impl Config {
             repository_override: None,
             working_directory: None,
             command: "".into(),
-            mode: RunnerMode::Simulation,
+            modes: vec![RunnerMode::Simulation],
             instruments: Instruments::test(),
             perf_unwinding_mode: None,
             enable_perf: false,
@@ -114,7 +121,7 @@ impl TryFrom<RunArgs> for Config {
     type Error = Error;
     fn try_from(args: RunArgs) -> Result<Self> {
         let instruments = Instruments::try_from(&args)?;
-        let mode = args.shared.resolve_modes()?;
+        let modes = args.shared.resolve_modes()?;
         let raw_upload_url = args
             .shared
             .upload_url
@@ -131,7 +138,7 @@ impl TryFrom<RunArgs> for Config {
                 .map(|repo| RepositoryOverride::from_arg(repo, args.shared.provider))
                 .transpose()?,
             working_directory: args.shared.working_directory,
-            mode,
+            modes,
             instruments,
             perf_unwinding_mode: args.shared.perf_run_args.perf_unwinding_mode,
             enable_perf: args.shared.perf_run_args.enable_perf,
@@ -153,7 +160,7 @@ impl Config {
         args: crate::cli::exec::ExecArgs,
         command: String,
     ) -> Result<Self> {
-        let mode = args.shared.resolve_modes()?;
+        let modes = args.shared.resolve_modes()?;
         let raw_upload_url = args
             .shared
             .upload_url
@@ -170,7 +177,7 @@ impl Config {
                 .map(|repo| RepositoryOverride::from_arg(repo, args.shared.provider))
                 .transpose()?,
             working_directory: args.shared.working_directory,
-            mode,
+            modes,
             instruments: Instruments { mongodb: None }, // exec doesn't support MongoDB
             perf_unwinding_mode: args.shared.perf_run_args.perf_unwinding_mode,
             enable_perf: args.shared.perf_run_args.enable_perf,
@@ -210,7 +217,7 @@ mod tests {
                 repository: None,
                 provider: None,
                 working_directory: None,
-                mode: Some(RunnerMode::Simulation),
+                mode: vec![RunnerMode::Simulation],
                 simulation_tool: None,
                 profile_folder: None,
                 skip_upload: false,
@@ -250,7 +257,7 @@ mod tests {
                 repository: Some("owner/repo".into()),
                 provider: Some(RepositoryProvider::GitLab),
                 working_directory: Some("/tmp".into()),
-                mode: Some(RunnerMode::Simulation),
+                mode: vec![RunnerMode::Simulation],
                 simulation_tool: None,
                 profile_folder: Some("./codspeed.out".into()),
                 skip_upload: true,
@@ -334,7 +341,7 @@ mod tests {
                 repository: None,
                 provider: None,
                 working_directory: None,
-                mode: Some(RunnerMode::Simulation),
+                mode: vec![RunnerMode::Simulation],
                 simulation_tool: None,
                 profile_folder: None,
                 skip_upload: false,
