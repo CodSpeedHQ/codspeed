@@ -17,7 +17,7 @@ mod poll_results;
 pub const DEFAULT_REPOSITORY_NAME: &str = "local-runs";
 
 const EXEC_HARNESS_COMMAND: &str = "exec-harness";
-const EXEC_HARNESS_VERSION: &str = "1.1.0";
+const EXEC_HARNESS_VERSION: &str = "1.1.1-alpha.1";
 
 /// Wraps a command with exec-harness and the given walltime arguments.
 ///
