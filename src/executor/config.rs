@@ -114,7 +114,7 @@ impl TryFrom<RunArgs> for Config {
     type Error = Error;
     fn try_from(args: RunArgs) -> Result<Self> {
         let instruments = Instruments::try_from(&args)?;
-        let mode = args.shared.resolve_mode()?;
+        let mode = args.shared.resolve_modes()?;
         let raw_upload_url = args
             .shared
             .upload_url
@@ -153,7 +153,7 @@ impl Config {
         args: crate::cli::exec::ExecArgs,
         command: String,
     ) -> Result<Self> {
-        let mode = args.shared.resolve_mode()?;
+        let mode = args.shared.resolve_modes()?;
         let raw_upload_url = args
             .shared
             .upload_url

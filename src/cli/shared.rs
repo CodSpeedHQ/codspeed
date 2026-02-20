@@ -56,7 +56,7 @@ pub struct ExecAndRunSharedArgs {
     /// The mode to run the benchmarks in.
     /// If not provided, the mode will be loaded from the shell session (set via `codspeed use <mode>`).
     #[arg(short, long, value_enum, env = "CODSPEED_RUNNER_MODE")]
-    pub mode: Option<RunnerMode>,
+    pub mode: Vec<RunnerMode>,
 
     /// The Valgrind simulation tool to use (callgrind or tracegrind).
     #[arg(long, value_enum, env = "CODSPEED_SIMULATION_TOOL", hide = true)]
@@ -98,25 +98,26 @@ pub struct ExecAndRunSharedArgs {
 }
 
 impl ExecAndRunSharedArgs {
-    /// Resolves the runner mode from CLI argument, shell session, or returns an error.
+    /// Resolves the runner modes from CLI argument, shell session, or returns an error.
     ///
     /// Priority:
     /// 1. CLI argument (--mode or -m)
     /// 2. Shell session mode (set via `codspeed use <mode>`)
     /// 3. Error if neither is available
-    pub fn resolve_mode(&self) -> Result<RunnerMode> {
-        if let Some(mode) = &self.mode {
-            return Ok(mode.clone());
+    pub fn resolve_modes(&self) -> Result<Vec<RunnerMode>> {
+        if !self.mode.is_empty() {
+            return Ok(self.mode.clone());
         }
 
-        if let Some(mode) = load_shell_session_mode()? {
-            debug!("Loaded mode from shell session: {mode:?}");
-            return Ok(mode);
+        let modes = load_shell_session_mode()?;
+
+        if modes.is_empty() {
+            return Err(anyhow!(
+                "No runner mode specified. Use --mode <mode> or set the mode for this shell session with `codspeed use <mode>`."
+            ));
         }
 
-        Err(anyhow!(
-            "No runner mode specified. Use --mode <mode> or set the mode for this shell session with `codspeed use <mode>`."
-        ))
+        Ok(modes)
     }
 }
 
