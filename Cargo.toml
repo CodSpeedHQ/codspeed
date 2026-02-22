@@ -32,7 +32,7 @@ serde_json = { workspace = true, features = ["preserve_order"] }
 url = "2.4.1"
 sha256 = "1.4.0"
 tokio = { version = "1", features = ["macros", "rt"] }
-tokio-tar = "0.3.1"
+tokio-tar = { package = "astral-tokio-tar", version = "0.5.6" }
 tokio-util = "0.7.16"
 md5 = "0.7.0"
 base64 = "0.21.0"
