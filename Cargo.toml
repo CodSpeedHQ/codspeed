@@ -1,6 +1,6 @@
 [package]
 name = "codspeed-runner"
-version = "4.10.7-alpha.1"
+version = "4.10.7-alpha.2"
 edition = "2024"
 repository = "https://github.com/CodSpeedHQ/codspeed"
 publish = false
