@@ -127,6 +127,7 @@ pub fn parse_for_memmap2<P: AsRef<Path>>(
 }
 
 /// PID filter for parsing perf records
+#[derive(Debug)]
 pub enum PidFilter {
     /// Parse records for all PIDs
     All,
