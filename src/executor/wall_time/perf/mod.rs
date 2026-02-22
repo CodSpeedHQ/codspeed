@@ -4,6 +4,7 @@ use crate::cli::UnwindingMode;
 use crate::executor::Config;
 use crate::executor::helpers::command::CommandBuilder;
 use crate::executor::helpers::env::is_codspeed_debug_enabled;
+use crate::executor::helpers::harvest_perf_maps_for_pids::harvest_perf_maps_for_pids;
 use crate::executor::helpers::run_command_with_log_pipe::run_command_with_log_pipe_and_callback;
 use crate::executor::helpers::run_with_sudo::run_with_sudo;
 use crate::executor::helpers::run_with_sudo::wrap_with_sudo;
@@ -264,6 +265,7 @@ pub struct BenchmarkData {
 pub enum BenchmarkDataSaveError {
     MissingIntegration,
     FailedToParsePerfFile,
+    FailedToHarvestPerfMaps,
     FailedToHarvestJitDumps,
 }
 
@@ -277,12 +279,14 @@ impl BenchmarkData {
 
         let path_ref = path.as_ref();
 
-        debug!("Reading perf data from file for mmap extraction");
         let pid_filter = if self.fifo_data.is_exec_harness() {
             parse_perf_file::PidFilter::All
         } else {
             parse_perf_file::PidFilter::TrackedPids(self.fifo_data.bench_pids.clone())
         };
+
+        debug!("Pid filter for perf file parsing: {pid_filter:?}");
+        debug!("Reading perf data from file for mmap extraction");
         let MemmapRecordsOutput {
             loaded_modules_by_path,
             tracked_pids,
@@ -297,6 +301,12 @@ impl BenchmarkData {
         // maps from /tmp to the profile folder. We have to write our own perf
         // maps to these files AFTERWARDS, otherwise it'll be overwritten!
         debug!("Harvesting perf maps and jit dumps for pids: {tracked_pids:?}");
+        harvest_perf_maps_for_pids(path_ref, &tracked_pids)
+            .await
+            .map_err(|e| {
+                error!("Failed to harvest perf maps: {e}");
+                BenchmarkDataSaveError::FailedToHarvestPerfMaps
+            })?;
         let jit_unwind_data_by_pid =
             jit_dump::save_symbols_and_harvest_unwind_data_for_pids(path_ref, &tracked_pids)
                 .await
