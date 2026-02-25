@@ -48,8 +48,6 @@ insta = { version = "1.46.1", default-features = false }
 test-with = "0.14"
 
 [package.metadata.dist]
-dist = true
-installers = ["shell"]
 targets = ["aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"]
 features = ["libbpf-rs/static"]
 
