@@ -6,7 +6,7 @@ members = ["cargo:."]
 # Whether to consider the binaries in a package for distribution (defaults true)
 dist = true
 # The preferred dist version to use in CI (Cargo.toml SemVer syntax)
-cargo-dist-version = "0.30.3"
+cargo-dist-version = "0.31.0"
 # CI backends to support
 ci = "github"
 # The installers to generate for each app
@@ -32,6 +32,11 @@ local-artifacts-jobs = ["./create-draft-release"]
 # We need this to prevent gh release edit from marking any release as latest, but cargo-dist does not support that customizing this yet
 # https://github.com/axodotdev/cargo-dist/issues/2244
 allow-dirty = ["ci"]
+
+[dist.github-action-commits]
+"actions/checkout" = "de0fac2e4500dabe0009e67214ff5f5447ce83dd" # v6.0.2
+"actions/upload-artifact" = "b7c566a772e6b6bfb58ed0dc250532a479d7789f" # v6.0.0
+"actions/download-artifact" = "37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
 
 [dist.github-custom-runners]
 aarch64-unknown-linux-musl = "codspeedhq-arm64-ubuntu-24.04"
