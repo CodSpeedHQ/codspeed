@@ -5,6 +5,13 @@
 
 
 
+## [4.11.1] - 2026-02-26
+
+### <!-- 7 -->⚙️ Internals
+- Pin all actions (#250) by @art049 in [#250](https://github.com/CodSpeedHQ/runner/pull/250)
+- Bump nix to 0.31.1 (#247) by @3v1n0 in [#247](https://github.com/CodSpeedHQ/runner/pull/247)
+
+
 ## [4.11.0] - 2026-02-23
 
 ### <!-- 0 -->🚀 Features
@@ -25,7 +32,7 @@
 - Use common lib paths for all allocators by @not-matthias
 
 ### <!-- 7 -->⚙️ Internals
-- Bump exec-harness version
+- Bump exec-harness version by @adriencaccia
 - Remove outdated allocator check by @not-matthias in [#241](https://github.com/CodSpeedHQ/runner/pull/241)
 - Add tcmalloc test by @not-matthias
 
@@ -971,6 +978,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[4.11.1]: https://github.com/CodSpeedHQ/runner/compare/v4.11.0..v4.11.1
 [4.11.0]: https://github.com/CodSpeedHQ/runner/compare/v4.10.6..v4.11.0
 [4.10.6]: https://github.com/CodSpeedHQ/runner/compare/v4.10.5..v4.10.6
 [4.10.5]: https://github.com/CodSpeedHQ/runner/compare/v4.10.4..v4.10.5
