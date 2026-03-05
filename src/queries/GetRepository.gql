@@ -3,7 +3,12 @@ query Repository(
   $name: String!
   $provider: RepositoryProvider
 ) {
-  repository(owner: $owner, name: $name, provider: $provider) {
-    id
+  repositoryOverview(owner: $owner, name: $name, provider: $provider) {
+    ... on Repository {
+      id
+    }
+    ... on AvailableRepository {
+      id
+    }
   }
 }
