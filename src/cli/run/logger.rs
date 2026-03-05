@@ -1,11 +1,10 @@
-use crate::executor::ExecutionContext;
 use crate::logger::{GROUP_TARGET, OPENED_GROUP_TARGET};
 use crate::prelude::*;
 use crate::run_environment::RunEnvironmentProvider;
 use log::LevelFilter;
 use simplelog::{CombinedLogger, WriteLogger};
 use std::fs::copy;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 
 pub struct Logger {
@@ -34,11 +33,7 @@ impl Logger {
         Ok(Self { log_file_path })
     }
 
-    pub fn persist_log_to_profile_folder(
-        &self,
-        execution_context: &ExecutionContext,
-    ) -> Result<()> {
-        let profile_folder = execution_context.profile_folder.clone();
+    pub fn persist_log_to_profile_folder(&self, profile_folder: &Path) -> Result<()> {
         let dest_log_file_path = profile_folder.join("runner.log");
         debug!("Persisting log file to {}", dest_log_file_path.display());
         log::logger().flush();

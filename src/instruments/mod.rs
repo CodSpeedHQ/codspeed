@@ -8,12 +8,12 @@ use crate::prelude::*;
 
 pub mod mongo_tracer;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MongoDBConfig {
     pub uri_env_name: Option<String>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Instruments {
     pub mongodb: Option<MongoDBConfig>,
 }

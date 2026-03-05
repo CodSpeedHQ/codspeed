@@ -119,15 +119,11 @@ fn test_cases(#[case] cmd: &str) {}
 fn env_test_cases(#[case] env_case: (&str, &str)) {}
 
 async fn create_test_setup(config: Config) -> (ExecutionContext, TempDir) {
-    use crate::api_client::CodSpeedAPIClient;
-    use crate::config::CodSpeedConfig;
     use crate::executor::config::RepositoryOverride;
     use crate::run_environment::interfaces::RepositoryProvider;
 
     let temp_dir = TempDir::new().unwrap();
 
-    let codspeed_config = CodSpeedConfig::default();
-    let api_client = CodSpeedAPIClient::create_test_client();
     let mut config_with_folder = config;
     config_with_folder.profile_folder = Some(temp_dir.path().to_path_buf());
 
@@ -141,15 +137,12 @@ async fn create_test_setup(config: Config) -> (ExecutionContext, TempDir) {
     }
 
     // Provide a test token so authentication doesn't fail
-    let mut codspeed_config_with_token = codspeed_config;
     if config_with_folder.token.is_none() {
-        codspeed_config_with_token.auth.token = Some("test-token".to_string());
+        config_with_folder.token = Some("test-token".to_string());
     }
 
     let execution_context =
-        ExecutionContext::new(config_with_folder, &codspeed_config_with_token, &api_client)
-            .await
-            .expect("Failed to create ExecutionContext for test");
+        ExecutionContext::new(config_with_folder).expect("Failed to create ExecutionContext");
 
     (execution_context, temp_dir)
 }
@@ -189,7 +182,7 @@ mod valgrind {
 
     fn valgrind_config(command: &str) -> Config {
         Config {
-            mode: RunnerMode::Simulation,
+            modes: vec![RunnerMode::Simulation],
             command: command.to_string(),
             ..Config::test()
         }
@@ -257,7 +250,7 @@ mod walltime {
 
     fn walltime_config(command: &str, enable_perf: bool) -> Config {
         Config {
-            mode: RunnerMode::Walltime,
+            modes: vec![RunnerMode::Walltime],
             command: command.to_string(),
             enable_perf,
             ..Config::test()
@@ -425,7 +418,7 @@ mod memory {
 
     fn memory_config(command: &str) -> Config {
         Config {
-            mode: RunnerMode::Memory,
+            modes: vec![RunnerMode::Memory],
             command: command.to_string(),
             ..Config::test()
         }

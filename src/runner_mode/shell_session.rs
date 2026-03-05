@@ -42,7 +42,7 @@ fn get_mode_file_path(base_dir: &Path, pid: pid_t) -> PathBuf {
     base_dir.join(pid.to_string())
 }
 
-pub(crate) fn register_shell_session_mode(mode: &RunnerMode) -> Result<()> {
+pub(crate) fn register_shell_session_mode(mode: &[RunnerMode]) -> Result<()> {
     let use_mode_dir = get_use_mode_root_dir();
     std::fs::create_dir_all(&use_mode_dir)?;
 
@@ -56,7 +56,7 @@ pub(crate) fn register_shell_session_mode(mode: &RunnerMode) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn load_shell_session_mode() -> Result<Option<RunnerMode>> {
+pub(crate) fn load_shell_session_mode() -> Result<Vec<RunnerMode>> {
     // Go up the process tree until we find a registered mode
     let mut current_pid = std::process::id() as pid_t;
 
@@ -66,12 +66,12 @@ pub(crate) fn load_shell_session_mode() -> Result<Option<RunnerMode>> {
 
         if mode_file_path.exists() {
             let mode_str = std::fs::read_to_string(mode_file_path)?;
-            let mode: RunnerMode = serde_json::from_str(&mode_str)?;
-            return Ok(Some(mode));
+            let mode: Vec<RunnerMode> = serde_json::from_str(&mode_str)?;
+            return Ok(mode);
         }
 
         current_pid = parent_pid;
     }
 
-    Ok(None)
+    Ok(Vec::new())
 }

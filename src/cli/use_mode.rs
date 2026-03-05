@@ -6,9 +6,11 @@ use clap::Args;
 
 #[derive(Debug, Args)]
 pub struct UseArgs {
-    /// Set the CodSpeed runner mode for this shell session. If not provided, the current mode will
-    /// be displayed.
-    pub mode: RunnerMode,
+    /// Set the CodSpeed runner mode(s) for this shell session.
+    /// Multiple modes can be provided as separate arguments (e.g. `simulation walltime`)
+    /// or comma-separated (e.g. `simulation,walltime`).
+    #[arg(value_delimiter = ',', required = true)]
+    pub mode: Vec<RunnerMode>,
 }
 
 pub fn run(args: UseArgs) -> Result<()> {

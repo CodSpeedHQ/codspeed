@@ -59,6 +59,8 @@ impl LocalProvider {
 
         let resolved = Self::resolve_repository(config, api_client, git_context.as_ref()).await?;
 
+        let expected_run_parts_count = config.modes.len() as u32;
+
         Ok(Self {
             repository_provider: resolved.provider,
             owner: resolved.owner,
@@ -68,7 +70,7 @@ impl LocalProvider {
             repository_root_path,
             event: RunEvent::Local,
             run_id: Uuid::new_v4().to_string(),
-            expected_run_parts_count: 1,
+            expected_run_parts_count,
         })
     }
 
@@ -294,6 +296,8 @@ impl RunEnvironmentProvider for LocalProvider {
         })
     }
 
+    /// Not used here because we need the executor_name to generate the run_part_id
+    /// TODO(COD-2009) Change this interface as all providers will add the executor to the run part metadata
     fn get_run_provider_run_part(&self) -> Option<RunPart> {
         None
     }
