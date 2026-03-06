@@ -11,6 +11,8 @@ use crate::{
 use async_compression::tokio::write::GzipEncoder;
 use console::style;
 use reqwest::StatusCode;
+use serde_json::Value;
+use std::collections::BTreeMap;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio_tar::Builder;
@@ -249,6 +251,7 @@ pub async fn upload(
     orchestrator: &Orchestrator,
     execution_context: &ExecutionContext,
     executor_name: ExecutorName,
+    run_part_suffix: BTreeMap<String, Value>,
 ) -> Result<UploadResult> {
     let profile_archive =
         create_profile_archive(&execution_context.profile_folder, executor_name.clone()).await?;
@@ -265,6 +268,7 @@ pub async fn upload(
             &orchestrator.system_info,
             &profile_archive,
             executor_name,
+            run_part_suffix,
         )
         .await?;
     debug!("Upload metadata: {upload_metadata:#?}");
@@ -350,9 +354,16 @@ mod tests {
                     .expect("Failed to create Orchestrator for test");
                 let execution_context =
                     ExecutionContext::new(config).expect("Failed to create ExecutionContext");
-                upload(&orchestrator, &execution_context, ExecutorName::Valgrind)
-                    .await
-                    .unwrap();
+                let run_part_suffix =
+                    BTreeMap::from([("executor".to_string(), Value::from("valgrind"))]);
+                upload(
+                    &orchestrator,
+                    &execution_context,
+                    ExecutorName::Valgrind,
+                    run_part_suffix,
+                )
+                .await
+                .unwrap();
             },
         )
         .await;

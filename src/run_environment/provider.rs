@@ -1,6 +1,8 @@
 use async_trait::async_trait;
 use git2::Repository;
+use serde_json::Value;
 use simplelog::SharedLogger;
+use std::collections::BTreeMap;
 
 use crate::executor::{Config, ExecutorName};
 use crate::prelude::*;
@@ -42,6 +44,41 @@ pub trait RunEnvironmentProvider {
     /// Return the metadata necessary to identify the `RunPart`
     fn get_run_provider_run_part(&self) -> Option<RunPart>;
 
+    /// Build the suffix that differentiates uploads within the same run part.
+    ///
+    /// The suffix is a structured key-value map appended to `run_part_id` via
+    /// [`RunPart::with_suffix`]. `orchestrator_suffix` contains data from the
+    /// orchestrator (e.g. `{"executor": "valgrind"}`).
+    ///
+    /// The default implementation adds a `run-index` to support multiple CLI
+    /// invocations in the same CI job. Providers where each invocation gets a
+    /// fresh `run_id` (e.g. local) should override to skip the run-index.
+    fn build_run_part_suffix(
+        &self,
+        run_part: &RunPart,
+        repository_root_path: &str,
+        orchestrator_suffix: BTreeMap<String, Value>,
+    ) -> BTreeMap<String, Value> {
+        let mut suffix = orchestrator_suffix;
+
+        let run_index_state = RunIndexState::new(
+            repository_root_path,
+            &run_part.run_id,
+            &run_part.run_part_id,
+        );
+        match run_index_state.get_and_increment() {
+            Ok(run_index) => {
+                suffix.insert("run-index".to_string(), Value::from(run_index));
+            }
+            Err(e) => {
+                warn!("Failed to track run index: {e}. Continuing with index 0.");
+                suffix.insert("run-index".to_string(), Value::from(0));
+            }
+        }
+
+        suffix
+    }
+
     /// Get the OIDC audience that must be used when requesting OIDC tokens.
     ///
     /// It will be validated when the token is used to authenticate with CodSpeed.
@@ -69,47 +106,27 @@ pub trait RunEnvironmentProvider {
 
     /// Returns the metadata necessary for uploading results to CodSpeed.
     ///
-    /// # Arguments
-    ///
-    /// * `config` - A reference to the configuration.
-    /// * `archive_hash` - The hash of the archive to be uploaded.
-    /// * `instruments` - A reference to the active instruments.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let provider = MyCIProvider::new();
-    /// let config = Config::new();
-    /// let instruments = Instruments::new();
-    /// let metadata = provider.get_upload_metadata(&config, "abc123").await.unwrap();
-    /// ```
+    /// `orchestrator_run_part_suffix` is structured data from the orchestrator used to differentiate
+    /// uploads within the same run (e.g. `{"executor": "valgrind"}`).
     async fn get_upload_metadata(
         &self,
         config: &Config,
         system_info: &SystemInfo,
         profile_archive: &ProfileArchive,
         executor_name: ExecutorName,
+        orchestrator_run_part_suffix: BTreeMap<String, Value>,
     ) -> Result<UploadMetadata> {
         let run_environment_metadata = self.get_run_environment_metadata()?;
 
         let commit_hash = self.get_commit_hash(&run_environment_metadata.repository_root_path)?;
 
-        // Apply run index suffix to run_part if applicable.
-        // This differentiates multiple uploads within the same CI job execution
-        // (e.g., running both simulation and memory benchmarks in the same job).
         let run_part = self.get_run_provider_run_part().map(|run_part| {
-            let run_index_state = RunIndexState::new(
+            let suffix = self.build_run_part_suffix(
+                &run_part,
                 &run_environment_metadata.repository_root_path,
-                &run_part.run_id,
-                &run_part.run_part_id,
+                orchestrator_run_part_suffix,
             );
-            match run_index_state.get_and_increment() {
-                Ok(run_index) => run_part.with_run_index(run_index),
-                Err(e) => {
-                    warn!("Failed to track run index: {e}. Continuing with index 0.");
-                    run_part.with_run_index(0)
-                }
-            }
+            run_part.with_suffix(suffix)
         });
 
         Ok(UploadMetadata {

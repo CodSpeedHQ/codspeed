@@ -5,8 +5,8 @@ use uuid::Uuid;
 
 use crate::api_client::{CodSpeedAPIClient, GetOrCreateProjectRepositoryVars, GetRepositoryVars};
 use crate::cli::run::helpers::{GitRemote, find_repository_root, parse_git_remote};
+use crate::executor::Config;
 use crate::executor::config::RepositoryOverride;
-use crate::executor::{Config, ExecutorName};
 use crate::local_logger::get_local_logger;
 use crate::prelude::*;
 use crate::run_environment::interfaces::{
@@ -14,8 +14,8 @@ use crate::run_environment::interfaces::{
 };
 use crate::run_environment::provider::{RunEnvironmentDetector, RunEnvironmentProvider};
 use crate::run_environment::{RunEnvironment, RunPart};
-use crate::system::SystemInfo;
-use crate::upload::{LATEST_UPLOAD_METADATA_VERSION, ProfileArchive, Runner, UploadMetadata};
+use serde_json::Value;
+use std::collections::BTreeMap;
 
 static FAKE_COMMIT_REF: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
@@ -246,7 +246,9 @@ impl RunEnvironmentProvider for LocalProvider {
             event: self.event.clone(),
             gh_data: None,
             gl_data: None,
-            local_data: None,
+            local_data: Some(LocalData {
+                expected_run_parts_count: self.expected_run_parts_count,
+            }),
             sender: None,
             owner: self.owner.clone(),
             repository: self.repository.clone(),
@@ -255,51 +257,23 @@ impl RunEnvironmentProvider for LocalProvider {
         })
     }
 
-    async fn get_upload_metadata(
-        &self,
-        config: &Config,
-        system_info: &SystemInfo,
-        profile_archive: &ProfileArchive,
-        executor_name: ExecutorName,
-    ) -> Result<UploadMetadata> {
-        let mut run_environment_metadata = self.get_run_environment_metadata()?;
-
-        run_environment_metadata.local_data = Some(LocalData {
-            expected_run_parts_count: self.expected_run_parts_count,
-        });
-
-        let run_part = Some(RunPart {
+    fn get_run_provider_run_part(&self) -> Option<RunPart> {
+        Some(RunPart {
             run_id: self.run_id.clone(),
-            run_part_id: executor_name.to_string(),
+            run_part_id: "local-job".into(),
             job_name: "local-job".into(),
             metadata: Default::default(),
-        });
-
-        Ok(UploadMetadata {
-            version: Some(LATEST_UPLOAD_METADATA_VERSION),
-            tokenless: config.token.is_none(),
-            repository_provider: self.repository_provider.clone(),
-            commit_hash: run_environment_metadata.ref_.clone(),
-            allow_empty: config.allow_empty,
-            run_environment_metadata,
-            profile_md5: profile_archive.hash.clone(),
-            profile_encoding: profile_archive.content.encoding(),
-            runner: Runner {
-                name: "codspeed-runner".into(),
-                version: crate::VERSION.into(),
-                instruments: config.instruments.get_active_instrument_names(),
-                executor: executor_name,
-                system_info: system_info.clone(),
-            },
-            run_environment: self.get_run_environment(),
-            run_part,
         })
     }
 
-    /// Not used here because we need the executor_name to generate the run_part_id
-    /// TODO(COD-2009) Change this interface as all providers will add the executor to the run part metadata
-    fn get_run_provider_run_part(&self) -> Option<RunPart> {
-        None
+    /// Local runs don't need run-index because each invocation gets a fresh `run_id`.
+    fn build_run_part_suffix(
+        &self,
+        _run_part: &RunPart,
+        _repository_root_path: &str,
+        orchestrator_suffix: BTreeMap<String, Value>,
+    ) -> BTreeMap<String, Value> {
+        orchestrator_suffix
     }
 }
 

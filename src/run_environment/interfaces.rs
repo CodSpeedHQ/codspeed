@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::collections::BTreeMap;
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Default)]
@@ -99,14 +99,21 @@ pub struct RunPart {
 }
 
 impl RunPart {
-    /// Returns a new `RunPart` with the run index suffix appended to `run_part_id`.
+    /// Returns a new `RunPart` with the given suffix appended to `run_part_id`.
     ///
-    /// This is used to differentiate multiple uploads within the same CI job execution.
-    /// The suffix follows the same structured format as other metadata: `-{"run-index":N}`
-    pub fn with_run_index(mut self, run_index: u32) -> Self {
-        self.run_part_id = format!("{}-{{\"run-index\":{}}}", self.run_part_id, run_index);
-        self.metadata
-            .insert("run-index".to_string(), json!(run_index));
+    /// The suffix is a structured key-value map that gets:
+    /// - serialized as JSON and appended to `run_part_id` (e.g. `job_name-{"executor":"valgrind","run-index":0}`)
+    /// - merged into the `metadata` field
+    ///
+    /// This is used to differentiate multiple uploads within the same run
+    /// (e.g., different executors, or multiple invocations in the same CI job).
+    pub fn with_suffix(mut self, suffix: BTreeMap<String, Value>) -> Self {
+        if suffix.is_empty() {
+            return self;
+        }
+        let suffix_str = serde_json::to_string(&suffix).expect("Unable to serialize suffix");
+        self.run_part_id = format!("{}-{}", self.run_part_id, suffix_str);
+        self.metadata.extend(suffix);
         self
     }
 }

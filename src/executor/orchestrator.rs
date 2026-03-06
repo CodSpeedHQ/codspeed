@@ -7,6 +7,8 @@ use crate::run_environment::{self, RunEnvironment, RunEnvironmentProvider};
 use crate::runner_mode::RunnerMode;
 use crate::system::{self, SystemInfo};
 use crate::upload::{UploadResult, upload};
+use serde_json::Value;
+use std::collections::BTreeMap;
 use std::path::Path;
 
 /// Shared orchestration state created once per CLI invocation.
@@ -112,6 +114,15 @@ impl Orchestrator {
         Ok(())
     }
 
+    /// Build the structured suffix that differentiates this upload within the run.
+    /// This is a temporary implementation
+    fn build_run_part_suffix(executor_name: &ExecutorName) -> BTreeMap<String, Value> {
+        BTreeMap::from([(
+            "executor".to_string(),
+            Value::from(executor_name.to_string()),
+        )])
+    }
+
     pub async fn upload_all(
         &self,
         completed_runs: &mut [(ExecutionContext, ExecutorName)],
@@ -128,7 +139,8 @@ impl Orchestrator {
             if total_runs > 1 {
                 info!("Uploading results for {executor_name:?} executor");
             }
-            let upload_result = upload(self, ctx, executor_name.clone()).await?;
+            let run_part_suffix = Self::build_run_part_suffix(executor_name);
+            let upload_result = upload(self, ctx, executor_name.clone(), run_part_suffix).await?;
             last_upload_result = Some(upload_result);
         }
         info!("Performance data uploaded");
