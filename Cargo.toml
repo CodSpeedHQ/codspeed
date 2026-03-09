@@ -53,9 +53,10 @@ async-trait = "0.1.82"
 libc = { workspace = true }
 bincode = "1.3.3"
 object = "0.36.7"
-linux-perf-data = { git = "https://github.com/CodSpeedHQ/linux-perf-data.git", rev = "e8c0ed51c2762b660708f8086e76a28449ef976c", features = [
-    "zstd",
-] } # feat: support zstd compressed records
+# linux-perf-data = { git = "https://github.com/CodSpeedHQ/linux-perf-data.git", rev = "e8c0ed51c2762b660708f8086e76a28449ef976c", features = [
+#     "zstd",
+# ] } # feat: support zstd compressed records
+linux-perf-data = { path = "../linux-perf-data/", features = ["zstd"] }
 debugid = "0.8.0"
 memmap2 = "0.9.5"
 nix = { version = "0.31.1", features = ["fs", "time", "user"] }

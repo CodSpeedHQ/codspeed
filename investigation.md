@@ -13,7 +13,10 @@ Failed to read record at index 3423125: The specified size in the perf event hea
 ```
 (`perf script` also fails with the same kind of error.)
 
-The `record_index` in the panic (3,423,125) counts **EventRecords successfully returned by the sorter** before the failure — it is incremented only after a successful `EventRecord` yield (line 76), not during reading. Because the sorter buffers records internally between `FINISHED_ROUND` markers, there is no direct mapping between this index and the raw file offset. **We cannot confirm from the index alone that the bad raw record at `0x8b14e410` is the one causing the panic** — it is the first invalid record found by raw scan, but there may be others, and the sorter's buffering adds indirection.
+The `record_index` in the panic (3,423,125) counts **EventRecords successfully returned by the sorter** before the failure. Confirmed via two independent methods:
+
+1. **`src/bin/count_event_records.rs`**: running the actual `linux-perf-data` library and counting EventRecords until the first error yields exactly 3,423,125.
+2. **Instrumented library log**: adding an `eprintln!` in `linux-perf-data/src/file_reader.rs` at the `InvalidPerfEventSize` error site reports `read_offset=0x8b14cd00`. This is a relative offset (from after the pipe header + metadata records). Converting to absolute: `16 (pipe header) + 5888 (metadata) + 0x8b14cd00 = 0x8b14e410` — exactly the raw file offset our scanner found. **The bad record is definitively the same one.**
 
 ## Root Cause Hypothesis
 
