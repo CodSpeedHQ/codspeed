@@ -17,18 +17,19 @@
 
 5. **`PERF_RECORD_COMPRESSED2` was introduced in kernel v6.16** (commit `208c0e168344`). Kernel 6.5 (Ubuntu 22.04) only has `PERF_RECORD_COMPRESSED` (type 81), which doesn't hit this overflow. _(Verified via `git log`/`git show` on kernel tags.)_
 
-6. **No valid perf record header exists at `offset + 65536`** (the expected next record if `data_size` is correct). The bytes there are garbage. _(Verified by hex dump.)_
+6. **The overflow always produces `size=0`, never a small nonzero value.** `output.pos` is capped at `max_record_size` = 65,519, so `compressed` ∈ [16, 65535]. `PERF_ALIGN` maps [65529, 65535] → 65536, and everything ≤ 65528 stays ≤ 65528. `(u16)65536 = 0` is the only possible overflow. _(Verified by C test program exercising all values.)_
 
-7. **A workaround exists in `linux-perf-data/src/file_reader.rs:478-516`** that detects `size==0 && type==COMPRESSED2`, reads `data_size`, reconstructs the record body, and passes it to decompression. _(Code exists but has not been validated against the test file — see hypotheses.)_
+7. **The padding write fails silently — no garbage is injected.** Line 673: `padding = header.size - compressed` → `0 - 65535` underflows to `~0`. `record__write` calls `writen(fd, &pad, ~0)` which fails (EFAULT from writing past valid memory). `record__pushfn` returns 1 (via `||`), but `perf_mmap__push` only checks `< 0`, so perf continues normally. The first `record__write(bf, compressed)` wrote exactly 65,535 bytes (header + data_size + compressed payload). _(Verified by code tracing through `record__pushfn` → `perf_mmap__push`.)_
+
+8. **The next valid record is at `offset + 65535` (not `offset + 65536`).** At `0x8b15e40f` = `0x8b14e410 + 65535`: a valid COMPRESSED2 (size=33168), followed by FINISHED_ROUND (size=8), followed by 20+ consecutive valid records. At `0x8b15e410` = `offset + 65536`: garbage (the first byte of that valid record is misaligned by 1). _(Verified by scanning the file and walking the record chain.)_
+
+9. **The on-disk record is NOT 8-byte aligned.** Since the padding write failed, the actual bytes written were `compressed` = 65,535 (not `PERF_ALIGN(65535, 8)` = 65,536). The 1-byte difference means the workaround must skip `8 + data_size` bytes after the header (= 65,527), NOT `aligned_size` (= 65,528). _(Direct consequence of facts #7 and #8.)_
+
+10. **A workaround exists in `linux-perf-data/src/file_reader.rs:478-516`** but it has a bug: it reads `padding` = `aligned_size - total_size` = 1 extra byte, consuming the first byte of the next valid record and desynchronizing the stream. _(Code review: lines 493-506 compute and read alignment padding that was never written to disk.)_
 
 ## Hypotheses (unvalidated)
 
-1. **The workaround actually recovers the file.** The code reads `data_size` bytes of compressed payload and decompresses. But fact #6 shows garbage at the expected next-record offset. Either:
-   - The compressed payload decompresses fine but the _following_ record is corrupted too (pipe-mode stream corruption beyond this point), or
-   - `data_size=65519` is itself wrong and the read overshoots/undershoots, desynchronizing the stream.
-   - **Status: untested.** Need to run the workaround on the test file.
-
-2. **Only `size=0` overflows occur.** Any `compressed` in [65529, 65534] would produce a small nonzero `size` (8–48) that passes `size >= 8` but points to wrong data. We haven't scanned for such records.
+1. **Fixing the workaround to skip 0 padding bytes will recover the file.** The compressed payload (65,519 bytes at `data_size`) should decompress successfully, and after skipping exactly `8 + 8 + data_size` bytes from the header start (no alignment padding), the stream should resynchronize. **Status: untested.**
 
 ## Proposed fixes
 
