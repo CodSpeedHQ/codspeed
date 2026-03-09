@@ -41,6 +41,18 @@ pub fn get_base_injected_env(
         ),
     ]);
 
+    // Java: Enable frame pointers and perf map generation for flamegraph profiling.
+    // - UnlockDiagnosticVMOptions must come before DumpPerfMapAtExit (diagnostic option).
+    // - PreserveFramePointer: Preserves frame pointers for profiling.
+    // - DumpPerfMapAtExit: Writes /tmp/perf-<pid>.map on JVM exit for symbol resolution.
+    // - DebugNonSafepoints: Enables debug info for JIT-compiled non-safepoint code.
+    if mode == RunnerMode::Walltime {
+        env.insert(
+            "JAVA_TOOL_OPTIONS",
+            "-XX:+PreserveFramePointer -XX:+UnlockDiagnosticVMOptions -XX:+DumpPerfMapAtExit -XX:+DebugNonSafepoints".into(),
+        );
+    }
+
     if let Some(version) = &config.go_runner_version {
         env.insert("CODSPEED_GO_RUNNER_VERSION", version.to_string());
     }
