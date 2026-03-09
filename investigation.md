@@ -7,30 +7,28 @@
 
 ## Confirmed facts
 
-1. **The parser panics at record index 3,423,125** with `InvalidPerfEventSize`. `perf script` also fails on this file. *(Verified via `count_event_records.rs` and instrumented library log.)*
+1. **The parser panics at record index 3,423,125** with `InvalidPerfEventSize`. `perf script` also fails on this file. _(Verified via `count_event_records.rs` and instrumented library log.)_
 
-2. **A `PERF_RECORD_COMPRESSED2` record at offset `0x8b14e410` has `size=0`.** Raw bytes: `type=83, misc=0, size=0`. The next 8 bytes (`data_size`) are `0xffef` = 65,519. *(Verified by raw hex dump and independent library instrumentation matching the same offset.)*
+2. **A `PERF_RECORD_COMPRESSED2` record at offset `0x8b14e410` has `size=0`.** Raw bytes: `type=83, misc=0, size=0`. The next 8 bytes (`data_size`) are `0xffef` = 65,519. _(Verified by raw hex dump and independent library instrumentation matching the same offset.)_
 
-3. **All 417,241 valid COMPRESSED2 records satisfy `size == PERF_ALIGN(16 + data_size, 8)`.** The bad record is the only one that breaks this invariant. *(Verified by full-file scan.)*
+3. **All 417,241 valid COMPRESSED2 records satisfy `size == PERF_ALIGN(16 + data_size, 8)`.** The bad record is the only one that breaks this invariant. _(Verified by full-file scan.)_
 
-4. **Kernel source (`tools/perf/builtin-record.c:672`) assigns `PERF_ALIGN(compressed, sizeof(u64))` to `header.size` (`__u16`).** The cap `max_record_size = 65536 - 16 - 1 = 65519` allows `compressed` up to 65,535. `PERF_ALIGN(65535, 8) = 65536`, which truncates to 0 in `__u16`. *(Verified from local kernel source.)*
+4. **Kernel source (`tools/perf/builtin-record.c:672`) assigns `PERF_ALIGN(compressed, sizeof(u64))` to `header.size` (`__u16`).** The cap `max_record_size = 65536 - 16 - 1 = 65519` allows `compressed` up to 65,535. `PERF_ALIGN(65535, 8) = 65536`, which truncates to 0 in `__u16`. _(Verified from local kernel source.)_
 
-5. **`PERF_RECORD_COMPRESSED2` was introduced in kernel v6.16** (commit `208c0e168344`). Kernel 6.5 (Ubuntu 22.04) only has `PERF_RECORD_COMPRESSED` (type 81), which doesn't hit this overflow. *(Verified via `git log`/`git show` on kernel tags.)*
+5. **`PERF_RECORD_COMPRESSED2` was introduced in kernel v6.16** (commit `208c0e168344`). Kernel 6.5 (Ubuntu 22.04) only has `PERF_RECORD_COMPRESSED` (type 81), which doesn't hit this overflow. _(Verified via `git log`/`git show` on kernel tags.)_
 
-6. **No valid perf record header exists at `offset + 65536`** (the expected next record if `data_size` is correct). The bytes there are garbage. *(Verified by hex dump.)*
+6. **No valid perf record header exists at `offset + 65536`** (the expected next record if `data_size` is correct). The bytes there are garbage. _(Verified by hex dump.)_
 
-7. **A workaround exists in `linux-perf-data/src/file_reader.rs:478-516`** that detects `size==0 && type==COMPRESSED2`, reads `data_size`, reconstructs the record body, and passes it to decompression. *(Code exists but has not been validated against the test file — see hypotheses.)*
+7. **A workaround exists in `linux-perf-data/src/file_reader.rs:478-516`** that detects `size==0 && type==COMPRESSED2`, reads `data_size`, reconstructs the record body, and passes it to decompression. _(Code exists but has not been validated against the test file — see hypotheses.)_
 
 ## Hypotheses (unvalidated)
 
 1. **The workaround actually recovers the file.** The code reads `data_size` bytes of compressed payload and decompresses. But fact #6 shows garbage at the expected next-record offset. Either:
-   - The compressed payload decompresses fine but the *following* record is corrupted too (pipe-mode stream corruption beyond this point), or
+   - The compressed payload decompresses fine but the _following_ record is corrupted too (pipe-mode stream corruption beyond this point), or
    - `data_size=65519` is itself wrong and the read overshoots/undershoots, desynchronizing the stream.
    - **Status: untested.** Need to run the workaround on the test file.
 
 2. **Only `size=0` overflows occur.** Any `compressed` in [65529, 65534] would produce a small nonzero `size` (8–48) that passes `size >= 8` but points to wrong data. We haven't scanned for such records.
-
-3. **The bug is rare enough to be non-blocking.** It hit once in 417K records. We don't know the probability across different workloads.
 
 ## Proposed fixes
 
