@@ -1,7 +1,7 @@
-use crate::executor::Config;
+use crate::executor::ExecutorConfig;
 use crate::prelude::*;
 
-pub fn get_bench_command(config: &Config) -> Result<String> {
+pub fn get_bench_command(config: &ExecutorConfig) -> Result<String> {
     let bench_command = &config.command.trim();
 
     if bench_command.is_empty() {
@@ -19,7 +19,7 @@ mod tests {
 
     #[test]
     fn test_get_bench_command_empty() {
-        let config = Config::test();
+        let config = ExecutorConfig::test();
         assert!(get_bench_command(&config).is_err());
         assert_eq!(
             get_bench_command(&config).unwrap_err().to_string(),
@@ -29,16 +29,16 @@ mod tests {
 
     #[test]
     fn test_get_bench_command_cargo() {
-        let config = Config {
+        let config = ExecutorConfig {
             command: "cargo codspeed bench".into(),
-            ..Config::test()
+            ..ExecutorConfig::test()
         };
         assert_eq!(get_bench_command(&config).unwrap(), "cargo-codspeed bench");
     }
 
     #[test]
     fn test_get_bench_command_multiline() {
-        let config = Config {
+        let config = ExecutorConfig {
             // TODO: use indoc! macro
             command: r#"
 cargo codspeed bench --features "foo bar"
@@ -46,7 +46,7 @@ pnpm vitest bench "my-app"
 pytest tests/ --codspeed
 "#
             .into(),
-            ..Config::test()
+            ..ExecutorConfig::test()
         };
         assert_eq!(
             get_bench_command(&config).unwrap(),

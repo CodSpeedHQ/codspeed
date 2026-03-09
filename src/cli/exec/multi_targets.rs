@@ -66,19 +66,41 @@ fn walltime_options_to_args(
     }
 }
 
-/// Build a command that pipes targets JSON to exec-harness via stdin
+/// Build a shell command string that pipes targets JSON to exec-harness via stdin
 pub fn build_pipe_command(
     targets: &[Target],
     default_walltime: Option<&WalltimeOptions>,
-) -> Result<Vec<String>> {
+) -> Result<String> {
     let json = targets_to_exec_harness_json(targets, default_walltime)?;
-    // Use a heredoc to safely pass the JSON to exec-harness
-    Ok(vec![
-        EXEC_HARNESS_COMMAND.to_owned(),
-        "-".to_owned(),
-        "<<".to_owned(),
-        "'CODSPEED_EOF'\n".to_owned(),
-        json,
-        "\nCODSPEED_EOF".to_owned(),
-    ])
+    Ok(build_pipe_command_from_json(&json))
+}
+
+/// Build a shell command string that pipes BenchmarkTarget::Exec variants to exec-harness via stdin
+pub fn build_exec_targets_pipe_command(
+    targets: &[&crate::executor::config::BenchmarkTarget],
+) -> Result<String> {
+    let inputs: Vec<BenchmarkCommand> = targets
+        .iter()
+        .map(|target| match target {
+            crate::executor::config::BenchmarkTarget::Exec {
+                command,
+                name,
+                walltime_args,
+            } => Ok(BenchmarkCommand {
+                command: command.clone(),
+                name: name.clone(),
+                walltime_args: walltime_args.clone(),
+            }),
+            crate::executor::config::BenchmarkTarget::Entrypoint { .. } => {
+                bail!("Entrypoint targets cannot be used with exec-harness pipe command")
+            }
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let json = serde_json::to_string(&inputs).context("Failed to serialize targets to JSON")?;
+    Ok(build_pipe_command_from_json(&json))
+}
+
+fn build_pipe_command_from_json(json: &str) -> String {
+    format!("{EXEC_HARNESS_COMMAND} - <<'CODSPEED_EOF'\n{json}\nCODSPEED_EOF")
 }

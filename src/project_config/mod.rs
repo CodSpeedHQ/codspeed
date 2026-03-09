@@ -406,4 +406,33 @@ options:
         let config = ProjectConfig::discover_and_load(None, temp_dir.path()).unwrap();
         assert!(config.is_none());
     }
+
+    #[test]
+    fn test_deserialize_exec_target() {
+        let yaml = r#"
+benchmarks:
+  - exec: ls -al /nix/store
+  - name: my exec benchmark
+    exec: ./my_binary
+    options:
+      warmup-time: 1s
+"#;
+        let config: ProjectConfig = serde_yaml::from_str(yaml).unwrap();
+        let benchmarks = config.benchmarks.unwrap();
+        assert_eq!(benchmarks.len(), 2);
+
+        assert_eq!(benchmarks[0].exec, "ls -al /nix/store");
+        assert!(benchmarks[0].name.is_none());
+
+        assert_eq!(benchmarks[1].exec, "./my_binary");
+        assert_eq!(benchmarks[1].name, Some("my exec benchmark".to_string()));
+        let walltime = benchmarks[1]
+            .options
+            .as_ref()
+            .unwrap()
+            .walltime
+            .as_ref()
+            .unwrap();
+        assert_eq!(walltime.warmup_time, Some("1s".to_string()));
+    }
 }

@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::env;
 
 use crate::cli::run::helpers::get_env_variable;
-use crate::executor::Config;
+use crate::executor::config::{ExecutorConfig, OrchestratorConfig};
 use crate::prelude::*;
 use crate::run_environment::interfaces::{
     GlData, RepositoryProvider, RunEnvironment, RunEnvironmentMetadata, RunEvent, Sender,
@@ -27,9 +27,9 @@ pub struct GitLabCIProvider {
     repository_root_path: String,
 }
 
-impl TryFrom<&Config> for GitLabCIProvider {
+impl TryFrom<&OrchestratorConfig> for GitLabCIProvider {
     type Error = Error;
-    fn try_from(config: &Config) -> Result<Self> {
+    fn try_from(config: &OrchestratorConfig) -> Result<Self> {
         if config.repository_override.is_some() {
             bail!("Specifying owner and repository from CLI is not supported for GitLab CI");
         }
@@ -187,7 +187,7 @@ impl RunEnvironmentProvider for GitLabCIProvider {
     /// See:
     /// - https://docs.gitlab.com/integration/openid_connect_provider/
     /// - https://docs.gitlab.com/ci/secrets/id_token_authentication/
-    async fn set_oidc_token(&self, _config: &mut Config) -> Result<()> {
+    async fn set_oidc_token(&self, _config: &mut ExecutorConfig) -> Result<()> {
         Ok(())
     }
 }
@@ -224,9 +224,9 @@ mod tests {
                 ("CI_COMMIT_REF_NAME", Some("main")),
             ],
             || {
-                let config = Config {
+                let config = OrchestratorConfig {
                     token: Some("token".into()),
-                    ..Config::test()
+                    ..OrchestratorConfig::test()
                 };
                 let gitlab_ci_provider = GitLabCIProvider::try_from(&config).unwrap();
                 let run_environment_metadata =
@@ -271,9 +271,9 @@ mod tests {
                 ),
             ],
             || {
-                let config = Config {
+                let config = OrchestratorConfig {
                     token: Some("token".into()),
-                    ..Config::test()
+                    ..OrchestratorConfig::test()
                 };
                 let gitlab_ci_provider = GitLabCIProvider::try_from(&config).unwrap();
                 let run_environment_metadata =
@@ -318,9 +318,9 @@ mod tests {
                 ),
             ],
             || {
-                let config = Config {
+                let config = OrchestratorConfig {
                     token: Some("token".into()),
-                    ..Config::test()
+                    ..OrchestratorConfig::test()
                 };
                 let gitlab_ci_provider = GitLabCIProvider::try_from(&config).unwrap();
                 let run_environment_metadata =

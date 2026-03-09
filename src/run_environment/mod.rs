@@ -9,7 +9,7 @@ use local::LocalProvider;
 use provider::RunEnvironmentDetector;
 
 use crate::api_client::CodSpeedAPIClient;
-use crate::executor::Config;
+use crate::executor::config::OrchestratorConfig;
 use crate::prelude::*;
 
 pub use self::interfaces::*;
@@ -22,7 +22,7 @@ mod gitlab_ci;
 mod local;
 
 pub async fn get_provider(
-    config: &Config,
+    config: &OrchestratorConfig,
     api_client: &CodSpeedAPIClient,
 ) -> Result<Box<dyn RunEnvironmentProvider>> {
     let mut provider: Box<dyn RunEnvironmentProvider> = {

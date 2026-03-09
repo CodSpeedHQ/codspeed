@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::api_client::{CodSpeedAPIClient, GetOrCreateProjectRepositoryVars, GetRepositoryVars};
 use crate::cli::run::helpers::{GitRemote, find_repository_root, parse_git_remote};
-use crate::executor::Config;
+use crate::executor::config::OrchestratorConfig;
 use crate::executor::config::RepositoryOverride;
 use crate::local_logger::get_local_logger;
 use crate::prelude::*;
@@ -48,7 +48,7 @@ struct ResolvedRepository {
 }
 
 impl LocalProvider {
-    pub async fn new(config: &Config, api_client: &CodSpeedAPIClient) -> Result<Self> {
+    pub async fn new(config: &OrchestratorConfig, api_client: &CodSpeedAPIClient) -> Result<Self> {
         let current_dir = std::env::current_dir()?;
         let git_context = Self::find_git_context(&current_dir);
 
@@ -86,7 +86,7 @@ impl LocalProvider {
 
     /// Resolve repository information from override, git remote, or API fallback
     async fn resolve_repository(
-        config: &Config,
+        config: &OrchestratorConfig,
         api_client: &CodSpeedAPIClient,
         git_context: Option<&GitContext>,
     ) -> Result<ResolvedRepository> {
@@ -352,9 +352,9 @@ mod tests {
     // TODO: uncomment later when we have a way to mock git repository
     // #[test]
     // fn test_provider_metadata() {
-    //     let config = Config {
+    //     let config = OrchestratorConfig {
     //         token: Some("token".into()),
-    //         ..Config::test()
+    //         ..OrchestratorConfig::test()
     //     };
     //     let local_provider = LocalProvider::try_from(&config).unwrap();
     //     let provider_metadata = local_provider.get_provider_metadata().unwrap();

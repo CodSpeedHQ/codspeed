@@ -1,7 +1,6 @@
-use super::Config;
+use super::ExecutorConfig;
 use crate::executor::ExecutionContext;
 use crate::executor::Executor;
-use crate::runner_mode::RunnerMode;
 use crate::system::SystemInfo;
 use rstest_reuse::{self, *};
 use shell_quote::{Bash, QuoteRefExt};
@@ -118,23 +117,11 @@ fn test_cases(#[case] cmd: &str) {}
 #[case(ENV_TESTS[7])]
 fn env_test_cases(#[case] env_case: (&str, &str)) {}
 
-async fn create_test_setup(config: Config) -> (ExecutionContext, TempDir) {
-    use crate::executor::config::RepositoryOverride;
-    use crate::run_environment::interfaces::RepositoryProvider;
-
+async fn create_test_setup(config: ExecutorConfig) -> (ExecutionContext, TempDir) {
     let temp_dir = TempDir::new().unwrap();
 
     let mut config_with_folder = config;
     config_with_folder.profile_folder = Some(temp_dir.path().to_path_buf());
-
-    // Provide a repository override so tests don't need a git repository
-    if config_with_folder.repository_override.is_none() {
-        config_with_folder.repository_override = Some(RepositoryOverride {
-            owner: "test-owner".to_string(),
-            repository: "test-repo".to_string(),
-            repository_provider: RepositoryProvider::GitHub,
-        });
-    }
 
     // Provide a test token so authentication doesn't fail
     if config_with_folder.token.is_none() {
@@ -180,11 +167,10 @@ mod valgrind {
         (_lock, executor)
     }
 
-    fn valgrind_config(command: &str) -> Config {
-        Config {
-            modes: vec![RunnerMode::Simulation],
+    fn valgrind_config(command: &str) -> ExecutorConfig {
+        ExecutorConfig {
             command: command.to_string(),
-            ..Config::test()
+            ..ExecutorConfig::test()
         }
     }
 
@@ -248,12 +234,11 @@ mod walltime {
         (permit, WallTimeExecutor::new())
     }
 
-    fn walltime_config(command: &str, enable_perf: bool) -> Config {
-        Config {
-            modes: vec![RunnerMode::Walltime],
+    fn walltime_config(command: &str, enable_perf: bool) -> ExecutorConfig {
+        ExecutorConfig {
             command: command.to_string(),
             enable_perf,
-            ..Config::test()
+            ..ExecutorConfig::test()
         }
     }
 
@@ -416,11 +401,10 @@ mod memory {
         (permit, _lock, MemoryExecutor)
     }
 
-    fn memory_config(command: &str) -> Config {
-        Config {
-            modes: vec![RunnerMode::Memory],
+    fn memory_config(command: &str) -> ExecutorConfig {
+        ExecutorConfig {
             command: command.to_string(),
-            ..Config::test()
+            ..ExecutorConfig::test()
         }
     }
 

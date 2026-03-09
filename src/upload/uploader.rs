@@ -1,5 +1,5 @@
-use crate::executor::Config;
 use crate::executor::ExecutionContext;
+use crate::executor::ExecutorConfig;
 use crate::executor::ExecutorName;
 use crate::executor::Orchestrator;
 use crate::run_environment::RunEnvironment;
@@ -122,11 +122,12 @@ async fn create_profile_archive(
 }
 
 async fn retrieve_upload_data(
-    config: &Config,
+    orchestrator: &Orchestrator,
+    config: &ExecutorConfig,
     upload_metadata: &UploadMetadata,
 ) -> Result<UploadData> {
     let mut upload_request = REQUEST_CLIENT
-        .post(config.upload_url.clone())
+        .post(orchestrator.config.upload_url.clone())
         .json(&upload_metadata);
     if !upload_metadata.tokenless {
         upload_request = upload_request.header("Authorization", config.token.clone().unwrap());
@@ -278,7 +279,8 @@ pub async fn upload(
     }
 
     debug!("Preparing upload...");
-    let upload_data = retrieve_upload_data(&execution_context.config, &upload_metadata).await?;
+    let upload_data =
+        retrieve_upload_data(orchestrator, &execution_context.config, &upload_metadata).await?;
     debug!("runId: {}", upload_data.run_id);
 
     debug!(
@@ -308,15 +310,25 @@ mod tests {
     #[ignore]
     #[tokio::test]
     async fn test_upload() {
-        let mut config = Config {
-            command: "pytest tests/ --codspeed".into(),
+        use crate::executor::OrchestratorConfig;
+
+        let orchestrator_config = OrchestratorConfig {
             upload_url: Url::parse("change me").unwrap(),
             token: Some("change me".into()),
             profile_folder: Some(PathBuf::from(format!(
                 "{}/src/uploader/samples/adrien-python-test",
                 env!("CARGO_MANIFEST_DIR")
             ))),
-            ..Config::test()
+            ..OrchestratorConfig::test()
+        };
+        let executor_config = ExecutorConfig {
+            command: "pytest tests/ --codspeed".into(),
+            token: Some("change me".into()),
+            profile_folder: Some(PathBuf::from(format!(
+                "{}/src/uploader/samples/adrien-python-test",
+                env!("CARGO_MANIFEST_DIR")
+            ))),
+            ..ExecutorConfig::test()
         };
         async_with_vars(
             [
@@ -349,11 +361,12 @@ mod tests {
             async {
                 let codspeed_config = CodSpeedConfig::default();
                 let api_client = CodSpeedAPIClient::create_test_client();
-                let orchestrator = Orchestrator::new(&mut config, &codspeed_config, &api_client)
-                    .await
-                    .expect("Failed to create Orchestrator for test");
-                let execution_context =
-                    ExecutionContext::new(config).expect("Failed to create ExecutionContext");
+                let orchestrator =
+                    Orchestrator::new(orchestrator_config, &codspeed_config, &api_client)
+                        .await
+                        .expect("Failed to create Orchestrator for test");
+                let execution_context = ExecutionContext::new(executor_config)
+                    .expect("Failed to create ExecutionContext");
                 let run_part_suffix =
                     BTreeMap::from([("executor".to_string(), Value::from("valgrind"))]);
                 upload(

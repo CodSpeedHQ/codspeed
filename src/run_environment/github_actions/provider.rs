@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use std::{env, fs};
 
 use crate::cli::run::helpers::{find_repository_root, get_env_variable};
-use crate::executor::Config;
+use crate::executor::config::{ExecutorConfig, OrchestratorConfig};
 use crate::prelude::*;
 use crate::request_client::OIDC_CLIENT;
 use crate::run_environment::interfaces::{
@@ -67,9 +67,9 @@ lazy_static! {
     static ref PR_REF_REGEX: Regex = Regex::new(r"^refs/pull/(?P<pr_number>\d+)/merge$").unwrap();
 }
 
-impl TryFrom<&Config> for GitHubActionsProvider {
+impl TryFrom<&OrchestratorConfig> for GitHubActionsProvider {
     type Error = Error;
-    fn try_from(config: &Config) -> Result<Self> {
+    fn try_from(config: &OrchestratorConfig) -> Result<Self> {
         if config.repository_override.is_some() {
             bail!("Specifying owner and repository from CLI is not supported for Github Actions");
         }
@@ -288,7 +288,7 @@ impl RunEnvironmentProvider for GitHubActionsProvider {
     /// - https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-with-reusable-workflows
     /// - https://docs.github.com/en/actions/concepts/security/openid-connect
     /// - https://docs.github.com/en/actions/reference/security/oidc#methods-for-requesting-the-oidc-token
-    fn check_oidc_configuration(&mut self, config: &Config) -> Result<()> {
+    fn check_oidc_configuration(&mut self, config: &OrchestratorConfig) -> Result<()> {
         // Check if a static token is already set
         if config.token.is_some() {
             announcement!(
@@ -343,7 +343,7 @@ impl RunEnvironmentProvider for GitHubActionsProvider {
     ///
     /// All the validation has already been performed in `check_oidc_configuration`.
     /// So if the oidc_config is None, we simply return.
-    async fn set_oidc_token(&self, config: &mut Config) -> Result<()> {
+    async fn set_oidc_token(&self, config: &mut ExecutorConfig) -> Result<()> {
         if let Some(oidc_config) = &self.oidc_config {
             let request_url = format!(
                 "{}&audience={}",
@@ -435,9 +435,9 @@ mod tests {
                 ("GITHUB_RUN_ID", Some("1234567890")),
             ],
             || {
-                let config = Config {
+                let config = OrchestratorConfig {
                     token: Some("token".into()),
-                    ..Config::test()
+                    ..OrchestratorConfig::test()
                 };
                 let github_actions_provider = GitHubActionsProvider::try_from(&config).unwrap();
                 assert_eq!(github_actions_provider.owner, "owner");
@@ -493,9 +493,9 @@ mod tests {
                 ("VERSION", Some("0.1.0")),
             ],
             || {
-                let config = Config {
+                let config = OrchestratorConfig {
                     token: Some("token".into()),
-                    ..Config::test()
+                    ..OrchestratorConfig::test()
                 };
                 let github_actions_provider = GitHubActionsProvider::try_from(&config).unwrap();
                 assert!(!github_actions_provider.is_head_repo_fork);
@@ -549,9 +549,9 @@ mod tests {
                 ("GH_MATRIX", Some("null")),
             ],
             || {
-                let config = Config {
+                let config = OrchestratorConfig {
                     token: Some("token".into()),
-                    ..Config::test()
+                    ..OrchestratorConfig::test()
                 };
                 let github_actions_provider = GitHubActionsProvider::try_from(&config).unwrap();
                 assert!(github_actions_provider.is_head_repo_fork);
@@ -632,9 +632,9 @@ mod tests {
                 ),
             ],
             || {
-                let config = Config {
+                let config = OrchestratorConfig {
                     token: Some("token".into()),
-                    ..Config::test()
+                    ..OrchestratorConfig::test()
                 };
                 let github_actions_provider = GitHubActionsProvider::try_from(&config).unwrap();
                 assert!(!github_actions_provider.is_head_repo_fork);

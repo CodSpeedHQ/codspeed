@@ -1,7 +1,7 @@
 use super::helpers::validate_walltime_results;
 use super::perf::PerfRunner;
-use crate::executor::Config;
 use crate::executor::Executor;
+use crate::executor::ExecutorConfig;
 use crate::executor::helpers::command::CommandBuilder;
 use crate::executor::helpers::env::{get_base_injected_env, is_codspeed_debug_enabled};
 use crate::executor::helpers::get_bench_command::get_bench_command;
@@ -83,7 +83,7 @@ impl WallTimeExecutor {
     }
 
     fn walltime_bench_cmd(
-        config: &Config,
+        config: &ExecutorConfig,
         execution_context: &ExecutionContext,
     ) -> Result<(NamedTempFile, NamedTempFile, CommandBuilder)> {
         // Build additional PATH environment variables

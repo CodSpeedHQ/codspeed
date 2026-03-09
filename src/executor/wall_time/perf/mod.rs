@@ -1,7 +1,7 @@
 #![cfg_attr(not(unix), allow(dead_code, unused_mut))]
 
 use crate::cli::UnwindingMode;
-use crate::executor::Config;
+use crate::executor::ExecutorConfig;
 use crate::executor::helpers::command::CommandBuilder;
 use crate::executor::helpers::env::is_codspeed_debug_enabled;
 use crate::executor::helpers::harvest_perf_maps_for_pids::harvest_perf_maps_for_pids;
@@ -87,7 +87,7 @@ impl PerfRunner {
     pub async fn run(
         &self,
         mut cmd_builder: CommandBuilder,
-        config: &Config,
+        config: &ExecutorConfig,
         profile_folder: &Path,
     ) -> anyhow::Result<ExitStatus> {
         let perf_fifo = PerfFifo::new()?;

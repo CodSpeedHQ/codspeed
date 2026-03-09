@@ -1,6 +1,4 @@
 use crate::cli::UnwindingMode;
-use crate::cli::exec::wrap_with_exec_harness;
-use crate::cli::run::RunArgs;
 use crate::instruments::Instruments;
 use crate::prelude::*;
 use crate::run_environment::RepositoryProvider;
@@ -9,6 +7,28 @@ use clap::ValueEnum;
 use semver::Version;
 use std::path::PathBuf;
 use url::Url;
+
+/// A benchmark target from project configuration.
+///
+/// Defines how a benchmark is executed:
+/// - `Exec`: a plain command measured by exec-harness (all exec targets share one invocation)
+/// - `Entrypoint`: a command that already contains benchmark harnessing (run independently)
+#[derive(Debug, Clone)]
+pub enum BenchmarkTarget {
+    /// A command measured by exec-harness (e.g. `ls -al /nix/store`)
+    Exec {
+        command: Vec<String>,
+        name: Option<String>,
+        walltime_args: exec_harness::walltime::WalltimeExecutionArgs,
+    },
+    /// A command with built-in harness (e.g. `pytest --codspeed src`)
+    Entrypoint {
+        command: String,
+        // We do not use it yet, temporarily allow
+        #[allow(dead_code)]
+        name: Option<String>,
+    },
+}
 
 /// The Valgrind tool to use for simulation mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
@@ -20,20 +40,20 @@ pub enum SimulationTool {
     Tracegrind,
 }
 
-/// Execution configuration for running benchmarks.
+/// Run-level configuration owned by the orchestrator.
 ///
-/// This struct contains all the configuration parameters needed to execute benchmarks,
-/// including API settings, execution mode, instrumentation options, and various flags
-/// for controlling the execution flow. It is typically constructed from command-line
-/// arguments via [`RunArgs`] and combined with [`CodSpeedConfig`] to create an
-/// [`ExecutionContext`].
+/// Holds all parameters that are constant across benchmark targets within a run,
+/// plus the target(s) to execute.
+/// Constructed from CLI arguments and passed to [`Orchestrator::new`].
+/// Use [`OrchestratorConfig::executor_config_for_command`] to produce a per-execution [`ExecutorConfig`].
 #[derive(Debug, Clone)]
-pub struct Config {
+pub struct OrchestratorConfig {
     pub upload_url: Url,
     pub token: Option<String>,
     pub repository_override: Option<RepositoryOverride>,
     pub working_directory: Option<String>,
-    pub command: String,
+
+    pub target: BenchmarkTarget,
 
     pub modes: Vec<RunnerMode>,
     pub instruments: Instruments,
@@ -45,6 +65,34 @@ pub struct Config {
 
     pub profile_folder: Option<PathBuf>,
     pub skip_upload: bool,
+    pub skip_run: bool,
+    pub skip_setup: bool,
+    /// If true, allow execution even when no benchmarks are found
+    pub allow_empty: bool,
+    /// The version of go-runner to install (if None, installs latest)
+    pub go_runner_version: Option<Version>,
+}
+
+/// Per-execution configuration passed to executors.
+///
+/// Produced by [`OrchestratorConfig::executor_config_for_command`]; holds the `command` string
+/// that the executor will run, plus executor-specific fields.
+/// Fields that are only needed at the orchestrator level (e.g. `upload_url`,
+/// `skip_upload`, `repository_override`) live on [`OrchestratorConfig`].
+#[derive(Debug, Clone)]
+pub struct ExecutorConfig {
+    pub token: Option<String>,
+    pub working_directory: Option<String>,
+    pub command: String,
+
+    pub instruments: Instruments,
+    pub enable_perf: bool,
+    /// Stack unwinding mode for perf (if enabled)
+    pub perf_unwinding_mode: Option<UnwindingMode>,
+
+    pub simulation_tool: SimulationTool,
+
+    pub profile_folder: Option<PathBuf>,
     pub skip_run: bool,
     pub skip_setup: bool,
     /// If true, allow execution even when no benchmarks are found
@@ -77,29 +125,51 @@ impl RepositoryOverride {
     }
 }
 
-impl Config {
+pub const DEFAULT_UPLOAD_URL: &str = "https://api.codspeed.io/upload";
+
+impl OrchestratorConfig {
     pub fn set_token(&mut self, token: Option<String>) {
         self.token = token;
     }
 
-    /// Create a clone of this config pinned to a single mode.
-    pub fn for_mode(&self, mode: &RunnerMode) -> Config {
-        let mut c = self.clone();
-        c.modes = vec![mode.clone()];
-        c
+    /// Produce a per-execution [`ExecutorConfig`] for the given command and mode.
+    pub fn executor_config_for_command(&self, command: String) -> ExecutorConfig {
+        ExecutorConfig {
+            token: self.token.clone(),
+            working_directory: self.working_directory.clone(),
+            command,
+            instruments: self.instruments.clone(),
+            enable_perf: self.enable_perf,
+            perf_unwinding_mode: self.perf_unwinding_mode,
+            simulation_tool: self.simulation_tool,
+            profile_folder: self.profile_folder.clone(),
+            skip_run: self.skip_run,
+            skip_setup: self.skip_setup,
+            allow_empty: self.allow_empty,
+            go_runner_version: self.go_runner_version.clone(),
+        }
+    }
+}
+
+impl ExecutorConfig {
+    pub fn set_token(&mut self, token: Option<String>) {
+        self.token = token;
     }
 }
 
 #[cfg(test)]
-impl Config {
-    /// Constructs a new `Config` with default values for testing purposes
+impl OrchestratorConfig {
+    /// Constructs a new `OrchestratorConfig` with default values for testing purposes
     pub fn test() -> Self {
         Self {
             upload_url: Url::parse(DEFAULT_UPLOAD_URL).unwrap(),
             token: None,
             repository_override: None,
             working_directory: None,
-            command: "".into(),
+            target: BenchmarkTarget::Entrypoint {
+                command: String::new(),
+                name: None,
+            },
             modes: vec![RunnerMode::Simulation],
             instruments: Instruments::test(),
             perf_unwinding_mode: None,
@@ -115,197 +185,17 @@ impl Config {
     }
 }
 
-const DEFAULT_UPLOAD_URL: &str = "https://api.codspeed.io/upload";
-
-impl TryFrom<RunArgs> for Config {
-    type Error = Error;
-    fn try_from(args: RunArgs) -> Result<Self> {
-        let instruments = Instruments::try_from(&args)?;
-        let modes = args.shared.resolve_modes()?;
-        let raw_upload_url = args
-            .shared
-            .upload_url
-            .unwrap_or_else(|| DEFAULT_UPLOAD_URL.into());
-        let upload_url = Url::parse(&raw_upload_url)
-            .map_err(|e| anyhow!("Invalid upload URL: {raw_upload_url}, {e}"))?;
-
-        Ok(Self {
-            upload_url,
-            token: args.shared.token,
-            repository_override: args
-                .shared
-                .repository
-                .map(|repo| RepositoryOverride::from_arg(repo, args.shared.provider))
-                .transpose()?,
-            working_directory: args.shared.working_directory,
-            modes,
-            instruments,
-            perf_unwinding_mode: args.shared.perf_run_args.perf_unwinding_mode,
-            enable_perf: args.shared.perf_run_args.enable_perf,
-            command: args.command.join(" "),
-            simulation_tool: args.shared.simulation_tool.unwrap_or_default(),
-            profile_folder: args.shared.profile_folder,
-            skip_upload: args.shared.skip_upload,
-            skip_run: args.shared.skip_run,
-            skip_setup: args.shared.skip_setup,
-            allow_empty: args.shared.allow_empty,
-            go_runner_version: args.shared.go_runner_version,
-        })
-    }
-}
-
-impl Config {
-    /// Create a Config from ExecArgs with a custom command (used for targets mode)
-    pub fn try_from_with_command(
-        args: crate::cli::exec::ExecArgs,
-        command: String,
-    ) -> Result<Self> {
-        let modes = args.shared.resolve_modes()?;
-        let raw_upload_url = args
-            .shared
-            .upload_url
-            .unwrap_or_else(|| DEFAULT_UPLOAD_URL.into());
-        let upload_url = Url::parse(&raw_upload_url)
-            .map_err(|e| anyhow!("Invalid upload URL: {raw_upload_url}, {e}"))?;
-
-        Ok(Self {
-            upload_url,
-            token: args.shared.token,
-            repository_override: args
-                .shared
-                .repository
-                .map(|repo| RepositoryOverride::from_arg(repo, args.shared.provider))
-                .transpose()?,
-            working_directory: args.shared.working_directory,
-            modes,
-            instruments: Instruments { mongodb: None }, // exec doesn't support MongoDB
-            perf_unwinding_mode: args.shared.perf_run_args.perf_unwinding_mode,
-            enable_perf: args.shared.perf_run_args.enable_perf,
-            command,
-            simulation_tool: args.shared.simulation_tool.unwrap_or_default(),
-            profile_folder: args.shared.profile_folder,
-            skip_upload: args.shared.skip_upload,
-            skip_run: args.shared.skip_run,
-            skip_setup: args.shared.skip_setup,
-            allow_empty: args.shared.allow_empty,
-            go_runner_version: args.shared.go_runner_version,
-        })
-    }
-}
-
-impl TryFrom<crate::cli::exec::ExecArgs> for Config {
-    type Error = Error;
-    fn try_from(args: crate::cli::exec::ExecArgs) -> Result<Self> {
-        let wrapped_command = wrap_with_exec_harness(&args.walltime_args, &args.command);
-        Self::try_from_with_command(args, wrapped_command)
+#[cfg(test)]
+impl ExecutorConfig {
+    /// Constructs a new `ExecutorConfig` with default values for testing purposes
+    pub fn test() -> Self {
+        OrchestratorConfig::test().executor_config_for_command("".into())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::cli::PerfRunArgs;
-    use crate::instruments::MongoDBConfig;
-
     use super::*;
-
-    #[test]
-    fn test_try_from_env_empty() {
-        let config = Config::try_from(RunArgs {
-            shared: crate::cli::ExecAndRunSharedArgs {
-                upload_url: None,
-                token: None,
-                repository: None,
-                provider: None,
-                working_directory: None,
-                mode: vec![RunnerMode::Simulation],
-                simulation_tool: None,
-                profile_folder: None,
-                skip_upload: false,
-                skip_run: false,
-                skip_setup: false,
-                allow_empty: false,
-                go_runner_version: None,
-                perf_run_args: PerfRunArgs {
-                    enable_perf: false,
-                    perf_unwinding_mode: None,
-                },
-            },
-            instruments: vec![],
-            mongo_uri_env_name: None,
-            message_format: None,
-            command: vec!["cargo".into(), "codspeed".into(), "bench".into()],
-        })
-        .unwrap();
-        assert_eq!(config.upload_url, Url::parse(DEFAULT_UPLOAD_URL).unwrap());
-        assert_eq!(config.token, None);
-        assert_eq!(config.repository_override, None);
-        assert_eq!(config.working_directory, None);
-        assert_eq!(config.instruments, Instruments { mongodb: None });
-        assert!(!config.skip_upload);
-        assert!(!config.skip_run);
-        assert!(!config.skip_setup);
-        assert!(!config.allow_empty);
-        assert_eq!(config.command, "cargo codspeed bench");
-    }
-
-    #[test]
-    fn test_try_from_args() {
-        let config = Config::try_from(RunArgs {
-            shared: crate::cli::ExecAndRunSharedArgs {
-                upload_url: Some("https://example.com/upload".into()),
-                token: Some("token".into()),
-                repository: Some("owner/repo".into()),
-                provider: Some(RepositoryProvider::GitLab),
-                working_directory: Some("/tmp".into()),
-                mode: vec![RunnerMode::Simulation],
-                simulation_tool: None,
-                profile_folder: Some("./codspeed.out".into()),
-                skip_upload: true,
-                skip_run: true,
-                skip_setup: true,
-                allow_empty: true,
-                go_runner_version: None,
-                perf_run_args: PerfRunArgs {
-                    enable_perf: false,
-                    perf_unwinding_mode: Some(UnwindingMode::FramePointer),
-                },
-            },
-            instruments: vec!["mongodb".into()],
-            mongo_uri_env_name: Some("MONGODB_URI".into()),
-            message_format: Some(crate::cli::run::MessageFormat::Json),
-            command: vec!["cargo".into(), "codspeed".into(), "bench".into()],
-        })
-        .unwrap();
-
-        assert_eq!(
-            config.upload_url,
-            Url::parse("https://example.com/upload").unwrap()
-        );
-        assert_eq!(config.token, Some("token".into()));
-        assert_eq!(
-            config.repository_override,
-            Some(RepositoryOverride {
-                owner: "owner".into(),
-                repository: "repo".into(),
-                repository_provider: RepositoryProvider::GitLab,
-            })
-        );
-        assert_eq!(config.working_directory, Some("/tmp".into()));
-        assert_eq!(
-            config.instruments,
-            Instruments {
-                mongodb: Some(MongoDBConfig {
-                    uri_env_name: Some("MONGODB_URI".into())
-                })
-            }
-        );
-        assert_eq!(config.profile_folder, Some("./codspeed.out".into()));
-        assert!(config.skip_upload);
-        assert!(config.skip_run);
-        assert!(config.skip_setup);
-        assert!(config.allow_empty);
-        assert_eq!(config.command, "cargo codspeed bench");
-    }
 
     #[test]
     fn test_repository_override_from_arg() {
@@ -330,41 +220,5 @@ mod tests {
 
         let result = RepositoryOverride::from_arg("CodSpeedHQ_runner".to_string(), None);
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_try_from_exec_args_default_url() {
-        let exec_args = crate::cli::exec::ExecArgs {
-            shared: crate::cli::ExecAndRunSharedArgs {
-                upload_url: None,
-                token: None,
-                repository: None,
-                provider: None,
-                working_directory: None,
-                mode: vec![RunnerMode::Simulation],
-                simulation_tool: None,
-                profile_folder: None,
-                skip_upload: false,
-                skip_run: false,
-                skip_setup: false,
-                allow_empty: false,
-                go_runner_version: None,
-                perf_run_args: PerfRunArgs {
-                    enable_perf: false,
-                    perf_unwinding_mode: None,
-                },
-            },
-            walltime_args: Default::default(),
-            name: None,
-            command: vec!["my-binary".into(), "arg1".into(), "arg2".into()],
-        };
-
-        let config = Config::try_from(exec_args).unwrap();
-
-        assert_eq!(
-            config.upload_url,
-            Url::parse("https://api.codspeed.io/upload").unwrap()
-        );
-        assert_eq!(config.command, "exec-harness my-binary arg1 arg2");
     }
 }

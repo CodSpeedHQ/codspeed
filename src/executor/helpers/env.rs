@@ -1,12 +1,12 @@
 use std::{collections::HashMap, env::consts::ARCH, path::Path};
 
-use crate::executor::Config;
+use crate::executor::ExecutorConfig;
 use crate::runner_mode::RunnerMode;
 
 pub fn get_base_injected_env(
     mode: RunnerMode,
     profile_folder: &Path,
-    config: &Config,
+    config: &ExecutorConfig,
 ) -> HashMap<&'static str, String> {
     let runner_mode_internal_env_value = match mode {
         // While the runner now deprecates the usage of instrumentation with a message, we

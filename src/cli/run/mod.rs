@@ -2,7 +2,8 @@ use super::ExecAndRunSharedArgs;
 use crate::api_client::CodSpeedAPIClient;
 use crate::config::CodSpeedConfig;
 use crate::executor;
-use crate::executor::Config;
+use crate::executor::config::{self, OrchestratorConfig, RepositoryOverride};
+use crate::instruments::Instruments;
 use crate::prelude::*;
 use crate::project_config::ProjectConfig;
 use crate::project_config::merger::ConfigMerger;
@@ -11,6 +12,7 @@ use crate::upload::UploadResult;
 use crate::upload::poll_results::{PollResultsOptions, poll_results};
 use clap::{Args, ValueEnum};
 use std::path::Path;
+use url::Url;
 
 pub mod helpers;
 pub mod logger;
@@ -91,14 +93,49 @@ impl RunArgs {
     }
 }
 
-use crate::project_config::Target;
-use crate::project_config::WalltimeOptions;
+fn build_orchestrator_config(
+    args: RunArgs,
+    target: executor::BenchmarkTarget,
+) -> Result<OrchestratorConfig> {
+    let instruments = Instruments::try_from(&args)?;
+    let modes = args.shared.resolve_modes()?;
+    let raw_upload_url = args
+        .shared
+        .upload_url
+        .unwrap_or_else(|| config::DEFAULT_UPLOAD_URL.into());
+    let upload_url = Url::parse(&raw_upload_url)
+        .map_err(|e| anyhow!("Invalid upload URL: {raw_upload_url}, {e}"))?;
+
+    Ok(OrchestratorConfig {
+        upload_url,
+        token: args.shared.token,
+        repository_override: args
+            .shared
+            .repository
+            .map(|repo| RepositoryOverride::from_arg(repo, args.shared.provider))
+            .transpose()?,
+        working_directory: args.shared.working_directory,
+        target,
+        modes,
+        instruments,
+        perf_unwinding_mode: args.shared.perf_run_args.perf_unwinding_mode,
+        enable_perf: args.shared.perf_run_args.enable_perf,
+        simulation_tool: args.shared.simulation_tool.unwrap_or_default(),
+        profile_folder: args.shared.profile_folder,
+        skip_upload: args.shared.skip_upload,
+        skip_run: args.shared.skip_run,
+        skip_setup: args.shared.skip_setup,
+        allow_empty: args.shared.allow_empty,
+        go_runner_version: args.shared.go_runner_version,
+    })
+}
+
+use crate::project_config::{Target, WalltimeOptions};
 /// Determines the execution mode based on CLI args and project config
 enum RunTarget<'a> {
     /// Single command from CLI args
     SingleCommand(RunArgs),
     /// Multiple targets from project config
-    /// Note: for now, only `codspeed exec` targets are supported in the project config
     ConfigTargets {
         args: RunArgs,
         targets: &'a [Target],
@@ -141,35 +178,56 @@ pub async fn run(
 
     match run_target {
         RunTarget::SingleCommand(args) => {
-            let mut config = Config::try_from(args)?;
-
+            let target = executor::BenchmarkTarget::Entrypoint {
+                command: args.command.join(" "),
+                name: None,
+            };
+            let config = build_orchestrator_config(args, target)?;
             let orchestrator =
-                executor::Orchestrator::new(&mut config, codspeed_config, api_client).await?;
+                executor::Orchestrator::new(config, codspeed_config, api_client).await?;
 
             if !orchestrator.is_local() {
                 super::show_banner();
             }
-            debug!("config: {config:#?}");
+            debug!("config: {:#?}", orchestrator.config);
 
             let poll_opts = PollResultsOptions::for_run(output_json);
             let poll_results_fn = async |upload_result: &UploadResult| {
                 poll_results(api_client, upload_result, &poll_opts).await
             };
             orchestrator
-                .execute(&mut config, setup_cache_dir, poll_results_fn)
+                .execute(setup_cache_dir, poll_results_fn)
                 .await?;
         }
 
         RunTarget::ConfigTargets {
-            mut args,
+            args,
             targets,
             default_walltime,
         } => {
-            args.command =
+            let pipe_command =
                 super::exec::multi_targets::build_pipe_command(targets, default_walltime)?;
-            let config = Config::try_from(args)?;
+            // Wrap as Entrypoint since the pipe command string already includes exec-harness
+            let target = executor::BenchmarkTarget::Entrypoint {
+                command: pipe_command,
+                name: None,
+            };
+            let config = build_orchestrator_config(args, target)?;
 
-            super::exec::execute_with_harness(config, api_client, codspeed_config, setup_cache_dir)
+            // Ensure exec-harness is installed since config targets use it
+            crate::binary_installer::ensure_binary_installed(
+                super::exec::EXEC_HARNESS_COMMAND,
+                super::exec::EXEC_HARNESS_VERSION,
+                || {
+                    format!(
+                        "https://github.com/CodSpeedHQ/codspeed/releases/download/exec-harness-v{}/exec-harness-installer.sh",
+                        super::exec::EXEC_HARNESS_VERSION
+                    )
+                },
+            )
+            .await?;
+
+            super::exec::execute_config(config, api_client, codspeed_config, setup_cache_dir)
                 .await?;
         }
     }

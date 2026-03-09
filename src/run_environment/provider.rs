@@ -4,7 +4,7 @@ use serde_json::Value;
 use simplelog::SharedLogger;
 use std::collections::BTreeMap;
 
-use crate::executor::{Config, ExecutorName};
+use crate::executor::{ExecutorConfig, ExecutorName, OrchestratorConfig};
 use crate::prelude::*;
 use crate::system::SystemInfo;
 use crate::upload::{
@@ -87,7 +87,7 @@ pub trait RunEnvironmentProvider {
     }
 
     /// Check the OIDC configuration for the current run environment, if supported.
-    fn check_oidc_configuration(&mut self, _config: &Config) -> Result<()> {
+    fn check_oidc_configuration(&mut self, _config: &OrchestratorConfig) -> Result<()> {
         Ok(())
     }
 
@@ -100,7 +100,7 @@ pub trait RunEnvironmentProvider {
     ///
     /// Warning: OIDC tokens are typically short-lived. This method must be called
     /// just before the upload step to ensure the token is valid during the upload.
-    async fn set_oidc_token(&self, _config: &mut Config) -> Result<()> {
+    async fn set_oidc_token(&self, _config: &mut ExecutorConfig) -> Result<()> {
         Ok(())
     }
 
@@ -110,7 +110,7 @@ pub trait RunEnvironmentProvider {
     /// uploads within the same run (e.g. `{"executor": "valgrind"}`).
     async fn get_upload_metadata(
         &self,
-        config: &Config,
+        config: &ExecutorConfig,
         system_info: &SystemInfo,
         profile_archive: &ProfileArchive,
         executor_name: ExecutorName,

@@ -1,4 +1,4 @@
-use crate::executor::Config;
+use crate::executor::ExecutorConfig;
 use crate::executor::RunnerMode;
 use crate::executor::config::SimulationTool;
 use crate::executor::helpers::env::get_base_injected_env;
@@ -84,7 +84,7 @@ echo -n "$status" > "$2"
 }
 
 pub async fn measure(
-    config: &Config,
+    config: &ExecutorConfig,
     profile_folder: &Path,
     mongo_tracer: &Option<MongoTracer>,
 ) -> Result<()> {

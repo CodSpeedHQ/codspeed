@@ -6,7 +6,7 @@ use simplelog::SharedLogger;
 use crate::cli::run::helpers::{
     GitRemote, find_repository_root, get_env_variable, parse_git_remote,
 };
-use crate::executor::Config;
+use crate::executor::config::{ExecutorConfig, OrchestratorConfig};
 use crate::prelude::*;
 use crate::run_environment::interfaces::{RepositoryProvider, RunEnvironmentMetadata, RunEvent};
 use crate::run_environment::provider::{RunEnvironmentDetector, RunEnvironmentProvider};
@@ -52,9 +52,9 @@ pub fn get_ref() -> Result<String> {
     }
 }
 
-impl TryFrom<&Config> for BuildkiteProvider {
+impl TryFrom<&OrchestratorConfig> for BuildkiteProvider {
     type Error = Error;
-    fn try_from(config: &Config) -> Result<Self> {
+    fn try_from(config: &OrchestratorConfig) -> Result<Self> {
         if config.token.is_none() {
             bail!("Token authentication is required for Buildkite");
         }
@@ -159,7 +159,7 @@ impl RunEnvironmentProvider for BuildkiteProvider {
     /// Docs:
     /// - https://buildkite.com/docs/agent/v3/cli-oidc
     /// - https://buildkite.com/docs/pipelines/security/oidc
-    async fn set_oidc_token(&self, _config: &mut Config) -> Result<()> {
+    async fn set_oidc_token(&self, _config: &mut ExecutorConfig) -> Result<()> {
         Ok(())
     }
 }
@@ -199,9 +199,9 @@ mod tests {
                 ("BUILDKITE", Some("true")),
             ],
             || {
-                let config = Config {
+                let config = OrchestratorConfig {
                     token: Some("token".into()),
-                    ..Config::test()
+                    ..OrchestratorConfig::test()
                 };
                 let provider = BuildkiteProvider::try_from(&config).unwrap();
 
@@ -238,9 +238,9 @@ mod tests {
                 ("BUILDKITE", Some("true")),
             ],
             || {
-                let config = Config {
+                let config = OrchestratorConfig {
                     token: Some("token".into()),
-                    ..Config::test()
+                    ..OrchestratorConfig::test()
                 };
                 let provider = BuildkiteProvider::try_from(&config).unwrap();
 
@@ -277,9 +277,9 @@ mod tests {
                 ("BUILDKITE", Some("true")),
             ],
             || {
-                let config = Config {
+                let config = OrchestratorConfig {
                     token: Some("token".into()),
-                    ..Config::test()
+                    ..OrchestratorConfig::test()
                 };
                 let provider = BuildkiteProvider::try_from(&config).unwrap();
                 let run_environment_metadata = provider.get_run_environment_metadata().unwrap();
