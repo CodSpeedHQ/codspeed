@@ -18,7 +18,7 @@ The `record_index` in the panic (3,423,125) counts **EventRecords successfully r
 1. **`src/bin/count_event_records.rs`**: running the actual `linux-perf-data` library and counting EventRecords until the first error yields exactly 3,423,125.
 2. **Instrumented library log**: adding an `eprintln!` in `linux-perf-data/src/file_reader.rs` at the `InvalidPerfEventSize` error site reports `read_offset=0x8b14cd00`. This is a relative offset (from after the pipe header + metadata records). Converting to absolute: `16 (pipe header) + 5888 (metadata) + 0x8b14cd00 = 0x8b14e410` — exactly the raw file offset our scanner found. **The bad record is definitively the same one.**
 
-## Root Cause Hypothesis
+## Root Cause
 
 ### Found: A `PERF_RECORD_COMPRESSED2` record with `size=0`
 
@@ -33,66 +33,73 @@ Raw scan of the file (walking header by header) found the first invalid record a
 | `size` (u16) | **0** (invalid: must be ≥ 8) |
 | `data_size` (next 8 bytes at `0x8b14e418`) | `0xffef` = **65,519** |
 
-### The Math
+### Kernel Bug: u16 overflow in `builtin-record.c`
 
-`PERF_RECORD_COMPRESSED2` (type 83, Linux 6.12+) format:
-```
-[perf_event_header: 8 bytes]
-  .type  = 83
-  .misc  = 0
-  .size  = total record size (u16, max 65535)
-[data_size: 8 bytes]  ← actual compressed payload length
-[compressed data: data_size bytes]
-[padding to 8-byte alignment]
+The bug is in `tools/perf/builtin-record.c:672`:
+
+```c
+event->data_size = compressed - sizeof(struct perf_record_compressed2);
+event->header.size = PERF_ALIGN(compressed, sizeof(u64));  // BUG: u16 overflow
 ```
 
-For this record:
+`compressed` is the total byte count returned by `zstd_compress_stream_to_records`, which includes the 16-byte struct header plus the zstd output. `PERF_ALIGN` rounds it up to 8-byte alignment and the result is assigned to `header.size`, which is a `__u16` (max 65,535).
+
+`max_record_size` is computed as:
+```c
+// tools/perf/util/event.h
+#define PERF_SAMPLE_MAX_SIZE (1 << 16)  // = 65536
+
+// builtin-record.c
+size_t max_record_size = PERF_SAMPLE_MAX_SIZE - sizeof(struct perf_record_compressed2) - 1;
+//                     = 65536 - 16 - 1 = 65519
 ```
-total = 8 (header) + 8 (data_size field) + 65519 (data) = 65535 bytes
-65535 % 8 = 7  →  needs 1 byte of alignment padding  →  65535 + 1 = 65536 bytes
-65536 as u16 = 0  ← WRAPS TO ZERO
+
+The `-1` was intended to prevent overflow, but it only caps the zstd output. The alignment step happens **after**:
+
+```
+compressed = 16 (struct header) + output.pos (zstd bytes, max 65519)
+           = max 65535
+
+PERF_ALIGN(65535, 8) = 65536
+
+(u16)65536 = 0  ← BUG
 ```
 
-### Hypothesis: Kernel u16 overflow bug
+Any `compressed` value in `[65529, 65535]` triggers this: `PERF_ALIGN` rounds up to 65536, which wraps to 0 in `__u16`.
 
-The `perf_event_header.size` field is a `u16` (max 65,535). When a `COMPRESSED2` record's aligned total size is exactly **65,536 bytes**, the u16 field wraps to **0**.
+For our specific record: `compressed = 65535` → `PERF_ALIGN = 65536` → `header.size = 0`. The `data_size` field (`65519`) is computed correctly and is trustworthy — it's just `compressed - 16`.
 
-This is likely a kernel bug introduced with `PERF_RECORD_COMPRESSED2` where the size calculation was not protected against u16 overflow.
+### Why Ubuntu 24.04 / kernel 6.17 and not 22.04 / kernel 6.5
 
-## Evidence Supporting This
+- Kernel **6.5** (Ubuntu 22.04 AWS) predates `PERF_RECORD_COMPRESSED2` → uses only `PERF_RECORD_COMPRESSED` (type 81), which has no `data_size` field and a different size calculation that doesn't hit this overflow → works fine.
+- Kernel **6.17** (Ubuntu 24.04 AWS) introduced `PERF_RECORD_COMPRESSED2` (type 83) with the buggy alignment assignment → triggers the u16 overflow when compressed output is large enough.
 
-1. All preceding `COMPRESSED2` records have `size` < 65,535 (sizes seen: 10,328 / 19,976 / 23,112 / 25,464 / 41,200 / 42,272 / 42,704).
-2. The exact arithmetic lines up: `data_size = 65519` → unpadded total = 65,535 → padded = 65,536 → u16 = 0.
-3. Both `perf script` and the Rust parser fail at the same location — the file content is consistent, the header field is just wrong.
-4. The file is likely **not corrupted by truncation or write error** — the data at the record's location looks like a valid continuation of zstd stream data.
+## Fix / Workaround
 
-## Why Ubuntu 24.04 and Not 22.04
+### Kernel fix
+In `tools/perf/builtin-record.c:672`, cast to a wider type before aligning:
+```c
+event->header.size = (u16)PERF_ALIGN(compressed, sizeof(u64));
+// Should assert or clamp: aligned value must fit in u16
+```
+Or cap `max_record_size` to ensure `PERF_ALIGN(16 + max_record_size, 8) <= 65535`.
 
-- Ubuntu 22.04 ships kernel **5.15** → uses `PERF_RECORD_COMPRESSED` (type 81, Linux 5.2+), which does NOT have a `data_size` field and has smaller records that never reach the u16 overflow boundary.
-- Ubuntu 24.04 (and the ARM64 test machine running kernel **6.12.70**) uses `PERF_RECORD_COMPRESSED2` (type 83, Linux 6.x / May 2025), which adds an 8-byte `data_size` field — making records large enough to trigger the u16 overflow.
-- `perf script` also fails on this file for the same reason (not a parser-specific bug).
-
-## Open Questions / Next Steps
-
-1. **Confirm the actual record size is 65535 or 65536** by verifying that `0x8b14e410 + 65535` or `0x8b14e410 + 65536` lands on a valid next record.
-   - `+65535 = 0x8b15e40f` → found `type=83 size=33168` there, BUT this address is not 8-byte aligned (ends in `0xf`), which is suspicious.
-   - `+65536 = 0x8b15e410` → found `type=0` there, which is invalid.
-   - **Neither offset cleanly validates** — needs more investigation.
-
-2. **Is the data_size field itself trustworthy?** Could `size=0` be a different kind of overflow where `data_size` is also wrong?
-
-3. **Does the kernel write padding into `size` or not?** Kernel source for `PERF_RECORD_COMPRESSED2` size calculation needs to be verified. If the kernel does NOT include alignment padding in `size`, then the actual size is 65,535 (which also fits in u16 as `0xffff`, not 0). This means the actual `data_size` must be larger than 65,519 for `size` to overflow to 0.
-
-4. **Scan for more `size=0` records** to see if this happens multiple times in the file.
-
-5. **Workaround for the parser**: Handle `size=0` on `PERF_RECORD_COMPRESSED2` records by reading the `data_size` field from the next 8 bytes to reconstruct the actual record size.
+### Parser workaround (in `linux-perf-data`)
+When a `PERF_RECORD_COMPRESSED2` record has `header.size < 8`, recover the actual size from the `data_size` field (next 8 bytes):
+```
+actual_size = PERF_ALIGN(sizeof(perf_record_compressed2) + data_size, 8)
+            = PERF_ALIGN(16 + data_size, 8)
+```
+Since `data_size` is set correctly (`compressed - 16`), this gives the right number of bytes to consume.
 
 ## Related Code
 
-- Parser: `src/executor/wall_time/perf/parse_perf_file.rs:69-70` — panics on `InvalidPerfEventSize`
-- Library error: `linux-perf-data/src/file_reader.rs:467-468` — returns `Error::InvalidPerfEventSize` when `size < 8`
-- Decompressor: `linux-perf-data/src/decompression.rs` — uses stateful zstd streaming context across chunks
+- Parser panic: `src/executor/wall_time/perf/parse_perf_file.rs:69-70`
+- Library error: `linux-perf-data/src/file_reader.rs` — `read_next_round_impl`, returns `Error::InvalidPerfEventSize` when `size < 8`
+- Kernel bug: `tools/perf/builtin-record.c:672` in `~/projects/linux`
+- Record struct: `tools/lib/perf/include/perf/event.h:477` — `struct perf_record_compressed2`
 
-## Diagnostic Tool
+## Diagnostic Tools
 
-`src/bin/diagnose_perf_file.rs` — raw perf file walker that finds and dumps context around the first invalid record.
+- `src/bin/diagnose_perf_file.rs` — raw perf file walker, finds and dumps context around the first invalid record
+- `src/bin/count_event_records.rs` — runs the library and counts EventRecords until failure
