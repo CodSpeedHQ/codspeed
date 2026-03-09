@@ -1,16 +1,20 @@
 # Perf File Corruption Investigation
 
 ## File
+
 `/home/guillaume/cod-2314/profile.pPMUwlf7Pu.out/perf.pipedata`
+
 - Size: 4,445,779,093 bytes (4.14 GiB)
 - Format: `PERFILE2` pipe mode (little-endian)
 - Pipe header: 16 bytes (magic=`PERFILE2`, size=16)
 
 ## Symptom
+
 ```
 thread 'main' panicked at src/executor/wall_time/perf/parse_perf_file.rs:70:9:
 Failed to read record at index 3423125: The specified size in the perf event header was smaller than the header itself
 ```
+
 (`perf script` also fails with the same kind of error.)
 
 The `record_index` in the panic (3,423,125) counts **EventRecords successfully returned by the sorter** before the failure. Confirmed via two independent methods:
@@ -24,14 +28,14 @@ The `record_index` in the panic (3,423,125) counts **EventRecords successfully r
 
 Raw scan of the file (walking header by header) found the first invalid record at:
 
-| Field | Value |
-|-------|-------|
-| Raw record index | 730,541 |
-| Byte offset | `0x8b14e410` (2,333,402,128 bytes into the file) |
-| `type` | 83 = `PERF_RECORD_COMPRESSED2` |
-| `misc` | 0 |
-| `size` (u16) | **0** (invalid: must be ≥ 8) |
-| `data_size` (next 8 bytes at `0x8b14e418`) | `0xffef` = **65,519** |
+| Field                                      | Value                                            |
+| ------------------------------------------ | ------------------------------------------------ |
+| Raw record index                           | 730,541                                          |
+| Byte offset                                | `0x8b14e410` (2,333,402,128 bytes into the file) |
+| `type`                                     | 83 = `PERF_RECORD_COMPRESSED2`                   |
+| `misc`                                     | 0                                                |
+| `size` (u16)                               | **0** (invalid: must be ≥ 8)                     |
+| `data_size` (next 8 bytes at `0x8b14e418`) | `0xffef` = **65,519**                            |
 
 ### Kernel Bug: u16 overflow in `builtin-record.c`
 
@@ -45,6 +49,7 @@ event->header.size = PERF_ALIGN(compressed, sizeof(u64));  // BUG: u16 overflow
 `compressed` is the total byte count returned by `zstd_compress_stream_to_records`, which includes the 16-byte struct header plus the zstd output. `PERF_ALIGN` rounds it up to 8-byte alignment and the result is assigned to `header.size`, which is a `__u16` (max 65,535).
 
 `max_record_size` is computed as:
+
 ```c
 // tools/perf/util/event.h
 #define PERF_SAMPLE_MAX_SIZE (1 << 16)  // = 65536
@@ -81,6 +86,7 @@ The bug is **probabilistic** — it triggers when the zstd output for a single f
 Attempts to reproduce via `perf record --compression-level=3` with various `-m` (mmap pages) values and a heavy multi-threaded Python workload at 9997Hz sampling did not trigger the bug on this machine (kernel 6.12.70). The original file's max `COMPRESSED2` size before the bad record was 61,432 bytes — so even with an identical workload, hitting the exact overflow window is not guaranteed.
 
 A deterministic repro via `perf record` is not practical without either:
+
 1. Running the exact same workload that produced the original file, or
 2. Patching perf/kernel to lower `PERF_SAMPLE_MAX_SIZE` to make the window easier to hit, or
 3. Writing a unit test that directly calls `zstd_compress_stream_to_records` with crafted input producing exactly 65529–65535 bytes of output.
@@ -90,19 +96,25 @@ The original file `/home/guillaume/cod-2314/profile.pPMUwlf7Pu.out/perf.pipedata
 ## Fix / Workaround
 
 ### Kernel fix
+
 In `tools/perf/builtin-record.c:672`, cast to a wider type before aligning:
+
 ```c
 event->header.size = (u16)PERF_ALIGN(compressed, sizeof(u64));
 // Should assert or clamp: aligned value must fit in u16
 ```
+
 Or cap `max_record_size` to ensure `PERF_ALIGN(16 + max_record_size, 8) <= 65535`.
 
 ### Parser workaround (in `linux-perf-data`)
+
 When a `PERF_RECORD_COMPRESSED2` record has `header.size < 8`, recover the actual size from the `data_size` field (next 8 bytes):
+
 ```
 actual_size = PERF_ALIGN(sizeof(perf_record_compressed2) + data_size, 8)
             = PERF_ALIGN(16 + data_size, 8)
 ```
+
 Since `data_size` is set correctly (`compressed - 16`), this gives the right number of bytes to consume.
 
 ## Related Code
