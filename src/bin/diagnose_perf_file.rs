@@ -6,10 +6,12 @@ const PERF_EVENT_HEADER_SIZE: usize = 8; // type(4) + misc(2) + size(2)
 const PIPE_HEADER_SIZE: usize = 16; // magic(8) + size(8)
 
 fn main() {
-    let perf_file_path = "/home/guillaume/cod-2314/profile.pPMUwlf7Pu.out/perf.pipedata";
+    let perf_file_path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "/home/guillaume/cod-2314/profile.pPMUwlf7Pu.out/perf.pipedata".to_string());
     let target_record_index: u64 = 3_423_125;
 
-    let file = std::fs::File::open(perf_file_path).expect("Failed to open perf file");
+    let file = std::fs::File::open(&perf_file_path).expect("Failed to open perf file");
     let file_size = file.metadata().unwrap().len();
     println!("File size: {} bytes ({:.2} GiB)", file_size, file_size as f64 / (1024.0 * 1024.0 * 1024.0));
 

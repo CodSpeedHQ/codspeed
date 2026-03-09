@@ -74,6 +74,19 @@ For our specific record: `compressed = 65535` → `PERF_ALIGN = 65536` → `head
 - Kernel **6.5** (Ubuntu 22.04 AWS) predates `PERF_RECORD_COMPRESSED2` → uses only `PERF_RECORD_COMPRESSED` (type 81), which has no `data_size` field and a different size calculation that doesn't hit this overflow → works fine.
 - Kernel **6.17** (Ubuntu 24.04 AWS) introduced `PERF_RECORD_COMPRESSED2` (type 83) with the buggy alignment assignment → triggers the u16 overflow when compressed output is large enough.
 
+## Reproducibility
+
+The bug is **probabilistic** — it triggers when the zstd output for a single flush lands in the 7-byte window `[65529, 65535]` out of 65,535 possible sizes. In the original file it happened once out of 417,241 `COMPRESSED2` records in a 4GB file.
+
+Attempts to reproduce via `perf record --compression-level=3` with various `-m` (mmap pages) values and a heavy multi-threaded Python workload at 9997Hz sampling did not trigger the bug on this machine (kernel 6.12.70). The original file's max `COMPRESSED2` size before the bad record was 61,432 bytes — so even with an identical workload, hitting the exact overflow window is not guaranteed.
+
+A deterministic repro via `perf record` is not practical without either:
+1. Running the exact same workload that produced the original file, or
+2. Patching perf/kernel to lower `PERF_SAMPLE_MAX_SIZE` to make the window easier to hit, or
+3. Writing a unit test that directly calls `zstd_compress_stream_to_records` with crafted input producing exactly 65529–65535 bytes of output.
+
+The original file `/home/guillaume/cod-2314/profile.pPMUwlf7Pu.out/perf.pipedata` serves as the concrete test case.
+
 ## Fix / Workaround
 
 ### Kernel fix
