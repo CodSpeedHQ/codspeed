@@ -4,7 +4,7 @@ mod api_client;
 mod binary_installer;
 pub mod cli;
 mod config;
-mod executor;
+pub mod executor;
 mod instruments;
 mod local_logger;
 pub mod logger;
@@ -16,7 +16,7 @@ mod runner_mode;
 mod system;
 mod upload;
 
-pub use local_logger::clean_logger;
+pub use local_logger::{clean_logger, init_local_logger};
 pub use project_config::{ProjectConfig, ProjectOptions, Target, TargetOptions, WalltimeOptions};
 pub use runner_mode::RunnerMode;
 

@@ -28,7 +28,7 @@ use std::{cell::OnceCell, process::ExitStatus};
 
 mod jit_dump;
 mod naming;
-mod parse_perf_file;
+pub mod parse_perf_file;
 mod save_artifacts;
 mod setup;
 

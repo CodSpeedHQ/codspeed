@@ -10,7 +10,7 @@ mod shared;
 #[cfg(test)]
 mod tests;
 mod valgrind;
-mod wall_time;
+pub mod wall_time;
 
 use crate::instruments::mongo_tracer::{MongoTracer, install_mongodb_tracer};
 use crate::prelude::*;

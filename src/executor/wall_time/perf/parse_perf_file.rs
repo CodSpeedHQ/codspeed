@@ -65,10 +65,15 @@ pub fn parse_for_memmap2<P: AsRef<Path>>(
         mut record_iter,
     } = PerfFileReader::parse_pipe(reader)?;
 
-    while let Some(record) = record_iter.next_record(&mut perf_file).unwrap() {
+    let mut record_index = 0;
+    while let Some(record) = record_iter.next_record(&mut perf_file).unwrap_or_else(|e| {
+        panic!("Failed to read record at index {record_index}: {e}");
+    }) {
         let PerfFileRecord::EventRecord { record, .. } = record else {
             continue;
         };
+
+        record_index += 1;
 
         // Check the type from the raw record to avoid parsing overhead since we do not care about
         // most records.
@@ -196,6 +201,8 @@ fn process_mmap2_record(
         record_path_string,
         record.protection,
     );
+
+    return;
 
     let load_bias = match ModuleSymbols::compute_load_bias(
         &record_path,
