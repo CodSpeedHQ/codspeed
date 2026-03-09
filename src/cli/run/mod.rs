@@ -95,7 +95,7 @@ impl RunArgs {
 
 fn build_orchestrator_config(
     args: RunArgs,
-    target: executor::BenchmarkTarget,
+    targets: Vec<executor::BenchmarkTarget>,
 ) -> Result<OrchestratorConfig> {
     let instruments = Instruments::try_from(&args)?;
     let modes = args.shared.resolve_modes()?;
@@ -115,7 +115,7 @@ fn build_orchestrator_config(
             .map(|repo| RepositoryOverride::from_arg(repo, args.shared.provider))
             .transpose()?,
         working_directory: args.shared.working_directory,
-        target,
+        targets,
         modes,
         instruments,
         perf_unwinding_mode: args.shared.perf_run_args.perf_unwinding_mode,
@@ -178,11 +178,14 @@ pub async fn run(
 
     match run_target {
         RunTarget::SingleCommand(args) => {
-            let target = executor::BenchmarkTarget::Entrypoint {
-                command: args.command.join(" "),
-                name: None,
-            };
-            let config = build_orchestrator_config(args, target)?;
+            let command = args.command.join(" ");
+            let config = build_orchestrator_config(
+                args,
+                vec![executor::BenchmarkTarget::Entrypoint {
+                    command,
+                    name: None,
+                }],
+            )?;
             let orchestrator =
                 executor::Orchestrator::new(config, codspeed_config, api_client).await?;
 
@@ -205,28 +208,9 @@ pub async fn run(
             targets,
             default_walltime,
         } => {
-            let pipe_command =
-                super::exec::multi_targets::build_pipe_command(targets, default_walltime)?;
-            // Wrap as Entrypoint since the pipe command string already includes exec-harness
-            let target = executor::BenchmarkTarget::Entrypoint {
-                command: pipe_command,
-                name: None,
-            };
-            let config = build_orchestrator_config(args, target)?;
-
-            // Ensure exec-harness is installed since config targets use it
-            crate::binary_installer::ensure_binary_installed(
-                super::exec::EXEC_HARNESS_COMMAND,
-                super::exec::EXEC_HARNESS_VERSION,
-                || {
-                    format!(
-                        "https://github.com/CodSpeedHQ/codspeed/releases/download/exec-harness-v{}/exec-harness-installer.sh",
-                        super::exec::EXEC_HARNESS_VERSION
-                    )
-                },
-            )
-            .await?;
-
+            let benchmark_targets =
+                super::exec::multi_targets::build_benchmark_targets(targets, default_walltime)?;
+            let config = build_orchestrator_config(args, benchmark_targets)?;
             super::exec::execute_config(config, api_client, codspeed_config, setup_cache_dir)
                 .await?;
         }

@@ -43,7 +43,7 @@ pub enum SimulationTool {
 /// Run-level configuration owned by the orchestrator.
 ///
 /// Holds all parameters that are constant across benchmark targets within a run,
-/// plus the target(s) to execute.
+/// plus the list of targets to execute.
 /// Constructed from CLI arguments and passed to [`Orchestrator::new`].
 /// Use [`OrchestratorConfig::executor_config_for_command`] to produce a per-execution [`ExecutorConfig`].
 #[derive(Debug, Clone)]
@@ -53,7 +53,7 @@ pub struct OrchestratorConfig {
     pub repository_override: Option<RepositoryOverride>,
     pub working_directory: Option<String>,
 
-    pub target: BenchmarkTarget,
+    pub targets: Vec<BenchmarkTarget>,
 
     pub modes: Vec<RunnerMode>,
     pub instruments: Instruments,
@@ -132,6 +132,25 @@ impl OrchestratorConfig {
         self.token = token;
     }
 
+    /// Compute the total number of executor runs that will be performed.
+    ///
+    /// All `Exec` targets are combined into a single invocation, while each
+    /// `Entrypoint` target runs independently. Both are multiplied by the
+    /// number of configured modes.
+    pub fn expected_run_parts_count(&self) -> u32 {
+        let has_exec = self
+            .targets
+            .iter()
+            .any(|t| matches!(t, BenchmarkTarget::Exec { .. }));
+        let entrypoint_count = self
+            .targets
+            .iter()
+            .filter(|t| matches!(t, BenchmarkTarget::Entrypoint { .. }))
+            .count();
+        let invocation_count = (if has_exec { 1 } else { 0 }) + entrypoint_count;
+        (invocation_count * self.modes.len()) as u32
+    }
+
     /// Produce a per-execution [`ExecutorConfig`] for the given command and mode.
     pub fn executor_config_for_command(&self, command: String) -> ExecutorConfig {
         ExecutorConfig {
@@ -166,10 +185,10 @@ impl OrchestratorConfig {
             token: None,
             repository_override: None,
             working_directory: None,
-            target: BenchmarkTarget::Entrypoint {
+            targets: vec![BenchmarkTarget::Entrypoint {
                 command: String::new(),
                 name: None,
-            },
+            }],
             modes: vec![RunnerMode::Simulation],
             instruments: Instruments::test(),
             perf_unwinding_mode: None,
@@ -196,6 +215,109 @@ impl ExecutorConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_expected_run_parts_count() {
+        use crate::runner_mode::RunnerMode;
+
+        let base = OrchestratorConfig::test();
+
+        // Single entrypoint, single mode → 1
+        let config = OrchestratorConfig {
+            targets: vec![BenchmarkTarget::Entrypoint {
+                command: "cmd".into(),
+                name: None,
+            }],
+            modes: vec![RunnerMode::Simulation],
+            ..base.clone()
+        };
+        assert_eq!(config.expected_run_parts_count(), 1);
+
+        // Two entrypoints, single mode → 2
+        let config = OrchestratorConfig {
+            targets: vec![
+                BenchmarkTarget::Entrypoint {
+                    command: "cmd1".into(),
+                    name: None,
+                },
+                BenchmarkTarget::Entrypoint {
+                    command: "cmd2".into(),
+                    name: None,
+                },
+            ],
+            modes: vec![RunnerMode::Simulation],
+            ..base.clone()
+        };
+        assert_eq!(config.expected_run_parts_count(), 2);
+
+        // Multiple exec targets count as one invocation, single mode → 1
+        let config = OrchestratorConfig {
+            targets: vec![
+                BenchmarkTarget::Exec {
+                    command: vec!["exec1".into()],
+                    name: None,
+                    walltime_args: Default::default(),
+                },
+                BenchmarkTarget::Exec {
+                    command: vec!["exec2".into()],
+                    name: None,
+                    walltime_args: Default::default(),
+                },
+            ],
+            modes: vec![RunnerMode::Simulation],
+            ..base.clone()
+        };
+        assert_eq!(config.expected_run_parts_count(), 1);
+
+        // Mix of exec and entrypoint, single mode → 2
+        let config = OrchestratorConfig {
+            targets: vec![
+                BenchmarkTarget::Exec {
+                    command: vec!["exec1".into()],
+                    name: None,
+                    walltime_args: Default::default(),
+                },
+                BenchmarkTarget::Entrypoint {
+                    command: "cmd".into(),
+                    name: None,
+                },
+            ],
+            modes: vec![RunnerMode::Simulation],
+            ..base.clone()
+        };
+        assert_eq!(config.expected_run_parts_count(), 2);
+
+        // Single entrypoint, two modes → 2
+        #[allow(deprecated)]
+        let config = OrchestratorConfig {
+            targets: vec![BenchmarkTarget::Entrypoint {
+                command: "cmd".into(),
+                name: None,
+            }],
+            modes: vec![RunnerMode::Simulation, RunnerMode::Walltime],
+            ..base.clone()
+        };
+        assert_eq!(config.expected_run_parts_count(), 2);
+
+        // Mix of exec and entrypoint, two modes → 4
+        #[allow(deprecated)]
+        let config = OrchestratorConfig {
+            targets: vec![
+                BenchmarkTarget::Exec {
+                    command: vec!["exec1".into()],
+                    name: None,
+                    walltime_args: Default::default(),
+                },
+                BenchmarkTarget::Entrypoint {
+                    command: "cmd".into(),
+                    name: None,
+                },
+            ],
+            modes: vec![RunnerMode::Simulation, RunnerMode::Walltime],
+            ..base.clone()
+        };
+        assert_eq!(config.expected_run_parts_count(), 4);
+    }
 
     #[test]
     fn test_repository_override_from_arg() {

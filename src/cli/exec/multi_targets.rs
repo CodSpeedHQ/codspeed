@@ -1,35 +1,9 @@
 use super::EXEC_HARNESS_COMMAND;
+use crate::executor::config::BenchmarkTarget;
 use crate::prelude::*;
 use crate::project_config::Target;
 use crate::project_config::WalltimeOptions;
 use exec_harness::BenchmarkCommand;
-
-/// Convert targets from project config to exec-harness JSON input format
-pub fn targets_to_exec_harness_json(
-    targets: &[Target],
-    default_walltime: Option<&WalltimeOptions>,
-) -> Result<String> {
-    let inputs: Vec<BenchmarkCommand> = targets
-        .iter()
-        .map(|target| {
-            // Parse the exec string into command parts
-            let command = shell_words::split(&target.exec)
-                .with_context(|| format!("Failed to parse command: {}", target.exec))?;
-
-            // Merge target-specific walltime options with defaults
-            let target_walltime = target.options.as_ref().and_then(|o| o.walltime.as_ref());
-            let walltime_args = merge_walltime_options(default_walltime, target_walltime);
-
-            Ok(BenchmarkCommand {
-                command,
-                name: target.name.clone(),
-                walltime_args,
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
-
-    serde_json::to_string(&inputs).context("Failed to serialize targets to JSON")
-}
 
 /// Merge default walltime options with target-specific overrides
 fn merge_walltime_options(
@@ -66,13 +40,35 @@ fn walltime_options_to_args(
     }
 }
 
-/// Build a shell command string that pipes targets JSON to exec-harness via stdin
-pub fn build_pipe_command(
+/// Convert project config targets into [`BenchmarkTarget`] instances.
+///
+/// Exec targets are each converted to a `BenchmarkTarget::Exec`.
+/// Entrypoint targets are each converted to a `BenchmarkTarget::Entrypoint`.
+pub fn build_benchmark_targets(
     targets: &[Target],
     default_walltime: Option<&WalltimeOptions>,
-) -> Result<String> {
-    let json = targets_to_exec_harness_json(targets, default_walltime)?;
-    Ok(build_pipe_command_from_json(&json))
+) -> Result<Vec<BenchmarkTarget>> {
+    targets
+        .iter()
+        .map(|target| match (&target.exec, &target.entrypoint) {
+            (Some(exec), None) => {
+                let command = shell_words::split(exec)
+                    .with_context(|| format!("Failed to parse command: {exec}"))?;
+                let target_walltime = target.options.as_ref().and_then(|o| o.walltime.as_ref());
+                let walltime_args = merge_walltime_options(default_walltime, target_walltime);
+                Ok(BenchmarkTarget::Exec {
+                    command,
+                    name: target.name.clone(),
+                    walltime_args,
+                })
+            }
+            (None, Some(entrypoint)) => Ok(BenchmarkTarget::Entrypoint {
+                command: entrypoint.clone(),
+                name: target.name.clone(),
+            }),
+            _ => bail!("Benchmark target must have exactly one of 'exec' or 'entrypoint' set"),
+        })
+        .collect()
 }
 
 /// Build a shell command string that pipes BenchmarkTarget::Exec variants to exec-harness via stdin

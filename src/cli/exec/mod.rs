@@ -21,6 +21,18 @@ pub const DEFAULT_REPOSITORY_NAME: &str = "local-runs";
 pub const EXEC_HARNESS_COMMAND: &str = "exec-harness";
 pub const EXEC_HARNESS_VERSION: &str = "1.2.0";
 
+#[cfg(test)]
+pub fn wrap_with_exec_harness(
+    walltime_args: &exec_harness::walltime::WalltimeExecutionArgs,
+    command: &[String],
+) -> String {
+    shell_words::join(
+        std::iter::once(EXEC_HARNESS_COMMAND)
+            .chain(walltime_args.to_cli_args().iter().map(|s| s.as_str()))
+            .chain(command.iter().map(|s| s.as_str())),
+    )
+}
+
 #[derive(Args, Debug)]
 pub struct ExecArgs {
     #[command(flatten)]
@@ -80,7 +92,7 @@ fn build_orchestrator_config(
             .map(|repo| RepositoryOverride::from_arg(repo, args.shared.provider))
             .transpose()?,
         working_directory: args.shared.working_directory,
-        target,
+        targets: vec![target],
         modes,
         instruments: Instruments { mongodb: None }, // exec doesn't support MongoDB
         perf_unwinding_mode: args.shared.perf_run_args.perf_unwinding_mode,

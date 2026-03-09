@@ -64,42 +64,64 @@ impl Orchestrator {
         })
     }
 
-    /// Execute the benchmark target for all configured modes, then upload results.
+    /// Execute all benchmark targets for all configured modes, then upload results.
     ///
-    /// Reads the target from `self.config.target`:
-    /// - `Exec`: installs exec-harness, wraps the command, then runs all modes
-    /// - `Entrypoint`: runs the command directly across all modes
+    /// Processes `self.config.targets` as follows:
+    /// - All `Exec` targets are combined into a single exec-harness invocation (one executor per mode)
+    /// - Each `Entrypoint` target is run independently (one executor per mode per target)
     pub async fn execute<F>(&self, setup_cache_dir: Option<&Path>, poll_results: F) -> Result<()>
     where
         F: AsyncFn(&UploadResult) -> Result<()>,
     {
-        match &self.config.target {
-            BenchmarkTarget::Exec {
-                command,
-                name,
-                walltime_args,
-            } => {
-                ensure_binary_installed(EXEC_HARNESS_COMMAND, EXEC_HARNESS_VERSION, || {
-                    format!(
-                        "https://github.com/CodSpeedHQ/codspeed/releases/download/exec-harness-v{EXEC_HARNESS_VERSION}/exec-harness-installer.sh"
-                    )
-                })
-                .await?;
+        let exec_targets: Vec<&BenchmarkTarget> = self
+            .config
+            .targets
+            .iter()
+            .filter(|t| matches!(t, BenchmarkTarget::Exec { .. }))
+            .collect();
 
-                let single_target = BenchmarkTarget::Exec {
-                    command: command.clone(),
-                    name: name.clone(),
-                    walltime_args: walltime_args.clone(),
-                };
-                let pipe_cmd = multi_targets::build_exec_targets_pipe_command(&[&single_target])?;
-                let completed_runs = self.run_all_modes(pipe_cmd, setup_cache_dir).await?;
-                self.upload_and_poll(completed_runs, &poll_results).await?;
-            }
-            BenchmarkTarget::Entrypoint { command, .. } => {
-                let completed_runs = self.run_all_modes(command.clone(), setup_cache_dir).await?;
-                self.upload_and_poll(completed_runs, &poll_results).await?;
-            }
+        let entrypoint_targets: Vec<&BenchmarkTarget> = self
+            .config
+            .targets
+            .iter()
+            .filter(|t| matches!(t, BenchmarkTarget::Entrypoint { .. }))
+            .collect();
+
+        let mut all_completed_runs = vec![];
+
+        if !self.config.skip_run {
+            start_opened_group!("Running the benchmarks");
         }
+
+        // All exec targets combined into a single exec-harness invocation
+        if !exec_targets.is_empty() {
+            ensure_binary_installed(EXEC_HARNESS_COMMAND, EXEC_HARNESS_VERSION, || {
+                format!(
+                    "https://github.com/CodSpeedHQ/codspeed/releases/download/exec-harness-v{EXEC_HARNESS_VERSION}/exec-harness-installer.sh"
+                )
+            })
+            .await?;
+
+            let pipe_cmd = multi_targets::build_exec_targets_pipe_command(&exec_targets)?;
+            let completed_runs = self.run_all_modes(pipe_cmd, setup_cache_dir).await?;
+            all_completed_runs.extend(completed_runs);
+        }
+
+        // Each entrypoint target runs independently
+        for target in entrypoint_targets {
+            let BenchmarkTarget::Entrypoint { command, .. } = target else {
+                unreachable!()
+            };
+            let completed_runs = self.run_all_modes(command.clone(), setup_cache_dir).await?;
+            all_completed_runs.extend(completed_runs);
+        }
+
+        if !self.config.skip_run {
+            end_group!();
+        }
+
+        self.upload_and_poll(all_completed_runs, &poll_results)
+            .await?;
 
         Ok(())
     }
@@ -113,9 +135,6 @@ impl Orchestrator {
         let modes = &self.config.modes;
         let is_multi_mode = modes.len() > 1;
         let mut completed_runs: Vec<(ExecutionContext, ExecutorName)> = vec![];
-        if !self.config.skip_run {
-            start_opened_group!("Running the benchmarks");
-        }
         for mode in modes {
             if is_multi_mode {
                 info!("Running benchmarks for {mode} mode");
@@ -131,9 +150,6 @@ impl Orchestrator {
 
             run_executor(executor.as_ref(), self, &ctx, setup_cache_dir).await?;
             completed_runs.push((ctx, executor.name()));
-        }
-        if !self.config.skip_run {
-            end_group!();
         }
         Ok(completed_runs)
     }
@@ -165,12 +181,19 @@ impl Orchestrator {
     }
 
     /// Build the structured suffix that differentiates this upload within the run.
-    /// This is a temporary implementation
-    fn build_run_part_suffix(executor_name: &ExecutorName) -> BTreeMap<String, Value> {
-        BTreeMap::from([(
+    fn build_run_part_suffix(
+        executor_name: &ExecutorName,
+        run_part_index: usize,
+        total_runs: usize,
+    ) -> BTreeMap<String, Value> {
+        let mut suffix = BTreeMap::from([(
             "executor".to_string(),
             Value::from(executor_name.to_string()),
-        )])
+        )]);
+        if total_runs > 1 {
+            suffix.insert("run-part-index".to_string(), Value::from(run_part_index));
+        }
+        suffix
     }
 
     pub async fn upload_all(
@@ -180,7 +203,7 @@ impl Orchestrator {
         let mut last_upload_result: Option<UploadResult> = None;
 
         let total_runs = completed_runs.len();
-        for (ctx, executor_name) in completed_runs.iter_mut() {
+        for (run_part_index, (ctx, executor_name)) in completed_runs.iter_mut().enumerate() {
             if !self.is_local() {
                 // OIDC tokens can expire quickly, so refresh just before each upload
                 self.provider.set_oidc_token(&mut ctx.config).await?;
@@ -189,7 +212,8 @@ impl Orchestrator {
             if total_runs > 1 {
                 info!("Uploading results for {executor_name:?} executor");
             }
-            let run_part_suffix = Self::build_run_part_suffix(executor_name);
+            let run_part_suffix =
+                Self::build_run_part_suffix(executor_name, run_part_index, total_runs);
             let upload_result = upload(self, ctx, executor_name.clone(), run_part_suffix).await?;
             last_upload_result = Some(upload_result);
         }

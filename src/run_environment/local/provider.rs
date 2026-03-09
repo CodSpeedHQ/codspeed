@@ -59,7 +59,7 @@ impl LocalProvider {
 
         let resolved = Self::resolve_repository(config, api_client, git_context.as_ref()).await?;
 
-        let expected_run_parts_count = config.modes.len() as u32;
+        let expected_run_parts_count = config.expected_run_parts_count();
 
         Ok(Self {
             repository_provider: resolved.provider,

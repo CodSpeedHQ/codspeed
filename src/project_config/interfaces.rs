@@ -14,14 +14,20 @@ pub struct ProjectConfig {
     pub benchmarks: Option<Vec<Target>>,
 }
 
-/// A benchmark target to execute
+/// A benchmark target to execute.
+///
+/// Either `exec` or `entrypoint` must be specified (mutually exclusive).
 #[derive(Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct Target {
-    /// Optional name for this target
+    /// Optional name for this target (display purposes only)
     pub name: Option<String>,
-    /// Command to execute
-    pub exec: String,
+    /// Optional id to run a subset of targets (e.g. `codspeed run --bench my_id`)
+    pub id: Option<String>,
+    /// Command measured by exec-harness (mutually exclusive with `entrypoint`)
+    pub exec: Option<String>,
+    /// Command with built-in benchmark harness (mutually exclusive with `exec`)
+    pub entrypoint: Option<String>,
     /// Target-specific options
     pub options: Option<TargetOptions>,
 }
