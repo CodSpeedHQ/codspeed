@@ -1,6 +1,6 @@
 {
   "name": "CodSpeed",
-  "description": "CodSpeed plugin for Claude Code helpig with performance measurement and optimizaiton.",
+  "description": "CodSpeed plugin for Claude Code helping with performance measurement and optimizaiton.",
   "version": "1.0.0",
   "author": {
     "name": "CodSpeed"
