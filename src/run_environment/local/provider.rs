@@ -57,7 +57,11 @@ impl LocalProvider {
             .map(|ctx| ctx.root_path.clone())
             .unwrap_or_else(|| current_dir.to_string_lossy().to_string());
 
-        let resolved = Self::resolve_repository(config, api_client, git_context.as_ref()).await?;
+        let resolved = if !config.skip_upload {
+            Self::resolve_repository(config, api_client, git_context.as_ref()).await?
+        } else {
+            Self::dummy_resolved_repository(git_context.as_ref())
+        };
 
         let expected_run_parts_count = config.expected_run_parts_count();
 
@@ -82,6 +86,21 @@ impl LocalProvider {
                 root_path: path.to_string_lossy().to_string(),
             }
         })
+    }
+
+    /// Create a dummy resolved repository, resolved offline when --skip-upload is used and we don't need to resolve the actual repository information from the API
+    fn dummy_resolved_repository(git_context: Option<&GitContext>) -> ResolvedRepository {
+        let (ref_, head_ref) = git_context
+            .and_then(|ctx| Self::get_git_ref_info(&ctx.root_path).ok())
+            .unwrap_or_else(|| (FAKE_COMMIT_REF.to_string(), None));
+
+        ResolvedRepository {
+            provider: RepositoryProvider::GitHub,
+            owner: "local".to_string(),
+            name: "local".to_string(),
+            ref_,
+            head_ref,
+        }
     }
 
     /// Resolve repository information from override, git remote, or API fallback
