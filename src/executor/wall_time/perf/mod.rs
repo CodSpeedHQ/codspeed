@@ -96,6 +96,12 @@ impl PerfRunner {
         // Infer the unwinding mode from the benchmark cmd
         let (cg_mode, stack_size) = if let Some(mode) = config.perf_unwinding_mode {
             (mode, None)
+        } else if config.command.contains("gradle")
+            || config.command.contains("java")
+            || config.command.contains("maven")
+        {
+            // In Java, we must use FP unwinding otherwise we'll have broken call stacks.
+            (UnwindingMode::FramePointer, None)
         } else if config.command.contains("cargo") {
             (UnwindingMode::Dwarf, None)
         } else if config.command.contains("pytest")
