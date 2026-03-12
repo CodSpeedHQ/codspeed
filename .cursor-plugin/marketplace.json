@@ -1,0 +1,13 @@
+{
+  "name": "codspeed-plugin-marketplace",
+  "owner": {
+    "name": "CodSpeed"
+  },
+  "plugins": [
+    {
+      "name": "codspeed",
+      "source": "./",
+      "description": "Tools for accurate and reliable performance measurement and optimization"
+    }
+  ]
+}
