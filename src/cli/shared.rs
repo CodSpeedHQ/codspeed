@@ -106,6 +106,10 @@ pub struct ExecAndRunSharedArgs {
     #[arg(long, env = "CODSPEED_GO_RUNNER_VERSION", value_parser = parse_version)]
     pub go_runner_version: Option<semver::Version>,
 
+    /// Show full executor output instead of a rolling buffer window
+    #[arg(long, default_value = "false")]
+    pub show_full_output: bool,
+
     #[command(flatten)]
     pub perf_run_args: PerfRunArgs,
 }

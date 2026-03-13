@@ -160,6 +160,7 @@ mod tests {
             skip_setup: false,
             allow_empty: false,
             go_runner_version: None,
+            show_full_output: false,
             perf_run_args: PerfRunArgs {
                 enable_perf: true,
                 perf_unwinding_mode: None,
@@ -193,6 +194,7 @@ mod tests {
             skip_setup: false,
             allow_empty: false,
             go_runner_version: None,
+            show_full_output: false,
             perf_run_args: PerfRunArgs {
                 enable_perf: true,
                 perf_unwinding_mode: None,
@@ -228,6 +230,7 @@ mod tests {
             skip_setup: false,
             allow_empty: false,
             go_runner_version: None,
+            show_full_output: false,
             perf_run_args: PerfRunArgs {
                 enable_perf: false,
                 perf_unwinding_mode: None,
