@@ -6,6 +6,7 @@ use crate::cli::run::logger::Logger;
 use crate::config::CodSpeedConfig;
 use crate::executor::config::BenchmarkTarget;
 use crate::executor::config::OrchestratorConfig;
+use crate::local_logger::rolling_buffer::{activate_rolling_buffer, deactivate_rolling_buffer};
 use crate::prelude::*;
 use crate::run_environment::{self, RunEnvironment, RunEnvironmentProvider};
 use crate::runner_mode::RunnerMode;
@@ -135,10 +136,7 @@ impl Orchestrator {
         let modes = &self.config.modes;
         let is_multi_mode = modes.len() > 1;
         let mut completed_runs: Vec<(ExecutionContext, ExecutorName)> = vec![];
-        for mode in modes {
-            if is_multi_mode {
-                info!("Running benchmarks for {mode} mode");
-            }
+        for mode in modes.iter() {
             let mut per_mode_config = self.config.executor_config_for_command(command.clone());
             // For multi-mode runs, always create a fresh profile folder per mode
             // even if the user specified one (to avoid modes overwriting each other).
@@ -148,7 +146,12 @@ impl Orchestrator {
             let ctx = ExecutionContext::new(per_mode_config)?;
             let executor = get_executor_from_mode(mode);
 
+            let rolling_title = format!("[{mode}] Running benchmarks");
+            activate_rolling_buffer(&rolling_title);
+
             run_executor(executor.as_ref(), self, &ctx, setup_cache_dir).await?;
+
+            deactivate_rolling_buffer();
             completed_runs.push((ctx, executor.name()));
         }
         Ok(completed_runs)
@@ -210,7 +213,7 @@ impl Orchestrator {
             }
 
             if total_runs > 1 {
-                info!("Uploading results for {executor_name:?} executor");
+                info!("Uploading results {}/{total_runs}", run_part_index + 1);
             }
             let run_part_suffix =
                 Self::build_run_part_suffix(executor_name, run_part_index, total_runs);

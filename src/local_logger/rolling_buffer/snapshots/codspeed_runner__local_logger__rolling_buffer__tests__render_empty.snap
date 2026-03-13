@@ -1,0 +1,7 @@
+---
+source: src/local_logger/rolling_buffer/tests.rs
+expression: render_stripped(&rb)
+---
+     Running benchmarks
+    ╭──────────────────────────────────────────────────────╮
+    ╰──────────────────────────────────────────────────────╯

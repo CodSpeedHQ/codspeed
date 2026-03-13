@@ -192,7 +192,7 @@ pub async fn run(
             if !orchestrator.is_local() {
                 super::show_banner();
             }
-            debug!("config: {:#?}", orchestrator.config);
+            debug!("config: {:?}", orchestrator.config);
 
             let poll_opts = PollResultsOptions::for_run(output_json);
             let poll_results_fn = async |upload_result: &UploadResult| {
