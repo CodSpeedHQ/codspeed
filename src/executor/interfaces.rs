@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
@@ -8,13 +9,32 @@ pub enum ExecutorName {
     Memory,
 }
 
-#[allow(clippy::to_string_trait_impl)]
-impl ToString for ExecutorName {
-    fn to_string(&self) -> String {
+impl fmt::Display for ExecutorName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ExecutorName::Valgrind => "valgrind".to_string(),
-            ExecutorName::WallTime => "walltime".to_string(),
-            ExecutorName::Memory => "memory".to_string(),
+            ExecutorName::Valgrind => write!(f, "valgrind"),
+            ExecutorName::WallTime => write!(f, "walltime"),
+            ExecutorName::Memory => write!(f, "memory"),
+        }
+    }
+}
+
+impl ExecutorName {
+    /// Human-readable label for this executor.
+    pub fn label(&self) -> &'static str {
+        match self {
+            ExecutorName::Valgrind => "CPU Simulation",
+            ExecutorName::WallTime => "Walltime",
+            ExecutorName::Memory => "Memory",
+        }
+    }
+
+    /// Nerd Font icon for this executor.
+    pub fn icon(&self) -> &'static str {
+        match self {
+            ExecutorName::Valgrind => "\u{f4bc}",
+            ExecutorName::WallTime => "\u{f520}",
+            ExecutorName::Memory => "\u{efc5}",
         }
     }
 }

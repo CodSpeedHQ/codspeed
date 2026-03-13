@@ -159,7 +159,11 @@ fn build_simulation_table(results: &[&FetchLocalRunBenchmarkResult]) -> String {
             }
         })
         .collect();
-    build_table_with_style(&rows, "CPU Simulation", "\u{2699}")
+    build_table_with_style(
+        &rows,
+        ExecutorName::Valgrind.label(),
+        ExecutorName::Valgrind.icon(),
+    )
 }
 
 fn build_walltime_table(results: &[&FetchLocalRunBenchmarkResult]) -> String {
@@ -197,7 +201,11 @@ fn build_walltime_table(results: &[&FetchLocalRunBenchmarkResult]) -> String {
             }
         })
         .collect();
-    build_table_with_style(&rows, "Walltime", "\u{23F1}")
+    build_table_with_style(
+        &rows,
+        ExecutorName::WallTime.label(),
+        ExecutorName::WallTime.icon(),
+    )
 }
 
 fn build_memory_table(results: &[&FetchLocalRunBenchmarkResult]) -> String {
@@ -231,7 +239,11 @@ fn build_memory_table(results: &[&FetchLocalRunBenchmarkResult]) -> String {
             }
         })
         .collect();
-    build_table_with_style(&rows, "Memory", "\u{2630}")
+    build_table_with_style(
+        &rows,
+        ExecutorName::Memory.label(),
+        ExecutorName::Memory.icon(),
+    )
 }
 
 pub fn build_benchmark_table(results: &[FetchLocalRunBenchmarkResult]) -> String {

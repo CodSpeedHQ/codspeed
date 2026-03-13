@@ -128,10 +128,17 @@ impl Orchestrator {
         let run_parts: Vec<ExecutorTarget> = command_labels
             .iter()
             .flat_map(|(cmd, label)| {
-                modes.iter().map(move |mode| ExecutorTarget {
-                    command: cmd.clone(),
-                    mode,
-                    label: format!("[{mode}] {label}"),
+                modes.iter().map(move |mode| {
+                    let executor_name = get_executor_from_mode(mode).name();
+                    ExecutorTarget {
+                        command: cmd.clone(),
+                        mode,
+                        label: format!(
+                            "{} {} - {label}",
+                            executor_name.icon(),
+                            executor_name.label()
+                        ),
+                    }
                 })
             })
             .collect();
@@ -145,11 +152,11 @@ impl Orchestrator {
 
         for (run_part_index, part) in run_parts.into_iter().enumerate() {
             let config = self.config.executor_config_for_command(part.command);
+            let executor = get_executor_from_mode(part.mode);
             let profile_folder =
-                self.resolve_profile_folder(part.mode, run_part_index, total_parts)?;
+                self.resolve_profile_folder(&executor.name(), run_part_index, total_parts)?;
 
             let ctx = ExecutionContext::new(config, profile_folder);
-            let executor = get_executor_from_mode(part.mode);
 
             activate_rolling_buffer(&part.label);
 
@@ -172,18 +179,18 @@ impl Orchestrator {
     /// Resolve the profile folder for a given run part.
     ///
     /// - Single run part + user-specified folder: use as-is
-    /// - Multiple run parts + user-specified folder: `<folder>/<mode>-<index>`
+    /// - Multiple run parts + user-specified folder: `<folder>/<executor>-<index>`
     /// - No user-specified folder: create a random temp folder
     fn resolve_profile_folder(
         &self,
-        mode: &RunnerMode,
+        executor_name: &ExecutorName,
         run_part_index: usize,
         total_parts: usize,
     ) -> Result<PathBuf> {
         match (&self.config.profile_folder, total_parts) {
             (Some(folder), 1) => Ok(folder.clone()),
             (Some(folder), _) => {
-                let subfolder = folder.join(format!("{mode}-{run_part_index}"));
+                let subfolder = folder.join(format!("{executor_name}-{run_part_index}"));
                 std::fs::create_dir_all(&subfolder).with_context(|| {
                     format!(
                         "Failed to create profile subfolder: {}",
