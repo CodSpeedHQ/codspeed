@@ -2,6 +2,7 @@ use console::style;
 
 use crate::api_client::CodSpeedAPIClient;
 use crate::cli::run::helpers::benchmark_display::{build_benchmark_table, build_detailed_summary};
+use crate::local_logger::{start_spinner, stop_spinner};
 use crate::prelude::*;
 
 use super::{UploadResult, poll_run_report};
@@ -42,7 +43,10 @@ pub async fn poll_results(
     upload_result: &UploadResult,
     options: &PollResultsOptions,
 ) -> Result<()> {
-    let response = poll_run_report(api_client, upload_result).await?;
+    start_spinner("Waiting for results");
+    let response = poll_run_report(api_client, upload_result).await;
+    stop_spinner();
+    let response = response?;
 
     if options.show_impact {
         let report = response.run.head_reports.into_iter().next();

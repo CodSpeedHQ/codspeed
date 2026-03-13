@@ -3,13 +3,13 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use super::{CODSPEED_U8_COLOR_CODE, IS_TTY, SPINNER, format_checkmark};
+use super::{
+    CODSPEED_U8_COLOR_CODE, IS_TTY, SPINNER, SPINNER_TICKS, TICK_INTERVAL_MS, format_checkmark,
+};
 use console::{Term, style};
 use lazy_static::lazy_static;
 
 const INDENT: &str = "    ";
-const SPINNER_TICKS: &[&str] = &["  ", ". ", "..", " ."];
-const TICK_INTERVAL_MS: u128 = 300;
 
 lazy_static! {
     /// Global shared rolling buffer, set by `activate_rolling_buffer` and
@@ -19,6 +19,11 @@ lazy_static! {
 }
 
 /// Stop signal for the tick thread.
+///
+/// The rolling buffer manages its own background tick thread rather than using
+/// `ProgressBar` because it renders a multi-line frame (title + bordered log box)
+/// via direct terminal cursor manipulation. `ProgressBar` only manages a single
+/// line and would conflict with the rolling buffer's cursor movements.
 static TICK_STOP: AtomicBool = AtomicBool::new(false);
 
 pub struct RollingBuffer {
@@ -100,7 +105,7 @@ impl RollingBuffer {
 
     fn spinner_tick(&self) -> &'static str {
         let elapsed_ms = self.start.elapsed().as_millis();
-        let idx = (elapsed_ms / TICK_INTERVAL_MS) as usize % SPINNER_TICKS.len();
+        let idx = (elapsed_ms / TICK_INTERVAL_MS as u128) as usize % SPINNER_TICKS.len();
         SPINNER_TICKS[idx]
     }
 
@@ -297,7 +302,7 @@ pub fn activate_rolling_buffer(title: &str) {
     TICK_STOP.store(false, Ordering::Relaxed);
     std::thread::spawn(|| {
         while !TICK_STOP.load(Ordering::Relaxed) {
-            std::thread::sleep(Duration::from_millis(TICK_INTERVAL_MS as u64));
+            std::thread::sleep(Duration::from_millis(TICK_INTERVAL_MS));
             if TICK_STOP.load(Ordering::Relaxed) {
                 break;
             }

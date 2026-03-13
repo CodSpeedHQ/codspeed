@@ -19,7 +19,10 @@ use crate::logger::{GroupEvent, JsonEvent, get_group_event, get_json_event};
 pub const CODSPEED_U8_COLOR_CODE: u8 = 208; // #FF8700
 
 /// Spinner tick characters - smooth animation for a polished feel
-const SPINNER_TICKS: &[&str] = &["  ", ". ", "..", " ."];
+pub(crate) const SPINNER_TICKS: &[&str] = &["  ", ". ", "..", " ."];
+
+/// Interval between spinner animation ticks (milliseconds)
+pub(crate) const TICK_INTERVAL_MS: u64 = 300;
 
 lazy_static! {
     pub static ref SPINNER: Arc<Mutex<Option<ProgressBar>>> = Arc::new(Mutex::new(None));
@@ -88,32 +91,7 @@ impl Log for LocalLogger {
                             *current = Some(name.clone());
                         }
 
-                        if *IS_TTY {
-                            let spinner = ProgressBar::new_spinner();
-                            let tick_strings: Vec<String> = SPINNER_TICKS
-                                .iter()
-                                .map(|s| {
-                                    format!("{}", style(s).color256(CODSPEED_U8_COLOR_CODE).dim())
-                                })
-                                .collect();
-                            let tick_strs: Vec<&str> =
-                                tick_strings.iter().map(|s| s.as_str()).collect();
-
-                            spinner.set_style(
-                                ProgressStyle::with_template(
-                                    &format!(
-                                        "  {{spinner}} {{wide_msg:.{CODSPEED_U8_COLOR_CODE}}} {{elapsed:.dim}}"
-                                    ),
-                                )
-                                .unwrap()
-                                .tick_strings(&tick_strs),
-                            );
-                            spinner.set_message(format!("{name}..."));
-                            spinner.enable_steady_tick(Duration::from_millis(300));
-                            SPINNER.lock().unwrap().replace(spinner);
-                        } else {
-                            eprintln!("{name}...");
-                        }
+                        install_spinner(&name);
                     }
                 }
                 GroupEvent::End => {
@@ -260,6 +238,54 @@ pub fn init_local_logger() -> Result<()> {
     let logger = get_local_logger();
     CombinedLogger::init(vec![logger])?;
     Ok(())
+}
+
+/// Create a styled spinner progress bar with CodSpeed branding.
+fn create_spinner(message: &str) -> ProgressBar {
+    let spinner = ProgressBar::new_spinner();
+    let tick_strings: Vec<String> = SPINNER_TICKS
+        .iter()
+        .map(|s| format!("{}", style(s).color256(CODSPEED_U8_COLOR_CODE).dim()))
+        .collect();
+    let tick_strs: Vec<&str> = tick_strings.iter().map(|s| s.as_str()).collect();
+
+    spinner.set_style(
+        ProgressStyle::with_template(&format!(
+            "  {{spinner}} {{wide_msg:.{CODSPEED_U8_COLOR_CODE}}} {{elapsed:.dim}}"
+        ))
+        .unwrap()
+        .tick_strings(&tick_strs),
+    );
+    spinner.set_message({ message }.to_string());
+    spinner.enable_steady_tick(Duration::from_millis(TICK_INTERVAL_MS));
+    spinner
+}
+
+/// Install a spinner into the global slot so log records suspend it.
+fn install_spinner(message: &str) {
+    if *IS_TTY {
+        let spinner = create_spinner(message);
+        SPINNER.lock().unwrap().replace(spinner);
+    } else {
+        eprintln!("{message}...");
+    }
+}
+
+/// Start a standalone spinner with a message (no group header or checkmark).
+///
+/// The spinner animates on TTY outputs. On non-TTY, prints the message once.
+/// Call [`stop_spinner`] to clear it when done.
+pub fn start_spinner(message: &str) {
+    install_spinner(message);
+}
+
+/// Stop and clear the current standalone spinner.
+pub fn stop_spinner() {
+    if let Ok(mut spinner) = SPINNER.lock() {
+        if let Some(pb) = spinner.take() {
+            pb.finish_and_clear();
+        }
+    }
 }
 
 pub fn clean_logger() {
