@@ -96,6 +96,12 @@ impl PerfRunner {
         // Infer the unwinding mode from the benchmark cmd
         let (cg_mode, stack_size) = if let Some(mode) = config.perf_unwinding_mode {
             (mode, None)
+        } else if config.command.contains("gradle")
+            || config.command.contains("java")
+            || config.command.contains("maven")
+        {
+            // In Java, we must use FP unwinding otherwise we'll have broken call stacks.
+            (UnwindingMode::FramePointer, None)
         } else if config.command.contains("cargo") {
             (UnwindingMode::Dwarf, None)
         } else if config.command.contains("pytest")
@@ -216,6 +222,16 @@ impl PerfRunner {
         let on_cmd = async |cmd: &FifoCommand| {
             #[allow(deprecated)]
             match cmd {
+                // Print /proc/{pid}/maps for the benchmark process. This helps with debugging missing symbols, as
+                // it allows finding the module in which an address is located.
+                FifoCommand::CurrentBenchmark { pid, .. } if is_codspeed_debug_enabled() => {
+                    let maps_path = format!("/proc/{pid}/maps");
+                    match std::fs::read_to_string(&maps_path) {
+                        Ok(maps) => debug!("/proc/{pid}/maps:\n{maps}"),
+                        Err(e) => debug!("Failed to read {maps_path}: {e}"),
+                    }
+                    return Ok(None);
+                }
                 FifoCommand::StartBenchmark => {
                     perf_fifo.start_events().await?;
                 }
