@@ -1,5 +1,5 @@
-use super::EXEC_HARNESS_COMMAND;
 use crate::executor::config::BenchmarkTarget;
+use crate::executor::orchestrator::EXEC_HARNESS_COMMAND;
 use crate::prelude::*;
 use crate::project_config::{Target, TargetCommand, WalltimeOptions};
 use exec_harness::BenchmarkCommand;

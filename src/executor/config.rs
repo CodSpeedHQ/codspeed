@@ -3,6 +3,7 @@ use crate::instruments::Instruments;
 use crate::prelude::*;
 use crate::run_environment::RepositoryProvider;
 use crate::runner_mode::RunnerMode;
+use crate::upload::poll_results::PollResultsOptions;
 use clap::ValueEnum;
 use semver::Version;
 use std::path::PathBuf;
@@ -71,6 +72,10 @@ pub struct OrchestratorConfig {
     pub allow_empty: bool,
     /// The version of go-runner to install (if None, installs latest)
     pub go_runner_version: Option<Version>,
+    /// If true, show full executor output instead of a rolling buffer window
+    pub show_full_output: bool,
+    /// Options controlling post-upload result polling and display
+    pub poll_results_options: PollResultsOptions,
 }
 
 /// Per-execution configuration passed to executors.
@@ -92,7 +97,6 @@ pub struct ExecutorConfig {
 
     pub simulation_tool: SimulationTool,
 
-    pub profile_folder: Option<PathBuf>,
     pub skip_run: bool,
     pub skip_setup: bool,
     /// If true, allow execution even when no benchmarks are found
@@ -161,7 +165,6 @@ impl OrchestratorConfig {
             enable_perf: self.enable_perf,
             perf_unwinding_mode: self.perf_unwinding_mode,
             simulation_tool: self.simulation_tool,
-            profile_folder: self.profile_folder.clone(),
             skip_run: self.skip_run,
             skip_setup: self.skip_setup,
             allow_empty: self.allow_empty,
@@ -200,6 +203,8 @@ impl OrchestratorConfig {
             skip_setup: false,
             allow_empty: false,
             go_runner_version: None,
+            show_full_output: false,
+            poll_results_options: PollResultsOptions::for_exec(),
         }
     }
 }

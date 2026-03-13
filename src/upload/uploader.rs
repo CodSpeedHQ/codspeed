@@ -321,13 +321,13 @@ mod tests {
             ))),
             ..OrchestratorConfig::test()
         };
+        let profile_folder = PathBuf::from(format!(
+            "{}/src/uploader/samples/adrien-python-test",
+            env!("CARGO_MANIFEST_DIR")
+        ));
         let executor_config = ExecutorConfig {
             command: "pytest tests/ --codspeed".into(),
             token: Some("change me".into()),
-            profile_folder: Some(PathBuf::from(format!(
-                "{}/src/uploader/samples/adrien-python-test",
-                env!("CARGO_MANIFEST_DIR")
-            ))),
             ..ExecutorConfig::test()
         };
         async_with_vars(
@@ -365,8 +365,7 @@ mod tests {
                     Orchestrator::new(orchestrator_config, &codspeed_config, &api_client)
                         .await
                         .expect("Failed to create Orchestrator for test");
-                let execution_context = ExecutionContext::new(executor_config)
-                    .expect("Failed to create ExecutionContext");
+                let execution_context = ExecutionContext::new(executor_config, profile_folder);
                 let run_part_suffix =
                     BTreeMap::from([("executor".to_string(), Value::from("valgrind"))]);
                 upload(

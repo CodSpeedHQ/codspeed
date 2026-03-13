@@ -2,11 +2,13 @@ use console::style;
 
 use crate::api_client::CodSpeedAPIClient;
 use crate::cli::run::helpers::benchmark_display::{build_benchmark_table, build_detailed_summary};
+use crate::local_logger::{start_spinner, stop_spinner};
 use crate::prelude::*;
 
 use super::{UploadResult, poll_run_report};
 
 /// Options controlling poll_results display behavior.
+#[derive(Debug, Clone)]
 pub struct PollResultsOptions {
     /// If true, show impact percentage (used by `codspeed run`)
     pub show_impact: bool,
@@ -41,26 +43,41 @@ pub async fn poll_results(
     upload_result: &UploadResult,
     options: &PollResultsOptions,
 ) -> Result<()> {
-    let response = poll_run_report(api_client, upload_result).await?;
+    start_spinner("Waiting for results");
+    let response = poll_run_report(api_client, upload_result).await;
+    stop_spinner();
+    let response = response?;
 
     if options.show_impact {
         let report = response.run.head_reports.into_iter().next();
         if let Some(report) = report {
             if let Some(impact) = report.impact {
                 let rounded_impact = (impact * 100.0).round();
-                let impact_text = if impact > 0.0 {
-                    style(format!("+{rounded_impact}%")).green().bold()
+                let (arrow, impact_text) = if impact > 0.0 {
+                    (
+                        style("\u{f062}").green(),
+                        style(format!("+{rounded_impact}%")).green().bold(),
+                    )
+                } else if impact < 0.0 {
+                    (
+                        style("\u{f063}").red(),
+                        style(format!("{rounded_impact}%")).red().bold(),
+                    )
                 } else {
-                    style(format!("{rounded_impact}%")).red().bold()
+                    (
+                        style("\u{25CF}").dim(),
+                        style(format!("{rounded_impact}%")).dim().bold(),
+                    )
                 };
 
-                info!(
-                    "Impact: {} (allowed regression: -{}%)",
-                    impact_text,
-                    (response.allowed_regression * 100.0).round()
-                );
+                let allowed = (response.allowed_regression * 100.0).round();
+                info!("{arrow} Impact: {impact_text} (allowed regression: -{allowed}%)");
             } else {
-                info!("No impact detected, reason: {}", report.conclusion);
+                info!(
+                    "{} No impact detected, reason: {}",
+                    style("\u{25CB}").dim(),
+                    report.conclusion
+                );
             }
         }
     }
@@ -78,14 +95,14 @@ pub async fn poll_results(
         );
     } else {
         end_group!();
-        start_group!("Benchmark results");
+        start_opened_group!("Benchmark results");
 
         if options.detailed_single && response.run.results.len() == 1 {
             let summary = build_detailed_summary(&response.run.results[0]);
-            info!("\n{summary}");
+            info!("{summary}\n");
         } else {
             let table = build_benchmark_table(&response.run.results);
-            info!("\n{table}");
+            info!("{table}\n");
         }
 
         if options.output_json {
@@ -98,10 +115,10 @@ pub async fn poll_results(
         }
 
         info!(
-            "\nTo see the full report, visit: {}",
+            "\n{} {}",
+            style("View full report:").dim(),
             style(response.run.url).blue().bold().underlined()
         );
-        end_group!();
     }
 
     Ok(())

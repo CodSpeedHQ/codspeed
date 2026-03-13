@@ -10,7 +10,7 @@ pub async fn setup(setup_cache_dir: Option<&Path>) -> Result<()> {
     for executor in executors {
         info!(
             "Setting up the environment for the executor: {}",
-            executor.name().to_string()
+            executor.name()
         );
         executor.setup(&system_info, setup_cache_dir).await?;
     }
