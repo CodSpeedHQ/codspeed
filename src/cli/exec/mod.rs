@@ -88,6 +88,7 @@ fn build_orchestrator_config(
         skip_setup: args.shared.skip_setup,
         allow_empty: args.shared.allow_empty,
         go_runner_version: args.shared.go_runner_version,
+        show_full_output: args.shared.show_full_output,
         poll_results_options: PollResultsOptions::for_exec(),
     })
 }

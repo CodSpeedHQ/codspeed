@@ -72,6 +72,8 @@ pub struct OrchestratorConfig {
     pub allow_empty: bool,
     /// The version of go-runner to install (if None, installs latest)
     pub go_runner_version: Option<Version>,
+    /// If true, show full executor output instead of a rolling buffer window
+    pub show_full_output: bool,
     /// Options controlling post-upload result polling and display
     pub poll_results_options: PollResultsOptions,
 }
@@ -201,6 +203,7 @@ impl OrchestratorConfig {
             skip_setup: false,
             allow_empty: false,
             go_runner_version: None,
+            show_full_output: false,
             poll_results_options: PollResultsOptions::for_exec(),
         }
     }

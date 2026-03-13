@@ -160,11 +160,15 @@ impl Orchestrator {
 
             let ctx = ExecutionContext::new(config, profile_folder);
 
-            activate_rolling_buffer(&part.label);
+            if !self.config.show_full_output {
+                activate_rolling_buffer(&part.label);
+            }
 
             run_executor(executor.as_ref(), self, &ctx, setup_cache_dir).await?;
 
-            deactivate_rolling_buffer();
+            if !self.config.show_full_output {
+                deactivate_rolling_buffer();
+            }
             all_completed_runs.push((ctx, executor.name()));
         }
 
