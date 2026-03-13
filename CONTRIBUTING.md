@@ -41,7 +41,7 @@ After releasing `memtrack` or `exec-harness`, you **must** update the version re
    const MEMTRACK_CODSPEED_VERSION: &str = "X.Y.Z"; // Update to new version
    ```
 
-2. **For exec-harness**: Update `EXEC_HARNESS_VERSION` in `src/exec/mod.rs`:
+2. **For exec-harness**: Update `EXEC_HARNESS_VERSION` in `src/executor/orchestrator.rs`:
    ```rust
    const EXEC_HARNESS_VERSION: &str = "X.Y.Z"; // Update to new version
    ```
@@ -57,7 +57,7 @@ The main runner (`codspeed-runner`) should be released after ensuring all depend
 **Verify binary version references**: Check that version constants in the runner code match the released versions:
 
 - `MEMTRACK_CODSPEED_VERSION` in `src/executor/memory/executor.rs`
-- `EXEC_HARNESS_VERSION` in `src/exec/mod.rs`
+- `EXEC_HARNESS_VERSION` in `src/executor/orchestrator.rs`
 
 #### Release Command
 

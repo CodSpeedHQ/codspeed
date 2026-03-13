@@ -1,7 +1,7 @@
 use super::{ExecutionContext, ExecutorName, get_executor_from_mode, run_executor};
 use crate::api_client::CodSpeedAPIClient;
 use crate::binary_installer::ensure_binary_installed;
-use crate::cli::exec::{EXEC_HARNESS_COMMAND, EXEC_HARNESS_VERSION, multi_targets};
+use crate::cli::exec::multi_targets;
 use crate::cli::run::logger::Logger;
 use crate::config::CodSpeedConfig;
 use crate::executor::config::BenchmarkTarget;
@@ -16,6 +16,9 @@ use crate::upload::{UploadResult, upload};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+
+pub const EXEC_HARNESS_COMMAND: &str = "exec-harness";
+pub const EXEC_HARNESS_VERSION: &str = "1.2.0";
 
 /// Shared orchestration state created once per CLI invocation.
 ///

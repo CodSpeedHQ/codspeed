@@ -18,9 +18,6 @@ pub mod multi_targets;
 /// We temporarily force this name for all exec runs
 pub const DEFAULT_REPOSITORY_NAME: &str = "local-runs";
 
-pub const EXEC_HARNESS_COMMAND: &str = "exec-harness";
-pub const EXEC_HARNESS_VERSION: &str = "1.2.0";
-
 #[derive(Args, Debug)]
 pub struct ExecArgs {
     #[command(flatten)]

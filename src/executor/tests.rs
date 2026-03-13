@@ -341,7 +341,7 @@ fi
         command: &[String],
     ) -> String {
         shell_words::join(
-            std::iter::once(crate::cli::exec::EXEC_HARNESS_COMMAND)
+            std::iter::once(crate::executor::orchestrator::EXEC_HARNESS_COMMAND)
                 .chain(walltime_args.to_cli_args().iter().map(|s| s.as_str()))
                 .chain(command.iter().map(|s| s.as_str())),
         )
