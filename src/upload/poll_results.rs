@@ -50,12 +50,12 @@ pub async fn poll_results(
                 let rounded_impact = (impact * 100.0).round();
                 let (arrow, impact_text) = if impact > 0.0 {
                     (
-                        style("\u{25B2}").green(),
+                        style("\u{f062}").green(),
                         style(format!("+{rounded_impact}%")).green().bold(),
                     )
                 } else if impact < 0.0 {
                     (
-                        style("\u{25BC}").red(),
+                        style("\u{f063}").red(),
                         style(format!("{rounded_impact}%")).red().bold(),
                     )
                 } else {
@@ -90,14 +90,14 @@ pub async fn poll_results(
         );
     } else {
         end_group!();
-        start_group!("Benchmark results");
+        start_opened_group!("Benchmark results");
 
         if options.detailed_single && response.run.results.len() == 1 {
             let summary = build_detailed_summary(&response.run.results[0]);
-            info!("\n{summary}");
+            info!("{summary}\n");
         } else {
             let table = build_benchmark_table(&response.run.results);
-            info!("\n{table}");
+            info!("{table}\n");
         }
 
         if options.output_json {
@@ -114,7 +114,6 @@ pub async fn poll_results(
             style("View full report:").dim(),
             style(response.run.url).blue().bold().underlined()
         );
-        end_group!();
     }
 
     Ok(())

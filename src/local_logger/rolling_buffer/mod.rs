@@ -189,7 +189,7 @@ impl RollingBuffer {
     /// Render the finished frame (checkmark title instead of spinner).
     fn render_finished_frame(&self) -> Vec<String> {
         let mut frame = Vec::new();
-        frame.push(format_checkmark(&self.title));
+        frame.push(format_checkmark(&self.title, false));
         frame.push(self.render_top_delimiter());
         for line in &self.lines {
             frame.push(self.render_content_line(line));

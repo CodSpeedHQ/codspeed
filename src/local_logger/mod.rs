@@ -72,38 +72,48 @@ impl Log for LocalLogger {
 
         if let Some(group_event) = get_group_event(record) {
             match group_event {
-                GroupEvent::Start(name) | GroupEvent::StartOpened(name) => {
+                GroupEvent::Start(ref name) | GroupEvent::StartOpened(ref name) => {
+                    let opened = matches!(group_event, GroupEvent::StartOpened(_));
+                    let name = name.clone();
+
                     let header = format_group_header(&name);
-                    eprintln!("\n{header}");
+                    eprintln!();
+                    eprintln!("{header}");
+                    eprintln!();
 
-                    // Store current group name for completion message
-                    if let Ok(mut current) = CURRENT_GROUP_NAME.lock() {
-                        *current = Some(name.clone());
-                    }
+                    // Opened groups don't get a spinner or closing checkmark
+                    if !opened {
+                        // Store current group name for completion message
+                        if let Ok(mut current) = CURRENT_GROUP_NAME.lock() {
+                            *current = Some(name.clone());
+                        }
 
-                    if *IS_TTY {
-                        let spinner = ProgressBar::new_spinner();
-                        let tick_strings: Vec<String> = SPINNER_TICKS
-                            .iter()
-                            .map(|s| format!("{}", style(s).color256(CODSPEED_U8_COLOR_CODE).dim()))
-                            .collect();
-                        let tick_strs: Vec<&str> =
-                            tick_strings.iter().map(|s| s.as_str()).collect();
+                        if *IS_TTY {
+                            let spinner = ProgressBar::new_spinner();
+                            let tick_strings: Vec<String> = SPINNER_TICKS
+                                .iter()
+                                .map(|s| {
+                                    format!("{}", style(s).color256(CODSPEED_U8_COLOR_CODE).dim())
+                                })
+                                .collect();
+                            let tick_strs: Vec<&str> =
+                                tick_strings.iter().map(|s| s.as_str()).collect();
 
-                        spinner.set_style(
-                            ProgressStyle::with_template(
-                                &format!(
-                                    "  {{spinner}} {{wide_msg:.{CODSPEED_U8_COLOR_CODE}}} {{elapsed:.dim}}"
-                                ),
-                            )
-                            .unwrap()
-                            .tick_strings(&tick_strs),
-                        );
-                        spinner.set_message(format!("{name}..."));
-                        spinner.enable_steady_tick(Duration::from_millis(300));
-                        SPINNER.lock().unwrap().replace(spinner);
-                    } else {
-                        eprintln!("{name}...");
+                            spinner.set_style(
+                                ProgressStyle::with_template(
+                                    &format!(
+                                        "  {{spinner}} {{wide_msg:.{CODSPEED_U8_COLOR_CODE}}} {{elapsed:.dim}}"
+                                    ),
+                                )
+                                .unwrap()
+                                .tick_strings(&tick_strs),
+                            );
+                            spinner.set_message(format!("{name}..."));
+                            spinner.enable_steady_tick(Duration::from_millis(300));
+                            SPINNER.lock().unwrap().replace(spinner);
+                        } else {
+                            eprintln!("{name}...");
+                        }
                     }
                 }
                 GroupEvent::End => {
@@ -119,7 +129,7 @@ impl Log for LocalLogger {
                                     let elapsed_str = format_elapsed(elapsed);
                                     eprintln!(
                                         "{} {}",
-                                        format_checkmark(&name),
+                                        format_checkmark(&name, true),
                                         style(elapsed_str).dim(),
                                     );
                                 }
@@ -147,18 +157,19 @@ impl Log for LocalLogger {
 
 /// Format a group header with styled prefix
 fn format_group_header(name: &str) -> String {
-    let prefix = style("\u{25B6}").color256(CODSPEED_U8_COLOR_CODE).bold();
+    let prefix = style("\u{f0da}").color256(CODSPEED_U8_COLOR_CODE).bold();
     let title = style(name).bold();
     format!("{prefix} {title}")
 }
 
-/// Format a completion checkmark with a dimmed label.
-pub(crate) fn format_checkmark(label: &str) -> String {
-    format!(
-        "  {} {}",
-        style("\u{2714} ").green().bold(),
-        style(label).dim(),
-    )
+/// Format a completion checkmark with a label.
+pub(crate) fn format_checkmark(label: &str, dim: bool) -> String {
+    let label = if dim {
+        style(label).dim().to_string()
+    } else {
+        label.to_string()
+    };
+    format!("  {}  {}", style("\u{f00c}").green().bold(), label)
 }
 
 /// Format elapsed duration in a compact human-readable way
@@ -196,13 +207,13 @@ fn indent_lines(s: &str, indent: &str) -> String {
 fn print_record(record: &log::Record) {
     match record.level() {
         log::Level::Error => {
-            let prefix = style("\u{2717}").red().bold();
+            let prefix = style("\u{f00d}").red().bold();
             let msg = indent_lines(&format!("{}", record.args()), "    ");
             let msg = Style::new().red().apply_to(msg);
             eprintln!("  {prefix} {msg}");
         }
         log::Level::Warn => {
-            let prefix = style("\u{25B2}").yellow();
+            let prefix = style("\u{f071}").yellow();
             let msg = indent_lines(&format!("{}", record.args()), "    ");
             let msg = Style::new().yellow().apply_to(msg);
             eprintln!("  {prefix} {msg}");
