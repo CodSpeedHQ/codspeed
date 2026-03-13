@@ -1,8 +1,6 @@
 use super::ExecutorConfig;
 use std::path::PathBuf;
 
-use super::create_profile_folder;
-
 /// Per-mode execution context.
 ///
 /// Contains only the mode-specific configuration and the profile folder path.
@@ -14,16 +12,10 @@ pub struct ExecutionContext {
 }
 
 impl ExecutionContext {
-    pub fn new(config: ExecutorConfig) -> anyhow::Result<Self> {
-        let profile_folder = if let Some(profile_folder) = &config.profile_folder {
-            profile_folder.clone()
-        } else {
-            create_profile_folder()?
-        };
-
-        Ok(ExecutionContext {
+    pub fn new(config: ExecutorConfig, profile_folder: PathBuf) -> Self {
+        ExecutionContext {
             config,
             profile_folder,
-        })
+        }
     }
 }

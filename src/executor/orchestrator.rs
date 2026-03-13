@@ -6,6 +6,7 @@ use crate::cli::run::logger::Logger;
 use crate::config::CodSpeedConfig;
 use crate::executor::config::BenchmarkTarget;
 use crate::executor::config::OrchestratorConfig;
+use crate::executor::helpers::profile_folder::create_profile_folder;
 use crate::local_logger::rolling_buffer::{activate_rolling_buffer, deactivate_rolling_buffer};
 use crate::prelude::*;
 use crate::run_environment::{self, RunEnvironment, RunEnvironmentProvider};
@@ -14,7 +15,7 @@ use crate::system::{self, SystemInfo};
 use crate::upload::{UploadResult, upload};
 use serde_json::Value;
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Shared orchestration state created once per CLI invocation.
 ///
@@ -67,13 +68,21 @@ impl Orchestrator {
 
     /// Execute all benchmark targets for all configured modes, then upload results.
     ///
-    /// Processes `self.config.targets` as follows:
-    /// - All `Exec` targets are combined into a single exec-harness invocation (one executor per mode)
-    /// - Each `Entrypoint` target is run independently (one executor per mode per target)
+    /// Flattens all `(command, mode)` pairs into a single iteration:
+    /// - All `Exec` targets are combined into a single exec-harness command
+    /// - Each `Entrypoint` target produces its own command
+    /// - Each command is crossed with every configured mode
+    ///
+    /// Each `(command, mode)` pair gets its own profile folder. When the user
+    /// specifies `--profile-folder` and there are multiple pairs, deterministic
+    /// subdirectories (`<mode>-<index>`) are created under that folder.
     pub async fn execute<F>(&self, setup_cache_dir: Option<&Path>, poll_results: F) -> Result<()>
     where
         F: AsyncFn(&UploadResult) -> Result<()>,
     {
+        // Build (command, label) pairs while we still know the target type
+        let mut command_labels: Vec<(String, String)> = vec![];
+
         let exec_targets: Vec<&BenchmarkTarget> = self
             .config
             .targets
@@ -81,20 +90,6 @@ impl Orchestrator {
             .filter(|t| matches!(t, BenchmarkTarget::Exec { .. }))
             .collect();
 
-        let entrypoint_targets: Vec<&BenchmarkTarget> = self
-            .config
-            .targets
-            .iter()
-            .filter(|t| matches!(t, BenchmarkTarget::Entrypoint { .. }))
-            .collect();
-
-        let mut all_completed_runs = vec![];
-
-        if !self.config.skip_run {
-            start_opened_group!("Running the benchmarks");
-        }
-
-        // All exec targets combined into a single exec-harness invocation
         if !exec_targets.is_empty() {
             ensure_binary_installed(EXEC_HARNESS_COMMAND, EXEC_HARNESS_VERSION, || {
                 format!(
@@ -104,17 +99,61 @@ impl Orchestrator {
             .await?;
 
             let pipe_cmd = multi_targets::build_exec_targets_pipe_command(&exec_targets)?;
-            let completed_runs = self.run_all_modes(pipe_cmd, setup_cache_dir).await?;
-            all_completed_runs.extend(completed_runs);
+            let label = match exec_targets.as_slice() {
+                [BenchmarkTarget::Exec { command, .. }] => {
+                    format!("Running `{}` with exec-harness", command.join(" "))
+                }
+                targets => format!("Running {} commands with exec-harness", targets.len()),
+            };
+            command_labels.push((pipe_cmd, label));
         }
 
-        // Each entrypoint target runs independently
-        for target in entrypoint_targets {
-            let BenchmarkTarget::Entrypoint { command, .. } = target else {
-                unreachable!()
-            };
-            let completed_runs = self.run_all_modes(command.clone(), setup_cache_dir).await?;
-            all_completed_runs.extend(completed_runs);
+        for target in &self.config.targets {
+            if let BenchmarkTarget::Entrypoint { command, .. } = target {
+                command_labels.push((command.clone(), command.clone()));
+            }
+        }
+
+        struct ExecutorTarget<'a> {
+            command: String,
+            mode: &'a RunnerMode,
+            label: String,
+        }
+
+        // Flatten into (command, mode) run parts
+        let modes = &self.config.modes;
+        let run_parts: Vec<ExecutorTarget> = command_labels
+            .iter()
+            .flat_map(|(cmd, label)| {
+                modes.iter().map(move |mode| ExecutorTarget {
+                    command: cmd.clone(),
+                    mode,
+                    label: format!("[{mode}] {label}"),
+                })
+            })
+            .collect();
+
+        let total_parts = run_parts.len();
+        let mut all_completed_runs = vec![];
+
+        if !self.config.skip_run {
+            start_opened_group!("Running the benchmarks");
+        }
+
+        for (run_part_index, part) in run_parts.into_iter().enumerate() {
+            let config = self.config.executor_config_for_command(part.command);
+            let profile_folder =
+                self.resolve_profile_folder(part.mode, run_part_index, total_parts)?;
+
+            let ctx = ExecutionContext::new(config, profile_folder);
+            let executor = get_executor_from_mode(part.mode);
+
+            activate_rolling_buffer(&part.label);
+
+            run_executor(executor.as_ref(), self, &ctx, setup_cache_dir).await?;
+
+            deactivate_rolling_buffer();
+            all_completed_runs.push((ctx, executor.name()));
         }
 
         if !self.config.skip_run {
@@ -127,34 +166,31 @@ impl Orchestrator {
         Ok(())
     }
 
-    /// Run the given command across all configured modes, returning completed run contexts.
-    async fn run_all_modes(
+    /// Resolve the profile folder for a given run part.
+    ///
+    /// - Single run part + user-specified folder: use as-is
+    /// - Multiple run parts + user-specified folder: `<folder>/<mode>-<index>`
+    /// - No user-specified folder: create a random temp folder
+    fn resolve_profile_folder(
         &self,
-        command: String,
-        setup_cache_dir: Option<&Path>,
-    ) -> Result<Vec<(ExecutionContext, ExecutorName)>> {
-        let modes = &self.config.modes;
-        let is_multi_mode = modes.len() > 1;
-        let mut completed_runs: Vec<(ExecutionContext, ExecutorName)> = vec![];
-        for mode in modes.iter() {
-            let mut per_mode_config = self.config.executor_config_for_command(command.clone());
-            // For multi-mode runs, always create a fresh profile folder per mode
-            // even if the user specified one (to avoid modes overwriting each other).
-            if is_multi_mode {
-                per_mode_config.profile_folder = None;
+        mode: &RunnerMode,
+        run_part_index: usize,
+        total_parts: usize,
+    ) -> Result<PathBuf> {
+        match (&self.config.profile_folder, total_parts) {
+            (Some(folder), 1) => Ok(folder.clone()),
+            (Some(folder), _) => {
+                let subfolder = folder.join(format!("{mode}-{run_part_index}"));
+                std::fs::create_dir_all(&subfolder).with_context(|| {
+                    format!(
+                        "Failed to create profile subfolder: {}",
+                        subfolder.display()
+                    )
+                })?;
+                Ok(subfolder)
             }
-            let ctx = ExecutionContext::new(per_mode_config)?;
-            let executor = get_executor_from_mode(mode);
-
-            let rolling_title = format!("[{mode}] Running benchmarks");
-            activate_rolling_buffer(&rolling_title);
-
-            run_executor(executor.as_ref(), self, &ctx, setup_cache_dir).await?;
-
-            deactivate_rolling_buffer();
-            completed_runs.push((ctx, executor.name()));
+            (None, _) => create_profile_folder(),
         }
-        Ok(completed_runs)
     }
 
     /// Upload completed runs and poll results.

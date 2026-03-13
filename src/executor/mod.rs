@@ -19,7 +19,6 @@ use crate::system::SystemInfo;
 use async_trait::async_trait;
 pub use config::{BenchmarkTarget, ExecutorConfig, OrchestratorConfig};
 pub use execution_context::ExecutionContext;
-pub use helpers::profile_folder::create_profile_folder;
 pub use interfaces::ExecutorName;
 pub use orchestrator::Orchestrator;
 

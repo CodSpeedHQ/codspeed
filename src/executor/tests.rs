@@ -120,16 +120,15 @@ fn env_test_cases(#[case] env_case: (&str, &str)) {}
 async fn create_test_setup(config: ExecutorConfig) -> (ExecutionContext, TempDir) {
     let temp_dir = TempDir::new().unwrap();
 
-    let mut config_with_folder = config;
-    config_with_folder.profile_folder = Some(temp_dir.path().to_path_buf());
+    let mut config = config;
 
     // Provide a test token so authentication doesn't fail
-    if config_with_folder.token.is_none() {
-        config_with_folder.token = Some("test-token".to_string());
+    if config.token.is_none() {
+        config.token = Some("test-token".to_string());
     }
 
-    let execution_context =
-        ExecutionContext::new(config_with_folder).expect("Failed to create ExecutionContext");
+    let profile_folder = temp_dir.path().to_path_buf();
+    let execution_context = ExecutionContext::new(config, profile_folder);
 
     (execution_context, temp_dir)
 }

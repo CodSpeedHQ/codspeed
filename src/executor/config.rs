@@ -92,7 +92,6 @@ pub struct ExecutorConfig {
 
     pub simulation_tool: SimulationTool,
 
-    pub profile_folder: Option<PathBuf>,
     pub skip_run: bool,
     pub skip_setup: bool,
     /// If true, allow execution even when no benchmarks are found
@@ -161,7 +160,6 @@ impl OrchestratorConfig {
             enable_perf: self.enable_perf,
             perf_unwinding_mode: self.perf_unwinding_mode,
             simulation_tool: self.simulation_tool,
-            profile_folder: self.profile_folder.clone(),
             skip_run: self.skip_run,
             skip_setup: self.skip_setup,
             allow_empty: self.allow_empty,
