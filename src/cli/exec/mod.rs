@@ -7,8 +7,7 @@ use crate::instruments::Instruments;
 use crate::prelude::*;
 use crate::project_config::ProjectConfig;
 use crate::project_config::merger::ConfigMerger;
-use crate::upload::UploadResult;
-use crate::upload::poll_results::{PollResultsOptions, poll_results};
+use crate::upload::poll_results::PollResultsOptions;
 use clap::Args;
 use std::path::Path;
 use url::Url;
@@ -89,6 +88,7 @@ fn build_orchestrator_config(
         skip_setup: args.shared.skip_setup,
         allow_empty: args.shared.allow_empty,
         go_runner_version: args.shared.go_runner_version,
+        poll_results_options: PollResultsOptions::for_exec(),
     })
 }
 
@@ -128,14 +128,7 @@ pub async fn execute_config(
 
     debug!("config: {:#?}", orchestrator.config);
 
-    let poll_opts = PollResultsOptions::for_exec();
-    let poll_results_fn = async |upload_result: &UploadResult| {
-        poll_results(api_client, upload_result, &poll_opts).await
-    };
-
-    orchestrator
-        .execute(setup_cache_dir, poll_results_fn)
-        .await?;
+    orchestrator.execute(setup_cache_dir, api_client).await?;
 
     Ok(())
 }

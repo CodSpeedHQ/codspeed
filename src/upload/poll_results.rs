@@ -7,6 +7,7 @@ use crate::prelude::*;
 use super::{UploadResult, poll_run_report};
 
 /// Options controlling poll_results display behavior.
+#[derive(Debug, Clone)]
 pub struct PollResultsOptions {
     /// If true, show impact percentage (used by `codspeed run`)
     pub show_impact: bool,

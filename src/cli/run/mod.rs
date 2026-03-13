@@ -8,8 +8,7 @@ use crate::prelude::*;
 use crate::project_config::ProjectConfig;
 use crate::project_config::merger::ConfigMerger;
 use crate::run_environment::interfaces::RepositoryProvider;
-use crate::upload::UploadResult;
-use crate::upload::poll_results::{PollResultsOptions, poll_results};
+use crate::upload::poll_results::PollResultsOptions;
 use clap::{Args, ValueEnum};
 use std::path::Path;
 use url::Url;
@@ -96,6 +95,7 @@ impl RunArgs {
 fn build_orchestrator_config(
     args: RunArgs,
     targets: Vec<executor::BenchmarkTarget>,
+    poll_results_options: PollResultsOptions,
 ) -> Result<OrchestratorConfig> {
     let instruments = Instruments::try_from(&args)?;
     let modes = args.shared.resolve_modes()?;
@@ -127,6 +127,7 @@ fn build_orchestrator_config(
         skip_setup: args.shared.skip_setup,
         allow_empty: args.shared.allow_empty,
         go_runner_version: args.shared.go_runner_version,
+        poll_results_options,
     })
 }
 
@@ -185,6 +186,7 @@ pub async fn run(
                     command,
                     name: None,
                 }],
+                PollResultsOptions::for_run(output_json),
             )?;
             let orchestrator =
                 executor::Orchestrator::new(config, codspeed_config, api_client).await?;
@@ -194,13 +196,7 @@ pub async fn run(
             }
             debug!("config: {:?}", orchestrator.config);
 
-            let poll_opts = PollResultsOptions::for_run(output_json);
-            let poll_results_fn = async |upload_result: &UploadResult| {
-                poll_results(api_client, upload_result, &poll_opts).await
-            };
-            orchestrator
-                .execute(setup_cache_dir, poll_results_fn)
-                .await?;
+            orchestrator.execute(setup_cache_dir, api_client).await?;
         }
 
         RunTarget::ConfigTargets {
@@ -210,7 +206,8 @@ pub async fn run(
         } => {
             let benchmark_targets =
                 super::exec::multi_targets::build_benchmark_targets(targets, default_walltime)?;
-            let config = build_orchestrator_config(args, benchmark_targets)?;
+            let config =
+                build_orchestrator_config(args, benchmark_targets, PollResultsOptions::for_exec())?;
             super::exec::execute_config(config, api_client, codspeed_config, setup_cache_dir)
                 .await?;
         }
