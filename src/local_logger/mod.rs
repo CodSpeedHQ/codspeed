@@ -1,3 +1,5 @@
+pub mod rolling_buffer;
+
 use std::{
     env,
     sync::{Arc, Mutex},
@@ -116,9 +118,8 @@ impl Log for LocalLogger {
                                 if let Some(name) = current.take() {
                                     let elapsed_str = format_elapsed(elapsed);
                                     eprintln!(
-                                        "  {} {} {}",
-                                        style("\u{2714}").green().bold(),
-                                        style(name).dim(),
+                                        "{} {}",
+                                        format_checkmark(&name),
                                         style(elapsed_str).dim(),
                                     );
                                 }
@@ -151,6 +152,15 @@ fn format_group_header(name: &str) -> String {
     format!("{prefix} {title}")
 }
 
+/// Format a completion checkmark with a dimmed label.
+pub(crate) fn format_checkmark(label: &str) -> String {
+    format!(
+        "  {} {}",
+        style("\u{2714} ").green().bold(),
+        style(label).dim(),
+    )
+}
+
 /// Format elapsed duration in a compact human-readable way
 fn format_elapsed(duration: Duration) -> String {
     let secs = duration.as_secs();
@@ -167,37 +177,51 @@ fn format_elapsed(duration: Duration) -> String {
     }
 }
 
+/// Indent every line of a string with the given prefix
+fn indent_lines(s: &str, indent: &str) -> String {
+    s.lines()
+        .enumerate()
+        .map(|(i, line)| {
+            if i == 0 {
+                line.to_string()
+            } else {
+                format!("{indent}{line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Print a log record to the console with the appropriate style
 fn print_record(record: &log::Record) {
     match record.level() {
         log::Level::Error => {
             let prefix = style("\u{2717}").red().bold();
-            let msg = Style::new().red().apply_to(record.args());
+            let msg = indent_lines(&format!("{}", record.args()), "    ");
+            let msg = Style::new().red().apply_to(msg);
             eprintln!("  {prefix} {msg}");
         }
         log::Level::Warn => {
             let prefix = style("\u{25B2}").yellow();
-            let msg = Style::new().yellow().apply_to(record.args());
+            let msg = indent_lines(&format!("{}", record.args()), "    ");
+            let msg = Style::new().yellow().apply_to(msg);
             eprintln!("  {prefix} {msg}");
         }
         log::Level::Info => {
-            let msg = Style::new().white().apply_to(record.args());
+            let msg = indent_lines(&format!("{}", record.args()), "  ");
+            let msg = Style::new().white().apply_to(msg);
             eprintln!("  {msg}");
         }
         log::Level::Debug => {
             let prefix = style("\u{00B7}").dim();
-            let msg = Style::new()
-                .blue()
-                .dim()
-                .apply_to(format!("{}", record.args()));
+            let msg = indent_lines(&format!("{}", record.args()), "    ");
+            let msg = Style::new().blue().dim().apply_to(msg);
             eprintln!("  {prefix} {msg}");
         }
         log::Level::Trace => {
-            let msg = Style::new().black().dim().apply_to(format!(
-                "[TRACE::{}] {}",
-                record.target(),
-                record.args()
-            ));
+            let raw = format!("[TRACE::{}] {}", record.target(), record.args());
+            let msg = indent_lines(&raw, "  ");
+            let msg = Style::new().black().dim().apply_to(msg);
             eprintln!("  {msg}");
         }
     }
