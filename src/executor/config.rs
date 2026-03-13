@@ -3,6 +3,7 @@ use crate::instruments::Instruments;
 use crate::prelude::*;
 use crate::run_environment::RepositoryProvider;
 use crate::runner_mode::RunnerMode;
+use crate::upload::poll_results::PollResultsOptions;
 use clap::ValueEnum;
 use semver::Version;
 use std::path::PathBuf;
@@ -71,6 +72,8 @@ pub struct OrchestratorConfig {
     pub allow_empty: bool,
     /// The version of go-runner to install (if None, installs latest)
     pub go_runner_version: Option<Version>,
+    /// Options controlling post-upload result polling and display
+    pub poll_results_options: PollResultsOptions,
 }
 
 /// Per-execution configuration passed to executors.
@@ -198,6 +201,7 @@ impl OrchestratorConfig {
             skip_setup: false,
             allow_empty: false,
             go_runner_version: None,
+            poll_results_options: PollResultsOptions::for_exec(),
         }
     }
 }

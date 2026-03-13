@@ -12,6 +12,7 @@ use crate::prelude::*;
 use crate::run_environment::{self, RunEnvironment, RunEnvironmentProvider};
 use crate::runner_mode::RunnerMode;
 use crate::system::{self, SystemInfo};
+use crate::upload::poll_results::poll_results;
 use crate::upload::{UploadResult, upload};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -79,10 +80,11 @@ impl Orchestrator {
     /// Each `(command, mode)` pair gets its own profile folder. When the user
     /// specifies `--profile-folder` and there are multiple pairs, deterministic
     /// subdirectories (`<mode>-<index>`) are created under that folder.
-    pub async fn execute<F>(&self, setup_cache_dir: Option<&Path>, poll_results: F) -> Result<()>
-    where
-        F: AsyncFn(&UploadResult) -> Result<()>,
-    {
+    pub async fn execute(
+        &self,
+        setup_cache_dir: Option<&Path>,
+        api_client: &CodSpeedAPIClient,
+    ) -> Result<()> {
         // Build (command, label) pairs while we still know the target type
         let mut command_labels: Vec<(String, String)> = vec![];
 
@@ -170,8 +172,7 @@ impl Orchestrator {
             end_group!();
         }
 
-        self.upload_and_poll(all_completed_runs, &poll_results)
-            .await?;
+        self.upload_and_poll(all_completed_runs, api_client).await?;
 
         Ok(())
     }
@@ -204,14 +205,11 @@ impl Orchestrator {
     }
 
     /// Upload completed runs and poll results.
-    async fn upload_and_poll<F>(
+    async fn upload_and_poll(
         &self,
         mut completed_runs: Vec<(ExecutionContext, ExecutorName)>,
-        poll_results: F,
-    ) -> Result<()>
-    where
-        F: AsyncFn(&UploadResult) -> Result<()>,
-    {
+        api_client: &CodSpeedAPIClient,
+    ) -> Result<()> {
         let skip_upload = self.config.skip_upload;
 
         if !skip_upload {
@@ -220,7 +218,12 @@ impl Orchestrator {
             end_group!();
 
             if self.is_local() {
-                poll_results(&last_upload_result).await?;
+                poll_results(
+                    api_client,
+                    &last_upload_result,
+                    &self.config.poll_results_options,
+                )
+                .await?;
             }
         } else {
             debug!("Skipping upload of performance data");
