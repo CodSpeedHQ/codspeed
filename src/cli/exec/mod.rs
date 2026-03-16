@@ -9,7 +9,7 @@ use crate::project_config::ProjectConfig;
 use crate::project_config::merger::ConfigMerger;
 use crate::upload::poll_results::PollResultsOptions;
 use clap::Args;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use url::Url;
 
@@ -118,11 +118,45 @@ pub async fn run(
 /// Sets up the orchestrator and drives execution. Exec-harness installation is handled
 /// by the orchestrator when exec targets are present.
 pub async fn execute_config(
-    config: OrchestratorConfig,
+    mut config: OrchestratorConfig,
     api_client: &CodSpeedAPIClient,
     codspeed_config: &CodSpeedConfig,
     setup_cache_dir: Option<&Path>,
 ) -> Result<()> {
+    // Resolve exec target binary paths so memtrack can discover statically linked
+    // allocators (which may not live in known build dirs).
+    let memtrack_binaries: HashSet<_> = config
+        .targets
+        .iter()
+        .filter_map(|t| match t {
+            executor::BenchmarkTarget::Exec { command, .. } => command.first().cloned(),
+            _ => None,
+        })
+        .filter_map(|bin| {
+            let result = match &config.working_directory {
+                Some(cwd) => which::which_in(&bin, std::env::var_os("PATH"), cwd),
+                None => which::which(&bin),
+            };
+            result.ok()
+        })
+        .collect();
+
+    if !memtrack_binaries.is_empty() {
+        let mut all_paths = memtrack_binaries;
+
+        // Merge with any user-provided value from the parent environment.
+        if let Some(existing) = std::env::var_os("CODSPEED_MEMTRACK_BINARIES") {
+            all_paths.extend(std::env::split_paths(&existing));
+        }
+
+        let joined =
+            std::env::join_paths(&all_paths).expect("memtrack binary paths should be joinable");
+        config.extra_env.insert(
+            "CODSPEED_MEMTRACK_BINARIES".into(),
+            joined.to_string_lossy().into_owned(),
+        );
+    }
+
     let orchestrator = executor::Orchestrator::new(config, codspeed_config, api_client).await?;
 
     if !orchestrator.is_local() {
