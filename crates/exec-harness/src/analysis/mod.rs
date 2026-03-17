@@ -59,6 +59,8 @@ pub fn perform_with_valgrind(commands: Vec<BenchmarkCommand>) -> Result<()> {
         cmd.env("PYTHONPERFSUPPORT", "1");
         cmd.env(constants::URI_ENV, &name_and_uri.uri);
 
+        crate::node::set_node_options(&mut cmd);
+
         let mut child = cmd.spawn().context("Failed to spawn command")?;
 
         let status = child.wait().context("Failed to execute command")?;

@@ -5,6 +5,7 @@ use std::io::{self, BufRead};
 
 pub mod analysis;
 pub mod constants;
+pub mod node;
 pub mod prelude;
 mod uri;
 pub mod walltime;
