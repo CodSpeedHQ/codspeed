@@ -1,16 +1,13 @@
 use crate::executor::ExecutorConfig;
 use crate::executor::RunnerMode;
 use crate::executor::config::SimulationTool;
-use crate::executor::helpers::env::get_base_injected_env;
+use crate::executor::helpers::env::{build_path_env, get_base_injected_env};
 use crate::executor::helpers::get_bench_command::get_bench_command;
-use crate::executor::helpers::introspected_golang;
-use crate::executor::helpers::introspected_nodejs;
 use crate::executor::helpers::run_command_with_log_pipe::run_command_with_log_pipe;
 use crate::executor::valgrind::helpers::ignored_objects_path::get_objects_path_to_ignore;
 use crate::executor::valgrind::helpers::python::is_free_threaded_python;
 use crate::instruments::mongo_tracer::MongoTracer;
 use crate::prelude::*;
-use std::env;
 use std::fs::canonicalize;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
@@ -110,19 +107,7 @@ pub async fn measure(
         cmd.env("PYTHONMALLOC", "malloc");
     }
 
-    cmd.env(
-        "PATH",
-        format!(
-            "{}:{}:{}",
-            introspected_nodejs::setup()
-                .map_err(|e| anyhow!("failed to setup NodeJS introspection. {e}"))?
-                .to_string_lossy(),
-            introspected_golang::setup()
-                .map_err(|e| anyhow!("failed to setup Go introspection. {e}"))?
-                .to_string_lossy(),
-            env::var("PATH").unwrap_or_default(),
-        ),
-    );
+    cmd.env("PATH", build_path_env(config.enable_introspection)?);
 
     if let Some(cwd) = &config.working_directory {
         let abs_cwd = canonicalize(cwd)?;

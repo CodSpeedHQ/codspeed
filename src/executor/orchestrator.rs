@@ -85,8 +85,8 @@ impl Orchestrator {
         setup_cache_dir: Option<&Path>,
         api_client: &CodSpeedAPIClient,
     ) -> Result<()> {
-        // Build (command, label) pairs while we still know the target type
-        let mut command_labels: Vec<(String, String)> = vec![];
+        // Build (command, label, uses_exec_harness) tuples while we still know the target type
+        let mut command_labels: Vec<(String, String, bool)> = vec![];
 
         let exec_targets: Vec<&BenchmarkTarget> = self
             .config
@@ -110,12 +110,12 @@ impl Orchestrator {
                 }
                 targets => format!("Running {} commands with exec-harness", targets.len()),
             };
-            command_labels.push((pipe_cmd, label));
+            command_labels.push((pipe_cmd, label, true));
         }
 
         for target in &self.config.targets {
             if let BenchmarkTarget::Entrypoint { command, .. } = target {
-                command_labels.push((command.clone(), command.clone()));
+                command_labels.push((command.clone(), command.clone(), false));
             }
         }
 
@@ -123,13 +123,14 @@ impl Orchestrator {
             command: String,
             mode: &'a RunnerMode,
             label: String,
+            uses_exec_harness: bool,
         }
 
         // Flatten into (command, mode) run parts
         let modes = &self.config.modes;
         let run_parts: Vec<ExecutorTarget> = command_labels
             .iter()
-            .flat_map(|(cmd, label)| {
+            .flat_map(|(cmd, label, uses_exec_harness)| {
                 modes.iter().map(move |mode| {
                     let executor_name = get_executor_from_mode(mode).name();
                     ExecutorTarget {
@@ -140,6 +141,7 @@ impl Orchestrator {
                             executor_name.icon(),
                             executor_name.label()
                         ),
+                        uses_exec_harness: *uses_exec_harness,
                     }
                 })
             })
@@ -153,7 +155,9 @@ impl Orchestrator {
         }
 
         for (run_part_index, part) in run_parts.into_iter().enumerate() {
-            let config = self.config.executor_config_for_command(part.command);
+            let config = self
+                .config
+                .executor_config_for_command(part.command, !part.uses_exec_harness);
             let executor = get_executor_from_mode(part.mode);
             let profile_folder =
                 self.resolve_profile_folder(&executor.name(), run_part_index, total_parts)?;

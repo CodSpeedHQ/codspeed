@@ -108,6 +108,9 @@ pub struct ExecutorConfig {
     pub go_runner_version: Option<Version>,
     /// Additional environment variables forwarded to executor subprocesses.
     pub extra_env: HashMap<String, String>,
+    /// Whether to enable language-level introspection (Node.js, Go wrappers in PATH).
+    /// Disabled for exec-harness targets since they don't need it.
+    pub enable_introspection: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -161,7 +164,14 @@ impl OrchestratorConfig {
     }
 
     /// Produce a per-execution [`ExecutorConfig`] for the given command and mode.
-    pub fn executor_config_for_command(&self, command: String) -> ExecutorConfig {
+    ///
+    /// `enable_introspection` controls whether language-level wrappers (Node.js, Go)
+    /// are injected into `PATH`. This should be `false` for exec-harness targets.
+    pub fn executor_config_for_command(
+        &self,
+        command: String,
+        enable_introspection: bool,
+    ) -> ExecutorConfig {
         ExecutorConfig {
             token: self.token.clone(),
             working_directory: self.working_directory.clone(),
@@ -175,6 +185,7 @@ impl OrchestratorConfig {
             allow_empty: self.allow_empty,
             go_runner_version: self.go_runner_version.clone(),
             extra_env: self.extra_env.clone(),
+            enable_introspection,
         }
     }
 }
@@ -220,7 +231,7 @@ impl OrchestratorConfig {
 impl ExecutorConfig {
     /// Constructs a new `ExecutorConfig` with default values for testing purposes
     pub fn test() -> Self {
-        OrchestratorConfig::test().executor_config_for_command("".into())
+        OrchestratorConfig::test().executor_config_for_command("".into(), true)
     }
 }
 

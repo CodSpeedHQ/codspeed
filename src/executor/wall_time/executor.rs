@@ -3,10 +3,10 @@ use super::perf::PerfRunner;
 use crate::executor::Executor;
 use crate::executor::ExecutorConfig;
 use crate::executor::helpers::command::CommandBuilder;
-use crate::executor::helpers::env::{get_base_injected_env, is_codspeed_debug_enabled};
+use crate::executor::helpers::env::{
+    build_path_env, get_base_injected_env, is_codspeed_debug_enabled,
+};
 use crate::executor::helpers::get_bench_command::get_bench_command;
-use crate::executor::helpers::introspected_golang;
-use crate::executor::helpers::introspected_nodejs;
 use crate::executor::helpers::run_command_with_log_pipe::run_command_with_log_pipe;
 use crate::executor::helpers::run_with_env::wrap_with_env;
 use crate::executor::helpers::run_with_sudo::wrap_with_sudo;
@@ -86,18 +86,7 @@ impl WallTimeExecutor {
         config: &ExecutorConfig,
         execution_context: &ExecutionContext,
     ) -> Result<(NamedTempFile, NamedTempFile, CommandBuilder)> {
-        // Build additional PATH environment variables
-        let path_env = std::env::var("PATH").unwrap_or_default();
-        let path_value = format!(
-            "{}:{}:{}",
-            introspected_nodejs::setup()
-                .map_err(|e| anyhow!("failed to setup NodeJS introspection. {e}"))?
-                .to_string_lossy(),
-            introspected_golang::setup()
-                .map_err(|e| anyhow!("failed to setup Go introspection. {e}"))?
-                .to_string_lossy(),
-            path_env
-        );
+        let path_value = build_path_env(config.enable_introspection)?;
 
         let mut extra_env = get_base_injected_env(
             RunnerMode::Walltime,
