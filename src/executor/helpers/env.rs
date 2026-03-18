@@ -50,6 +50,14 @@ pub fn get_base_injected_env(
     env
 }
 
+/// Set the env variable to not warn users about Go's perf unwinding mode when running Go benchmarks
+pub fn suppress_go_perf_unwinding_warning() {
+    // Safety: no multithreading
+    unsafe {
+        std::env::set_var("CODSPEED_GO_SUPPRESS_PERF_UNWINDING_MODE_WARNING", "true");
+    }
+}
+
 pub fn is_codspeed_debug_enabled() -> bool {
     std::env::var("CODSPEED_LOG")
         .ok()

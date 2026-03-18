@@ -32,6 +32,11 @@ if [ $# -eq 0 ]; then
     exit $?
 fi
 
+# On arm64, warn about setting CODSPEED_PERF_UNWINDING_MODE to "fp" for correct flamegraphs
+if [ "$(uname -m)" = "aarch64" ] && [ "${CODSPEED_GO_SUPPRESS_PERF_UNWINDING_MODE_WARNING:-}" != "true" ]; then
+    echo "::warning::Go profiling on arm64 require frame pointer unwinding. Set CODSPEED_PERF_UNWINDING_MODE=fp for better profiling." >&2
+fi
+
 # Route command based on first argument
 case "$1" in
     test)

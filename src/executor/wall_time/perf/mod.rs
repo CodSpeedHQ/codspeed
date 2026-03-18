@@ -4,6 +4,7 @@ use crate::cli::UnwindingMode;
 use crate::executor::ExecutorConfig;
 use crate::executor::helpers::command::CommandBuilder;
 use crate::executor::helpers::env::is_codspeed_debug_enabled;
+use crate::executor::helpers::env::suppress_go_perf_unwinding_warning;
 use crate::executor::helpers::harvest_perf_maps_for_pids::harvest_perf_maps_for_pids;
 use crate::executor::helpers::run_command_with_log_pipe::run_command_with_log_pipe_and_callback;
 use crate::executor::helpers::run_with_sudo::run_with_sudo;
@@ -98,6 +99,8 @@ impl PerfRunner {
             (mode, None)
         } else if config.command.contains("cargo") {
             (UnwindingMode::Dwarf, None)
+        } else if config.command.contains("go test") {
+            (UnwindingMode::FramePointer, None)
         } else if config.command.contains("pytest")
             || config.command.contains("uv")
             || config.command.contains("python")
@@ -112,7 +115,10 @@ impl PerfRunner {
         };
 
         let cg_mode = match cg_mode {
-            UnwindingMode::FramePointer => "fp",
+            UnwindingMode::FramePointer => {
+                suppress_go_perf_unwinding_warning();
+                "fp"
+            }
             UnwindingMode::Dwarf => &format!("dwarf,{}", stack_size.unwrap_or(8192)),
         };
         debug!("Using call graph mode: {cg_mode:?}");
