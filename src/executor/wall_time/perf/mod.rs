@@ -3,6 +3,7 @@
 use crate::cli::UnwindingMode;
 use crate::executor::ExecutorConfig;
 use crate::executor::helpers::command::CommandBuilder;
+use crate::executor::helpers::detect_executable::command_has_executable;
 use crate::executor::helpers::env::is_codspeed_debug_enabled;
 use crate::executor::helpers::env::suppress_go_perf_unwinding_warning;
 use crate::executor::helpers::harvest_perf_maps_for_pids::harvest_perf_maps_for_pids;
@@ -97,20 +98,17 @@ impl PerfRunner {
         // Infer the unwinding mode from the benchmark cmd
         let (cg_mode, stack_size) = if let Some(mode) = config.perf_unwinding_mode {
             (mode, None)
-        } else if config.command.contains("gradle")
-            || config.command.contains("java")
-            || config.command.contains("maven")
-        {
+        } else if command_has_executable(
+            &config.command,
+            &["gradle", "gradlew", "java", "maven", "mvn", "mvnw"],
+        ) {
             // In Java, we must use FP unwinding otherwise we'll have broken call stacks.
             (UnwindingMode::FramePointer, None)
-        } else if config.command.contains("cargo") {
+        } else if command_has_executable(&config.command, &["cargo"]) {
             (UnwindingMode::Dwarf, None)
-        } else if config.command.contains("go test") {
+        } else if command_has_executable(&config.command, &["go"]) {
             (UnwindingMode::FramePointer, None)
-        } else if config.command.contains("pytest")
-            || config.command.contains("uv")
-            || config.command.contains("python")
-        {
+        } else if command_has_executable(&config.command, &["pytest", "uv", "python", "python3"]) {
             // Note that the higher the stack size, the larger the file, although it is mitigated
             // by zstd compression
             (UnwindingMode::Dwarf, Some(16 * 1024))
