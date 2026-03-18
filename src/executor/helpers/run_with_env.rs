@@ -34,7 +34,7 @@ fn get_exported_system_env() -> Result<String> {
 /// - NamedTempFile is the environment file that must be kept alive until command execution
 pub fn wrap_with_env(
     mut cmd_builder: CommandBuilder,
-    extra_env: &HashMap<&'static str, String>,
+    extra_env: &HashMap<String, String>,
 ) -> Result<(CommandBuilder, NamedTempFile)> {
     let env_file = create_env_file(extra_env)?;
 
@@ -50,7 +50,7 @@ pub fn wrap_with_env(
     Ok((cmd_builder, env_file))
 }
 
-fn create_env_file(extra_env: &HashMap<&'static str, String>) -> Result<NamedTempFile> {
+fn create_env_file(extra_env: &HashMap<String, String>) -> Result<NamedTempFile> {
     let system_env = get_exported_system_env()?;
     let base_injected_env = extra_env
         .iter()

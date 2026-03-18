@@ -7,7 +7,7 @@ pub fn get_base_injected_env(
     mode: RunnerMode,
     profile_folder: &Path,
     config: &ExecutorConfig,
-) -> HashMap<&'static str, String> {
+) -> HashMap<String, String> {
     let runner_mode_internal_env_value = match mode {
         // While the runner now deprecates the usage of instrumentation with a message, we
         // internally still use instrumentation temporarily to give time to users to upgrade their
@@ -20,30 +20,32 @@ pub fn get_base_injected_env(
         RunnerMode::Memory => "memory",
     };
     let mut env = HashMap::from([
-        ("PYTHONHASHSEED", "0".into()),
+        ("PYTHONHASHSEED".into(), "0".into()),
         (
-            "PYTHON_PERF_JIT_SUPPORT",
+            "PYTHON_PERF_JIT_SUPPORT".into(),
             if mode == RunnerMode::Walltime {
                 "1".into()
             } else {
                 "0".into()
             },
         ),
-        ("ARCH", ARCH.into()),
-        ("CODSPEED_ENV", "runner".into()),
+        ("ARCH".into(), ARCH.into()),
+        ("CODSPEED_ENV".into(), "runner".into()),
         (
-            "CODSPEED_RUNNER_MODE",
+            "CODSPEED_RUNNER_MODE".into(),
             runner_mode_internal_env_value.into(),
         ),
         (
-            "CODSPEED_PROFILE_FOLDER",
+            "CODSPEED_PROFILE_FOLDER".into(),
             profile_folder.to_string_lossy().to_string(),
         ),
     ]);
 
     if let Some(version) = &config.go_runner_version {
-        env.insert("CODSPEED_GO_RUNNER_VERSION", version.to_string());
+        env.insert("CODSPEED_GO_RUNNER_VERSION".into(), version.to_string());
     }
+
+    env.extend(config.extra_env.clone());
 
     env
 }

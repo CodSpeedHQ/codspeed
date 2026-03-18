@@ -9,6 +9,7 @@ use crate::project_config::ProjectConfig;
 use crate::project_config::merger::ConfigMerger;
 use crate::upload::poll_results::PollResultsOptions;
 use clap::Args;
+use std::collections::HashMap;
 use std::path::Path;
 use url::Url;
 
@@ -90,6 +91,7 @@ fn build_orchestrator_config(
         go_runner_version: args.shared.go_runner_version,
         show_full_output: args.shared.show_full_output,
         poll_results_options: PollResultsOptions::for_exec(),
+        extra_env: HashMap::new(),
     })
 }
 

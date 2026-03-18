@@ -6,6 +6,7 @@ use crate::runner_mode::RunnerMode;
 use crate::upload::poll_results::PollResultsOptions;
 use clap::ValueEnum;
 use semver::Version;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use url::Url;
 
@@ -76,6 +77,8 @@ pub struct OrchestratorConfig {
     pub show_full_output: bool,
     /// Options controlling post-upload result polling and display
     pub poll_results_options: PollResultsOptions,
+    /// Additional environment variables forwarded to executor subprocesses.
+    pub extra_env: HashMap<String, String>,
 }
 
 /// Per-execution configuration passed to executors.
@@ -103,6 +106,8 @@ pub struct ExecutorConfig {
     pub allow_empty: bool,
     /// The version of go-runner to install (if None, installs latest)
     pub go_runner_version: Option<Version>,
+    /// Additional environment variables forwarded to executor subprocesses.
+    pub extra_env: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -169,6 +174,7 @@ impl OrchestratorConfig {
             skip_setup: self.skip_setup,
             allow_empty: self.allow_empty,
             go_runner_version: self.go_runner_version.clone(),
+            extra_env: self.extra_env.clone(),
         }
     }
 }
@@ -205,6 +211,7 @@ impl OrchestratorConfig {
             go_runner_version: None,
             show_full_output: false,
             poll_results_options: PollResultsOptions::for_exec(),
+            extra_env: HashMap::new(),
         }
     }
 }

@@ -104,7 +104,7 @@ impl WallTimeExecutor {
             &execution_context.profile_folder,
             &execution_context.config,
         );
-        extra_env.insert("PATH", path_value);
+        extra_env.insert("PATH".into(), path_value);
 
         // We have to write the benchmark command to a script, to ensure proper formatting
         // and to not have to manually escape everything.

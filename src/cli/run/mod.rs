@@ -10,6 +10,7 @@ use crate::project_config::merger::ConfigMerger;
 use crate::run_environment::interfaces::RepositoryProvider;
 use crate::upload::poll_results::PollResultsOptions;
 use clap::{Args, ValueEnum};
+use std::collections::HashMap;
 use std::path::Path;
 use url::Url;
 
@@ -130,6 +131,7 @@ fn build_orchestrator_config(
         go_runner_version: args.shared.go_runner_version,
         show_full_output: args.shared.show_full_output,
         poll_results_options,
+        extra_env: HashMap::new(),
     })
 }
 
