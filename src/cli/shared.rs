@@ -21,11 +21,10 @@ pub(crate) fn show_banner() {
     let url = style("codspeed.io").color256(CODSPEED_U8_COLOR_CODE);
     let separator = style("─".repeat(52)).dim();
 
-    eprintln!();
-    eprintln!("{}", style(logo).color256(CODSPEED_U8_COLOR_CODE).bold());
-    eprintln!("  {separator}");
-    eprintln!("  {url}  {version_tag}");
-    eprintln!();
+    eprintln!(
+        "\n{}\n  {separator}\n  {url}  {version_tag}\n",
+        style(logo).color256(CODSPEED_U8_COLOR_CODE).bold()
+    );
     debug!("codspeed v{VERSION}");
 }
 
