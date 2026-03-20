@@ -1,6 +1,6 @@
 [package]
 name = "memtrack"
-version = "1.2.2"
+version = "1.2.3"
 edition = "2024"
 repository = "https://github.com/CodSpeedHQ/codspeed"
 publish = false
