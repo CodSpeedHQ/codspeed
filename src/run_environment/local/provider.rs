@@ -300,6 +300,10 @@ impl RunEnvironmentProvider for LocalProvider {
         })
     }
 
+    fn get_commit_hash(&self, _repository_root_path: &str) -> Result<String> {
+        Ok(self.ref_.clone())
+    }
+
     /// Local runs don't need run-index because each invocation gets a fresh `run_id`.
     fn build_run_part_suffix(
         &self,
