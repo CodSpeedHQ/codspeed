@@ -1,26 +1,9 @@
 use codspeed_runner::{clean_logger, cli};
-use console::{Term, style};
+use console::style;
 use log::log_enabled;
-
-struct HiddenCursor(Term);
-
-impl HiddenCursor {
-    fn new() -> Self {
-        let term = Term::stderr();
-        let _ = term.hide_cursor();
-        Self(term)
-    }
-}
-
-impl Drop for HiddenCursor {
-    fn drop(&mut self) {
-        let _ = self.0.show_cursor();
-    }
-}
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let _cursor = HiddenCursor::new();
     let res = cli::run().await;
     if let Err(err) = res {
         // Show the primary error

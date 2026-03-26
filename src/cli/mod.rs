@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use crate::{
     api_client::CodSpeedAPIClient,
     config::CodSpeedConfig,
-    local_logger::{CODSPEED_U8_COLOR_CODE, init_local_logger},
+    local_logger::{CODSPEED_U8_COLOR_CODE, IS_TTY, init_local_logger},
     prelude::*,
     project_config::DiscoveredProjectConfig,
 };
@@ -23,6 +23,27 @@ use clap::{
     Parser, Subcommand,
     builder::{Styles, styling},
 };
+use console::Term;
+
+/// Guard that hides the terminal cursor on creation and restores it on drop.
+struct CursorGuard;
+
+impl CursorGuard {
+    fn new() -> Self {
+        if *IS_TTY {
+            let _ = Term::stderr().hide_cursor();
+        }
+        Self
+    }
+}
+
+impl Drop for CursorGuard {
+    fn drop(&mut self) {
+        if *IS_TTY {
+            let _ = Term::stderr().show_cursor();
+        }
+    }
+}
 
 fn create_styles() -> Styles {
     styling::Styles::styled()
@@ -99,6 +120,8 @@ enum Commands {
 
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
+    // Important: keep this after the Cli::parse() because the function can exit the process by itself, skipping the drop of the CursorGuard
+    let _cursor_guard = CursorGuard::new();
     let codspeed_config =
         CodSpeedConfig::load_with_override(cli.config_name.as_deref(), cli.oauth_token.as_deref())?;
     let api_client = CodSpeedAPIClient::try_from((&cli, &codspeed_config))?;
