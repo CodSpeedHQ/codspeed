@@ -49,6 +49,7 @@ impl RunArgs {
     /// Constructs a new `RunArgs` with default values for testing purposes
     pub fn test() -> Self {
         use super::PerfRunArgs;
+        use super::experimental::ExperimentalArgs;
         use crate::RunnerMode;
 
         Self {
@@ -71,6 +72,9 @@ impl RunArgs {
                 perf_run_args: PerfRunArgs {
                     enable_perf: false,
                     perf_unwinding_mode: None,
+                },
+                experimental: ExperimentalArgs {
+                    experimental_fair_sched: false,
                 },
             },
             instruments: vec![],

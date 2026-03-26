@@ -1,3 +1,4 @@
+use super::experimental::ExperimentalArgs;
 use crate::VERSION;
 use crate::executor::config::SimulationTool;
 use crate::local_logger::CODSPEED_U8_COLOR_CODE;
@@ -116,6 +117,9 @@ pub struct ExecAndRunSharedArgs {
 
     #[command(flatten)]
     pub perf_run_args: PerfRunArgs,
+
+    #[command(flatten)]
+    pub experimental: ExperimentalArgs,
 }
 
 impl ExecAndRunSharedArgs {

@@ -1,5 +1,6 @@
 mod auth;
 pub(crate) mod exec;
+pub(crate) mod experimental;
 pub(crate) mod run;
 mod setup;
 mod shared;
@@ -148,6 +149,7 @@ pub async fn run() -> Result<()> {
 
     match cli.command {
         Commands::Run(args) => {
+            args.shared.experimental.warn_if_active();
             run::run(
                 *args,
                 &api_client,
@@ -158,6 +160,7 @@ pub async fn run() -> Result<()> {
             .await?
         }
         Commands::Exec(args) => {
+            args.shared.experimental.warn_if_active();
             exec::run(
                 *args,
                 &api_client,
