@@ -110,7 +110,8 @@ pub fn parse_for_memmap2<P: AsRef<Path>>(
 
                 // Collect jitdump file paths before the PROT_EXEC filter in process_mmap2_record
                 // skips them. JIT runtimes mmap the jitdump file so perf records it.
-                if mmap2_record.path.as_slice().ends_with(b".dump") {
+                // Match perf's jit_detect(): basename must be `jit-<pid>.dump`.
+                if is_jit_dump_path(&mmap2_record.path.as_slice()) {
                     let path = PathBuf::from(
                         String::from_utf8_lossy(&mmap2_record.path.as_slice()).into_owned(),
                     );
@@ -177,6 +178,23 @@ impl PidFilter {
             }
         }
     }
+}
+
+/// Returns true if the path basename matches perf's jitdump pattern: `jit-<digits>.dump`.
+fn is_jit_dump_path(path: &[u8]) -> bool {
+    let basename = match path.iter().rposition(|&b| b == b'/') {
+        Some(pos) => &path[pos + 1..],
+        None => return false,
+    };
+    let rest = match basename.strip_prefix(b"jit-") {
+        Some(rest) => rest,
+        None => return false,
+    };
+    let rest = match rest.strip_suffix(b".dump") {
+        Some(rest) => rest,
+        None => return false,
+    };
+    !rest.is_empty() && rest.iter().all(|b| b.is_ascii_digit())
 }
 
 /// Process a single MMAP2 record and add it to the symbols and unwind data maps
