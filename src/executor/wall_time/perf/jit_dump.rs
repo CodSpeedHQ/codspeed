@@ -5,7 +5,7 @@ use crate::{
 use linux_perf_data::jitdump::{JitDumpReader, JitDumpRecord};
 use runner_shared::unwind_data::{ProcessUnwindData, UnwindData};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     path::{Path, PathBuf},
 };
 
@@ -108,44 +108,10 @@ impl JitDump {
     }
 }
 
-/// Finds all jitdump file paths for a given PID.
+/// Converts all the `jit-<pid>.dump` into a perf-<pid>.map with symbols, and collects the unwind data.
 ///
-/// Searches in order:
-/// 1. `/tmp/jit-{pid}.dump` (standard perf jitdump location)
-/// 2. `{jitdumpdir}/.debug/jit/*/jit-{pid}.dump` where `jitdumpdir` is `$JITDUMPDIR` or `$HOME`
-///    (LLVM ORC JIT / PerfSupportPlugin location)
-fn find_jit_dumps_for_pid(pid: libc::pid_t) -> Vec<PathBuf> {
-    let name = format!("jit-{pid}.dump");
-    let mut paths = Vec::new();
-
-    // Standard perf location.
-    let tmp_path = PathBuf::from("/tmp").join(&name);
-    if tmp_path.exists() {
-        paths.push(tmp_path);
-    }
-
-    // LLVM ORC JIT location: {base}/.debug/jit/*/jit-{pid}.dump
-    // See LLVM's JITLoaderPerf.cpp for the path construction logic.
-    let base_dir = std::env::var("JITDUMPDIR")
-        .or_else(|_| std::env::var("HOME"))
-        .ok()
-        .map(PathBuf::from);
-    if let Some(base) = base_dir {
-        let jit_dir = base.join(".debug/jit");
-        if let Ok(entries) = std::fs::read_dir(&jit_dir) {
-            for entry in entries.filter_map(|e| e.ok()) {
-                let candidate = entry.path().join(&name);
-                if candidate.exists() {
-                    paths.push(candidate);
-                }
-            }
-        }
-    }
-
-    paths
-}
-
-/// Converts all the `jit-<pid>.dump` into a perf-<pid>.map with symbols, and collects the unwind data
+/// Jitdump file paths are discovered from MMAP2 records in the perf data, since JIT runtimes
+/// mmap the jitdump file and perf records the mapping with the actual path on disk.
 ///
 /// # Symbols
 /// Since a jit dump is by definition specific to a single pid, we append the harvested symbols
@@ -155,16 +121,11 @@ fn find_jit_dumps_for_pid(pid: libc::pid_t) -> Vec<PathBuf> {
 /// Unwind data is generated as a list
 pub async fn save_symbols_and_harvest_unwind_data_for_pids(
     profile_folder: &Path,
-    pids: &HashSet<libc::pid_t>,
+    jit_dump_paths_by_pid: &HashMap<libc::pid_t, Vec<PathBuf>>,
 ) -> Result<HashMap<i32, Vec<(UnwindData, ProcessUnwindData)>>> {
-    let mut jit_unwind_data_by_path = HashMap::new();
+    let mut jit_unwind_data_by_pid = HashMap::new();
 
-    for pid in pids {
-        let paths = find_jit_dumps_for_pid(*pid);
-        if paths.is_empty() {
-            continue;
-        }
-
+    for (pid, paths) in jit_dump_paths_by_pid {
         for path in paths {
             debug!("Found JIT dump file: {path:?}");
 
@@ -178,7 +139,7 @@ pub async fn save_symbols_and_harvest_unwind_data_for_pids(
 
             symbols.append_to_file(profile_folder.join(format!("perf-{pid}.map")))?;
 
-            let jit_unwind_data = match JitDump::new(path).into_unwind_data() {
+            let jit_unwind_data = match JitDump::new(path.clone()).into_unwind_data() {
                 Ok(data) => data,
                 Err(error) => {
                     warn!("Failed to convert jit dump into unwind data: {error:?}");
@@ -186,12 +147,12 @@ pub async fn save_symbols_and_harvest_unwind_data_for_pids(
                 }
             };
 
-            jit_unwind_data_by_path
+            jit_unwind_data_by_pid
                 .entry(*pid)
                 .or_insert_with(Vec::new)
                 .extend(jit_unwind_data);
         }
     }
 
-    Ok(jit_unwind_data_by_path)
+    Ok(jit_unwind_data_by_pid)
 }

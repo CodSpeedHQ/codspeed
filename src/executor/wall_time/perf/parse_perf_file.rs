@@ -42,6 +42,8 @@ pub struct MemmapRecordsOutput {
     /// Module symbols and the computed load bias for each pid that maps the ELF path.
     pub loaded_modules_by_path: HashMap<PathBuf, LoadedModule>,
     pub tracked_pids: HashSet<pid_t>,
+    /// Jitdump file paths discovered from MMAP2 records, keyed by PID.
+    pub jit_dump_paths_by_pid: HashMap<pid_t, Vec<PathBuf>>,
 }
 
 /// Parse the perf file at `perf_file_path` and look for MMAP2 records for the given `pids`.
@@ -53,6 +55,7 @@ pub fn parse_for_memmap2<P: AsRef<Path>>(
     mut pid_filter: PidFilter,
 ) -> Result<MemmapRecordsOutput> {
     let mut loaded_modules_by_path = HashMap::<PathBuf, LoadedModule>::new();
+    let mut jit_dump_paths_by_pid = HashMap::<pid_t, Vec<PathBuf>>::new();
 
     // 1MiB buffer
     let reader = std::io::BufReader::with_capacity(
@@ -105,6 +108,21 @@ pub fn parse_for_memmap2<P: AsRef<Path>>(
                     continue;
                 }
 
+                // Collect jitdump file paths before the PROT_EXEC filter in process_mmap2_record
+                // skips them. JIT runtimes mmap the jitdump file so perf records it.
+                if mmap2_record.path.as_slice().ends_with(b".dump") {
+                    let path = PathBuf::from(
+                        String::from_utf8_lossy(&mmap2_record.path.as_slice()).into_owned(),
+                    );
+                    if path.exists() {
+                        debug!("Found jitdump path from MMAP2 record: {path:?}");
+                        jit_dump_paths_by_pid
+                            .entry(mmap2_record.pid)
+                            .or_default()
+                            .push(path);
+                    }
+                }
+
                 process_mmap2_record(mmap2_record, &mut loaded_modules_by_path);
             }
             _ => continue,
@@ -123,6 +141,7 @@ pub fn parse_for_memmap2<P: AsRef<Path>>(
     Ok(MemmapRecordsOutput {
         loaded_modules_by_path,
         tracked_pids,
+        jit_dump_paths_by_pid,
     })
 }
 
