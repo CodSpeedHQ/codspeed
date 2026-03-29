@@ -108,6 +108,43 @@ impl JitDump {
     }
 }
 
+/// Finds all jitdump file paths for a given PID.
+///
+/// Searches in order:
+/// 1. `/tmp/jit-{pid}.dump` (standard perf jitdump location)
+/// 2. `{jitdumpdir}/.debug/jit/*/jit-{pid}.dump` where `jitdumpdir` is `$JITDUMPDIR` or `$HOME`
+///    (LLVM ORC JIT / PerfSupportPlugin location)
+fn find_jit_dumps_for_pid(pid: libc::pid_t) -> Vec<PathBuf> {
+    let name = format!("jit-{pid}.dump");
+    let mut paths = Vec::new();
+
+    // Standard perf location.
+    let tmp_path = PathBuf::from("/tmp").join(&name);
+    if tmp_path.exists() {
+        paths.push(tmp_path);
+    }
+
+    // LLVM ORC JIT location: {base}/.debug/jit/*/jit-{pid}.dump
+    // See LLVM's JITLoaderPerf.cpp for the path construction logic.
+    let base_dir = std::env::var("JITDUMPDIR")
+        .or_else(|_| std::env::var("HOME"))
+        .ok()
+        .map(PathBuf::from);
+    if let Some(base) = base_dir {
+        let jit_dir = base.join(".debug/jit");
+        if let Ok(entries) = std::fs::read_dir(&jit_dir) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                let candidate = entry.path().join(&name);
+                if candidate.exists() {
+                    paths.push(candidate);
+                }
+            }
+        }
+    }
+
+    paths
+}
+
 /// Converts all the `jit-<pid>.dump` into a perf-<pid>.map with symbols, and collects the unwind data
 ///
 /// # Symbols
@@ -123,34 +160,37 @@ pub async fn save_symbols_and_harvest_unwind_data_for_pids(
     let mut jit_unwind_data_by_path = HashMap::new();
 
     for pid in pids {
-        let name = format!("jit-{pid}.dump");
-        let path = PathBuf::from("/tmp").join(&name);
-
-        if !path.exists() {
+        let paths = find_jit_dumps_for_pid(*pid);
+        if paths.is_empty() {
             continue;
         }
-        debug!("Found JIT dump file: {path:?}");
 
-        let symbols = match JitDump::new(path.clone()).into_perf_map() {
-            Ok(symbols) => symbols,
-            Err(error) => {
-                warn!("Failed to convert jit dump into perf map: {error:?}");
-                continue;
-            }
-        };
+        for path in paths {
+            debug!("Found JIT dump file: {path:?}");
 
-        // Also write to perf-<pid>.map for harvested Python perf maps compatibility
-        symbols.append_to_file(profile_folder.join(format!("perf-{pid}.map")))?;
+            let symbols = match JitDump::new(path.clone()).into_perf_map() {
+                Ok(symbols) => symbols,
+                Err(error) => {
+                    warn!("Failed to convert jit dump into perf map: {error:?}");
+                    continue;
+                }
+            };
 
-        let jit_unwind_data = match JitDump::new(path).into_unwind_data() {
-            Ok(data) => data,
-            Err(error) => {
-                warn!("Failed to convert jit dump into unwind data: {error:?}");
-                continue;
-            }
-        };
+            symbols.append_to_file(profile_folder.join(format!("perf-{pid}.map")))?;
 
-        jit_unwind_data_by_path.insert(*pid, jit_unwind_data);
+            let jit_unwind_data = match JitDump::new(path).into_unwind_data() {
+                Ok(data) => data,
+                Err(error) => {
+                    warn!("Failed to convert jit dump into unwind data: {error:?}");
+                    continue;
+                }
+            };
+
+            jit_unwind_data_by_path
+                .entry(*pid)
+                .or_insert_with(Vec::new)
+                .extend(jit_unwind_data);
+        }
     }
 
     Ok(jit_unwind_data_by_path)
