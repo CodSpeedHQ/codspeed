@@ -129,6 +129,7 @@ lto = "thin"
 strip = true
 
 [package.metadata.dist]
-targets = ["aarch64-unknown-linux-musl", "x86_64-unknown-linux-musl"]
+targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-musl", "x86_64-unknown-linux-musl"]
+binaries.aarch64-apple-darwin = ["codspeed"]
 binaries.aarch64-unknown-linux-musl = ["codspeed"]
 binaries.x86_64-unknown-linux-musl = ["codspeed"]
