@@ -17,7 +17,7 @@ use std::{env::consts::ARCH, process::Command};
 use tempfile::TempPath;
 
 /// Builds the Valgrind argument list for the given simulation tool.
-fn get_valgrind_args(tool: &SimulationTool) -> Vec<String> {
+fn get_valgrind_args(tool: &SimulationTool, config: &ExecutorConfig) -> Vec<String> {
     let mut args: Vec<String> = [
         "-q",
         "--trace-children=yes",
@@ -50,6 +50,11 @@ fn get_valgrind_args(tool: &SimulationTool) -> Vec<String> {
         "--trace-children-skip={}",
         children_skip_patterns.join(",")
     ));
+
+    if config.fair_sched {
+        args.push("--fair-sched=yes".to_string());
+    }
+
     args
 }
 
@@ -114,7 +119,7 @@ pub async fn measure(
         cmd.current_dir(abs_cwd);
     }
     // Configure valgrind
-    let valgrind_args = get_valgrind_args(&config.simulation_tool);
+    let valgrind_args = get_valgrind_args(&config.simulation_tool, config);
     let log_path = profile_folder.join("valgrind.log");
     cmd.arg("valgrind").args(valgrind_args.iter());
     if config.simulation_tool == SimulationTool::Callgrind {

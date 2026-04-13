@@ -1,6 +1,6 @@
 [package]
 name = "codspeed-runner"
-version = "4.12.1"
+version = "4.13.0"
 edition = "2024"
 repository = "https://github.com/CodSpeedHQ/codspeed"
 publish = false
@@ -31,7 +31,7 @@ serde_json = { workspace = true, features = ["preserve_order"] }
 url = "2.4.1"
 sha256 = "1.4.0"
 tokio = { version = "1", features = ["macros", "rt"] }
-tokio-tar = { package = "astral-tokio-tar", version = "0.5.6" }
+tokio-tar = { package = "astral-tokio-tar", version = "0.6.0" }
 tokio-util = "0.7.16"
 md5 = "0.7.0"
 base64 = "0.21.0"
@@ -41,7 +41,7 @@ simplelog = { version = "0.12.1", default-features = false, features = [
     "termcolor",
 ] }
 tempfile = { workspace = true }
-git2 = "0.20.2"
+git2 = "0.20.4"
 nestify = "0.3.3"
 gql_client = { git = "https://github.com/CodSpeedHQ/gql-client-rs" }
 serde_yaml = "0.9.34"
@@ -87,6 +87,7 @@ rstest_reuse = "0.7.0"
 shell-quote = "0.7.2"
 assert_cmd = "2.0.16"
 predicates = "3.1.4"
+strum = { version = "0.28.0", features = ["derive"] }
 
 [workspace]
 members = [

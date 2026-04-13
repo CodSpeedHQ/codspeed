@@ -1,3 +1,4 @@
+pub mod icons;
 pub mod rolling_buffer;
 
 use std::{
@@ -15,6 +16,7 @@ use std::io::Write;
 use std::sync::LazyLock;
 
 use crate::logger::{GroupEvent, JsonEvent, get_group_event, get_json_event};
+use icons::Icon;
 
 pub const CODSPEED_U8_COLOR_CODE: u8 = 208; // #FF8700
 
@@ -167,7 +169,9 @@ impl Log for LocalLogger {
 
 /// Format a group header with styled prefix
 fn format_group_header(name: &str) -> String {
-    let prefix = style("\u{f0da}").color256(CODSPEED_U8_COLOR_CODE).bold();
+    let prefix = style(Icon::GroupArrow.to_string())
+        .color256(CODSPEED_U8_COLOR_CODE)
+        .bold();
     let title = style(name).bold();
     format!("{prefix} {title}")
 }
@@ -179,7 +183,11 @@ pub(crate) fn format_checkmark(label: &str, dim: bool) -> String {
     } else {
         label.to_string()
     };
-    format!("  {}  {}", style("\u{f00c}").green().bold(), label)
+    format!(
+        "  {}  {}",
+        style(Icon::Checkmark.to_string()).green().bold(),
+        label
+    )
 }
 
 /// Format elapsed duration in a compact human-readable way
@@ -229,13 +237,13 @@ fn print_record(record: &log::Record) {
 fn format_log(level: log::Level, message: &str, target: &str) -> String {
     match level {
         log::Level::Error => {
-            let prefix = style("\u{f00d}").red().bold();
+            let prefix = style(Icon::Error.to_string()).red().bold();
             let msg = indent_lines(message, "    ");
             let msg = Style::new().red().apply_to(msg);
             format!("  {prefix} {msg}")
         }
         log::Level::Warn => {
-            let prefix = style("\u{f071}").yellow();
+            let prefix = style(Icon::Warning.to_string()).yellow();
             let msg = indent_lines(message, "    ");
             let msg = Style::new().yellow().apply_to(msg);
             format!("  {prefix} {msg}")
@@ -246,7 +254,7 @@ fn format_log(level: log::Level, message: &str, target: &str) -> String {
             format!("  {msg}")
         }
         log::Level::Debug => {
-            let prefix = style("\u{00B7}").dim();
+            let prefix = style(Icon::Bullet.to_string()).dim();
             let msg = indent_lines(message, "    ");
             let msg = Style::new().blue().dim().apply_to(msg);
             format!("  {prefix} {msg}")
