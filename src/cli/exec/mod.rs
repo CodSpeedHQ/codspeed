@@ -30,6 +30,14 @@ pub struct ExecArgs {
     #[arg(long)]
     pub name: Option<String>,
 
+    /// Allow the benchmarked command to exit with a non-zero status code.
+    ///
+    /// When set, a non-zero exit from the benchmarked process is logged as a
+    /// warning and measurement continues, instead of aborting. Mirrors
+    /// hyperfine's `-i / --ignore-failure`.
+    #[arg(short = 'i', long, default_value = "false")]
+    pub ignore_failure: bool,
+
     /// The command to execute with the exec harness
     pub command: Vec<String>,
 }
@@ -106,6 +114,7 @@ pub async fn run(
         command: merged_args.command.clone(),
         name: merged_args.name.clone(),
         walltime_args: merged_args.walltime_args.clone(),
+        ignore_failure: merged_args.ignore_failure,
     };
     let config = build_orchestrator_config(
         merged_args,

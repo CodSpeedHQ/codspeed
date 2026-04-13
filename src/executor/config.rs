@@ -22,6 +22,8 @@ pub enum BenchmarkTarget {
         command: Vec<String>,
         name: Option<String>,
         walltime_args: exec_harness::walltime::WalltimeExecutionArgs,
+        /// When true, a non-zero exit from the command is tolerated.
+        ignore_failure: bool,
     },
     /// A command with built-in harness (e.g. `pytest --codspeed src`)
     Entrypoint {
@@ -286,11 +288,13 @@ mod tests {
                     command: vec!["exec1".into()],
                     name: None,
                     walltime_args: Default::default(),
+                    ignore_failure: false,
                 },
                 BenchmarkTarget::Exec {
                     command: vec!["exec2".into()],
                     name: None,
                     walltime_args: Default::default(),
+                    ignore_failure: false,
                 },
             ],
             modes: vec![RunnerMode::Simulation],
@@ -305,6 +309,7 @@ mod tests {
                     command: vec!["exec1".into()],
                     name: None,
                     walltime_args: Default::default(),
+                    ignore_failure: false,
                 },
                 BenchmarkTarget::Entrypoint {
                     command: "cmd".into(),
@@ -336,6 +341,7 @@ mod tests {
                     command: vec!["exec1".into()],
                     name: None,
                     walltime_args: Default::default(),
+                    ignore_failure: false,
                 },
                 BenchmarkTarget::Entrypoint {
                     command: "cmd".into(),
