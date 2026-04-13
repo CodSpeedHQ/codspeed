@@ -79,6 +79,8 @@ pub struct OrchestratorConfig {
     pub poll_results_options: PollResultsOptions,
     /// Additional environment variables forwarded to executor subprocesses.
     pub extra_env: HashMap<String, String>,
+    /// Enable valgrind's --fair-sched option.
+    pub fair_sched: bool,
 }
 
 /// Per-execution configuration passed to executors.
@@ -111,6 +113,8 @@ pub struct ExecutorConfig {
     /// Whether to enable language-level introspection (Node.js, Go wrappers in PATH).
     /// Disabled for exec-harness targets since they don't need it.
     pub enable_introspection: bool,
+    /// Enable valgrind's --fair-sched option.
+    pub fair_sched: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -186,6 +190,7 @@ impl OrchestratorConfig {
             go_runner_version: self.go_runner_version.clone(),
             extra_env: self.extra_env.clone(),
             enable_introspection,
+            fair_sched: self.fair_sched,
         }
     }
 }
@@ -221,8 +226,9 @@ impl OrchestratorConfig {
             allow_empty: false,
             go_runner_version: None,
             show_full_output: false,
-            poll_results_options: PollResultsOptions::for_exec(),
+            poll_results_options: PollResultsOptions::new(false, None),
             extra_env: HashMap::new(),
+            fair_sched: false,
         }
     }
 }

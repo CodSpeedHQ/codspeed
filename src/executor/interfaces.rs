@@ -1,3 +1,4 @@
+use crate::local_logger::icons::Icon;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -29,12 +30,12 @@ impl ExecutorName {
         }
     }
 
-    /// Nerd Font icon for this executor.
-    pub fn icon(&self) -> &'static str {
+    /// Icon for this executor.
+    pub fn icon(&self) -> Icon {
         match self {
-            ExecutorName::Valgrind => "\u{f4bc}",
-            ExecutorName::WallTime => "\u{f520}",
-            ExecutorName::Memory => "\u{efc5}",
+            ExecutorName::Valgrind => Icon::ExecutorValgrind,
+            ExecutorName::WallTime => Icon::ExecutorWallTime,
+            ExecutorName::Memory => Icon::ExecutorMemory,
         }
     }
 }

@@ -1,5 +1,6 @@
 use crate::cli::run::helpers::download_file;
 use crate::executor::helpers::apt;
+use crate::executor::{ToolInstallStatus, ToolStatus};
 use crate::prelude::*;
 use crate::system::SystemInfo;
 use crate::{
@@ -52,18 +53,28 @@ fn parse_valgrind_codspeed_version(version_str: &str) -> Option<Version> {
     Version::parse(version_part).ok()
 }
 
-fn is_valgrind_installed() -> bool {
-    let is_valgrind_installed = Command::new("which")
+const TOOL_NAME: &str = "valgrind";
+
+pub fn get_valgrind_status() -> ToolStatus {
+    let tool_name = TOOL_NAME.to_string();
+
+    let is_available = Command::new("which")
         .arg("valgrind")
         .output()
         .is_ok_and(|output| output.status.success());
-    if !is_valgrind_installed {
+    if !is_available {
         debug!("valgrind is not installed");
-        return false;
+        return ToolStatus {
+            tool_name,
+            status: ToolInstallStatus::NotInstalled,
+        };
     }
 
     let Ok(version_output) = Command::new("valgrind").arg("--version").output() else {
-        return false;
+        return ToolStatus {
+            tool_name,
+            status: ToolInstallStatus::NotInstalled,
+        };
     };
 
     if !version_output.status.success() {
@@ -71,46 +82,62 @@ fn is_valgrind_installed() -> bool {
             "Failed to get valgrind version. stderr: {}",
             String::from_utf8_lossy(&version_output.stderr)
         );
-        return false;
+        return ToolStatus {
+            tool_name,
+            status: ToolInstallStatus::NotInstalled,
+        };
     }
 
-    let version = String::from_utf8_lossy(&version_output.stdout);
+    let version = String::from_utf8_lossy(&version_output.stdout)
+        .trim()
+        .to_string();
 
     // Check if it's a codspeed version
     if !version.contains(".codspeed") {
-        warn!(
-            "Valgrind is installed but is not a CodSpeed version. expecting {} but found installed: {}",
-            VALGRIND_CODSPEED_VERSION_STRING.as_str(),
-            version.trim()
-        );
-        return false;
+        return ToolStatus {
+            tool_name,
+            status: ToolInstallStatus::IncorrectVersion {
+                version,
+                message: "not a CodSpeed build".to_string(),
+            },
+        };
     }
 
     // Parse the installed version
     let Some(installed_version) = parse_valgrind_codspeed_version(&version) else {
-        warn!(
-            "Could not parse valgrind version. expecting {} but found installed: {}",
-            VALGRIND_CODSPEED_VERSION_STRING.as_str(),
-            version.trim()
-        );
-        return false;
+        return ToolStatus {
+            tool_name,
+            status: ToolInstallStatus::IncorrectVersion {
+                version,
+                message: "could not parse version".to_string(),
+            },
+        };
     };
+
     if installed_version < VALGRIND_CODSPEED_VERSION {
-        warn!(
-            "Valgrind is installed but the version is too old. expecting {} or higher but found installed: {}",
-            VALGRIND_CODSPEED_VERSION_STRING.as_str(),
-            version.trim()
-        );
-        return false;
+        return ToolStatus {
+            tool_name,
+            status: ToolInstallStatus::IncorrectVersion {
+                version,
+                message: format!(
+                    "version too old, expecting {} or higher",
+                    VALGRIND_CODSPEED_VERSION_STRING.as_str()
+                ),
+            },
+        };
     }
-    if installed_version > VALGRIND_CODSPEED_VERSION {
-        warn!(
-            "Using experimental valgrind version {}.codspeed. The recommended version is {}",
-            installed_version,
-            VALGRIND_CODSPEED_VERSION_STRING.as_str()
-        );
+
+    ToolStatus {
+        tool_name,
+        status: ToolInstallStatus::Installed { version },
     }
-    true
+}
+
+fn is_valgrind_installed() -> bool {
+    matches!(
+        get_valgrind_status().status,
+        ToolInstallStatus::Installed { .. }
+    )
 }
 
 pub async fn install_valgrind(

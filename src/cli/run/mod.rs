@@ -49,6 +49,7 @@ impl RunArgs {
     /// Constructs a new `RunArgs` with default values for testing purposes
     pub fn test() -> Self {
         use super::PerfRunArgs;
+        use super::experimental::ExperimentalArgs;
         use crate::RunnerMode;
 
         Self {
@@ -67,9 +68,13 @@ impl RunArgs {
                 allow_empty: false,
                 go_runner_version: None,
                 show_full_output: false,
+                base: None,
                 perf_run_args: PerfRunArgs {
                     enable_perf: false,
                     perf_unwinding_mode: None,
+                },
+                experimental: ExperimentalArgs {
+                    experimental_fair_sched: false,
                 },
             },
             instruments: vec![],
@@ -118,6 +123,7 @@ fn build_orchestrator_config(
         show_full_output: args.shared.show_full_output,
         poll_results_options,
         extra_env: HashMap::new(),
+        fair_sched: args.shared.experimental.experimental_fair_sched,
     })
 }
 
@@ -143,6 +149,7 @@ pub async fn run(
 ) -> Result<()> {
     let output_json = args.message_format == Some(MessageFormat::Json);
     let project_config = discovered_config.map(|d| &d.config);
+    let base_run_id = args.shared.base.clone();
 
     let run_target = if args.command.is_empty() {
         // No command provided - check for targets in project config
@@ -171,13 +178,14 @@ pub async fn run(
             // SingleCommand: working_directory comes from --working-directory CLI flag only.
             // Config file's working-directory is NOT used.
             let command = args.command.join(" ");
+            let poll_opts = PollResultsOptions::new(output_json, base_run_id);
             let config = build_orchestrator_config(
                 args,
                 vec![executor::BenchmarkTarget::Entrypoint {
                     command,
                     name: None,
                 }],
-                PollResultsOptions::for_run(output_json),
+                poll_opts,
             )?;
 
             let orchestrator =
@@ -230,10 +238,12 @@ pub async fn run(
 
             let benchmark_targets =
                 super::exec::multi_targets::build_benchmark_targets(targets, default_walltime)?;
-            let mut config =
-                build_orchestrator_config(args, benchmark_targets, PollResultsOptions::for_exec())?;
+            let mut config = build_orchestrator_config(
+                args,
+                benchmark_targets,
+                PollResultsOptions::new(false, base_run_id),
+            )?;
             config.working_directory = resolved_working_directory;
-
             super::exec::execute_config(config, api_client, codspeed_config, setup_cache_dir)
                 .await?;
         }

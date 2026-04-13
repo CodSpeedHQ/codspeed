@@ -1,9 +1,35 @@
 use crate::executor::helpers::apt;
 use crate::executor::wall_time::perf::perf_executable::get_working_perf_executable;
+use crate::executor::{ToolInstallStatus, ToolStatus};
 use crate::prelude::*;
 use crate::system::SystemInfo;
 
 use std::{path::Path, process::Command};
+
+const TOOL_NAME: &str = "perf";
+
+pub fn get_perf_status() -> ToolStatus {
+    let tool_name = TOOL_NAME.to_string();
+    match get_working_perf_executable() {
+        Some(perf_path) => {
+            let version = Command::new(&perf_path)
+                .arg("--version")
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            ToolStatus {
+                tool_name,
+                status: ToolInstallStatus::Installed { version },
+            }
+        }
+        None => ToolStatus {
+            tool_name,
+            status: ToolInstallStatus::NotInstalled,
+        },
+    }
+}
 
 fn is_perf_installed() -> bool {
     get_working_perf_executable().is_some()

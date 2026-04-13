@@ -1,0 +1,26 @@
+---
+source: src/local_logger/icons.rs
+expression: rendered
+---
+GroupArrow: ›
+Checkmark: ✓
+Error: ✗
+Warning: ⚠
+Bullet: ·
+ImpactUp: ↑
+ImpactDown: ↓
+ImpactNeutral: ●
+ExecutorValgrind: ⚙
+ExecutorWallTime: ⏱
+ExecutorMemory: ▤
+BoxTopLeft: ╭
+BoxTopRight: ╮
+BoxBottomLeft: ╰
+BoxBottomRight: ╯
+BoxHorizontal: ─
+BoxVertical: │
+BoxTDown: ┬
+BoxTRight: ├
+BoxTLeft: ┤
+Separator: ─
+Ellipsis: …
