@@ -127,7 +127,9 @@ pub fn debug_info_by_path(
         .collect()
 }
 
-#[cfg(test)]
+// These tests parse Linux ELF binaries from `testdata/`; gate them on Linux so they're not
+// attempted (and don't abort the test process) when running on macOS.
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
 
