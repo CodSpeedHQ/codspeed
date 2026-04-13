@@ -1,12 +1,11 @@
 use super::helpers::validate_walltime_results;
+use super::isolation::wrap_with_isolation;
 use super::perf::PerfRunner;
 use crate::executor::Executor;
 use crate::executor::ExecutorConfig;
 use crate::executor::ToolStatus;
 use crate::executor::helpers::command::CommandBuilder;
-use crate::executor::helpers::env::{
-    build_path_env, get_base_injected_env, is_codspeed_debug_enabled,
-};
+use crate::executor::helpers::env::{build_path_env, get_base_injected_env};
 use crate::executor::helpers::get_bench_command::get_bench_command;
 use crate::executor::helpers::run_command_with_log_pipe::run_command_with_log_pipe;
 use crate::executor::helpers::run_with_env::wrap_with_env;
@@ -105,28 +104,12 @@ impl WallTimeExecutor {
         bench_cmd.arg(script_file.path());
         let (mut bench_cmd, env_file) = wrap_with_env(bench_cmd, &extra_env)?;
 
-        let mut cmd_builder = CommandBuilder::new("systemd-run");
         if let Some(cwd) = &config.working_directory {
             let abs_cwd = canonicalize(cwd)?;
-            cmd_builder.current_dir(abs_cwd);
+            bench_cmd.current_dir(abs_cwd);
         }
-        if !is_codspeed_debug_enabled() {
-            cmd_builder.arg("--quiet");
-        }
-        // Remarks:
-        // - We're using --scope so that perf is able to capture the events of the benchmark process.
-        // - We can't user `--user` here because we need to run in `codspeed.slice`, otherwise we'd run in
-        //   user.slice` (which is isolated). We can use `--gid` and `--uid` to run the command as the current user.
-        // - We must use `bash` here instead of `sh` since `source` isn't available when symlinked to `dash`.
-        // - We have to pass the environment variables because `--scope` only inherits the system and not the user environment variables.
-        cmd_builder.arg("--slice=codspeed.slice");
-        cmd_builder.arg("--scope");
-        cmd_builder.arg("--same-dir");
-        cmd_builder.arg(format!("--uid={}", nix::unistd::Uid::current().as_raw()));
-        cmd_builder.arg(format!("--gid={}", nix::unistd::Gid::current().as_raw()));
-        cmd_builder.args(["--"]);
 
-        bench_cmd.wrap_with(cmd_builder);
+        let bench_cmd = wrap_with_isolation(bench_cmd)?;
 
         Ok((env_file, script_file, bench_cmd))
     }
