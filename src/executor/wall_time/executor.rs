@@ -2,6 +2,7 @@ use super::helpers::validate_walltime_results;
 use super::perf::PerfRunner;
 use crate::executor::Executor;
 use crate::executor::ExecutorConfig;
+use crate::executor::ToolStatus;
 use crate::executor::helpers::command::CommandBuilder;
 use crate::executor::helpers::env::{
     build_path_env, get_base_injected_env, is_codspeed_debug_enabled,
@@ -135,6 +136,10 @@ impl WallTimeExecutor {
 impl Executor for WallTimeExecutor {
     fn name(&self) -> ExecutorName {
         ExecutorName::WallTime
+    }
+
+    fn tool_status(&self) -> ToolStatus {
+        super::perf::setup::get_perf_status()
     }
 
     async fn setup(&self, system_info: &SystemInfo, setup_cache_dir: Option<&Path>) -> Result<()> {

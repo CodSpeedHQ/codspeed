@@ -25,8 +25,6 @@ fn _find_repository_root(base_dir: &Path) -> Option<PathBuf> {
         }
     }
 
-    log::warn!("Could not find repository root");
-
     None
 }
 

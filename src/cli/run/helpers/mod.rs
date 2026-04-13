@@ -1,4 +1,3 @@
-pub(crate) mod benchmark_display;
 mod download_file;
 mod find_repository_root;
 mod format_duration;

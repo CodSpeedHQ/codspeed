@@ -1,0 +1,19 @@
+---
+source: src/run_environment/local/provider.rs
+expression: run_environment_metadata
+---
+{
+  "ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "headRef": null,
+  "baseRef": null,
+  "owner": "CodSpeedHQ",
+  "repository": "local-runs",
+  "event": "local",
+  "sender": null,
+  "ghData": null,
+  "glData": null,
+  "localData": {
+    "expectedRunPartsCount": 1
+  },
+  "repositoryRootPath": "[root_path]"
+}

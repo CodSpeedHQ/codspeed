@@ -5,10 +5,42 @@
 
 
 
+## [4.13.0] - 2026-03-26
+
+### <!-- 0 -->🚀 Features
+- Forward the fair-sched flag to valgrind by @GuillaumeLagrange in [#279](https://github.com/CodSpeedHQ/runner/pull/279)
+- Add new cli flag --fair-sched and support for experimental flags by @GuillaumeLagrange
+- Pass java options benchmark by @not-matthias
+- Add snapshot test for local provider resolution by @GuillaumeLagrange
+- Add `codspeed auth status`, `codspeed setup status`, and `codspeed status` commands by @GuillaumeLagrange
+- Remove nerd fonts and centralize icon definition by @GuillaumeLagrange in [#272](https://github.com/CodSpeedHQ/runner/pull/272)
+- Add --base argument to compare local run to another run by @GuillaumeLagrange
+- Hide the cursor while running by @GuillaumeLagrange
+- Print the banner in a single eprintln! call by @GuillaumeLagrange
+- Add `codspeed update` command by @GuillaumeLagrange in [#275](https://github.com/CodSpeedHQ/runner/pull/275)
+
+### <!-- 1 -->🐛 Bug Fixes
+- Only hide curser after clap is done parsing cli args by @GuillaumeLagrange
+- Use exact executable matching for perf unwinding mode detection by @not-matthias in [#261](https://github.com/CodSpeedHQ/runner/pull/261)
+- Support spaces in base injected env by @not-matthias
+- Fix error when running outside of git repository by @GuillaumeLagrange in [#268](https://github.com/CodSpeedHQ/runner/pull/268)
+- Resolve working_directory relative to config file, not CWD by @GuillaumeLagrange in [#270](https://github.com/CodSpeedHQ/runner/pull/270)
+- Do not run teardown if executor's run failed by @GuillaumeLagrange
+
+### <!-- 2 -->🏗️ Refactor
+- Extract `parse_repository_from_remote` into shared helpers by @GuillaumeLagrange
+- Move the benchmark display helpers to the upload module by @GuillaumeLagrange in [#273](https://github.com/CodSpeedHQ/runner/pull/273)
+- Extract config discovery into `DiscoveredProjectConfig` by @GuillaumeLagrange
+
+### <!-- 7 -->⚙️ Internals
+- Use frame-pointer unwinding with Java by @not-matthias
+- Add basic basic end to end invocation by @GuillaumeLagrange in [#274](https://github.com/CodSpeedHQ/runner/pull/274)
+
+
 ## [4.12.1] - 2026-03-20
 
 ### <!-- 7 -->⚙️ Internals
-- Bump memtrack version
+- Bump memtrack version by @adriencaccia
 
 
 ## [4.12.0] - 2026-03-19
@@ -1039,6 +1071,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[4.13.0]: https://github.com/CodSpeedHQ/runner/compare/v4.12.1..v4.13.0
 [4.12.1]: https://github.com/CodSpeedHQ/runner/compare/v4.12.0..v4.12.1
 [4.12.0]: https://github.com/CodSpeedHQ/runner/compare/v4.11.1..v4.12.0
 [4.11.1]: https://github.com/CodSpeedHQ/runner/compare/v4.11.0..v4.11.1
