@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use super::{
     CODSPEED_U8_COLOR_CODE, IS_TTY, SPINNER, SPINNER_TICKS, TICK_INTERVAL_MS, format_checkmark,
+    icons::Icon,
 };
 use console::{Term, style};
 use std::sync::LazyLock;
@@ -113,7 +114,7 @@ impl RollingBuffer {
         let title_styled = style(&self.title).color256(CODSPEED_U8_COLOR_CODE);
 
         let line = format!("  {tick_styled} {title_styled}");
-        console::truncate_str(&line, self.term_width, "…").into_owned()
+        console::truncate_str(&line, self.term_width, &Icon::Ellipsis.to_string()).into_owned()
     }
 
     fn render_top_delimiter(&self) -> String {
@@ -126,8 +127,8 @@ impl RollingBuffer {
         } else {
             String::new()
         };
-        let prefix = format!("{INDENT}\u{256d}\u{2500}");
-        let suffix = "\u{256e}"; // ╮
+        let prefix = format!("{INDENT}{}{}", Icon::BoxTopLeft, Icon::BoxHorizontal);
+        let suffix = Icon::BoxTopRight.to_string();
         let label_visible_len = if truncated > 0 {
             format!(" {truncated} lines above ").len()
         } else {
@@ -135,9 +136,9 @@ impl RollingBuffer {
         };
         let used = console::measure_text_width(&prefix)
             + label_visible_len
-            + console::measure_text_width(suffix);
+            + console::measure_text_width(&suffix);
         let remaining = self.term_width.saturating_sub(used);
-        let bar = "\u{2500}".repeat(remaining);
+        let bar = Icon::BoxHorizontal.to_string().repeat(remaining);
         format!(
             "{}{}{}",
             style(prefix.to_string()).dim(),
@@ -147,22 +148,22 @@ impl RollingBuffer {
     }
 
     fn render_bottom_delimiter(&self) -> String {
-        let prefix = format!("{INDENT}\u{2570}");
-        let suffix = "\u{256f}"; // ╯
-        let used = console::measure_text_width(&prefix) + console::measure_text_width(suffix);
+        let prefix = format!("{INDENT}{}", Icon::BoxBottomLeft);
+        let suffix = Icon::BoxBottomRight.to_string();
+        let used = console::measure_text_width(&prefix) + console::measure_text_width(&suffix);
         let remaining = self.term_width.saturating_sub(used);
-        let bar = "\u{2500}".repeat(remaining);
+        let bar = Icon::BoxHorizontal.to_string().repeat(remaining);
         format!("{}", style(format!("{prefix}{bar}{suffix}")).dim())
     }
 
     fn render_content_line(&self, line: &str) -> String {
-        let inner_indent = format!("{INDENT}\u{2502} ");
-        let right_border = "\u{2502}"; // │
+        let inner_indent = format!("{INDENT}{} ", Icon::BoxVertical);
+        let right_border = Icon::BoxVertical.to_string();
         let chrome_width =
-            console::measure_text_width(&inner_indent) + console::measure_text_width(right_border);
+            console::measure_text_width(&inner_indent) + console::measure_text_width(&right_border);
         let max_content_width = self.term_width.saturating_sub(chrome_width);
         let truncated = if max_content_width > 0 {
-            console::truncate_str(line, max_content_width, "…")
+            console::truncate_str(line, max_content_width, &Icon::Ellipsis.to_string())
         } else {
             std::borrow::Cow::Borrowed("")
         };
@@ -173,7 +174,7 @@ impl RollingBuffer {
             style(&inner_indent).dim(),
             style(&*truncated).dim(),
             " ".repeat(padding),
-            style(right_border).dim()
+            style(&right_border).dim()
         )
     }
 

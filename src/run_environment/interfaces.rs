@@ -1,3 +1,5 @@
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -9,6 +11,16 @@ pub enum RepositoryProvider {
     GitHub,
     GitLab,
     Project,
+}
+
+impl fmt::Display for RepositoryProvider {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RepositoryProvider::GitHub => write!(f, "Github"),
+            RepositoryProvider::GitLab => write!(f, "Gitlab"),
+            RepositoryProvider::Project => write!(f, "Project"),
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]

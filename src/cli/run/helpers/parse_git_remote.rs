@@ -1,6 +1,8 @@
 use std::sync::LazyLock;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, bail};
+
+use crate::run_environment::RepositoryProvider;
 
 static REMOTE_REGEX: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(
@@ -14,6 +16,34 @@ pub struct GitRemote {
     pub domain: String,
     pub owner: String,
     pub repository: String,
+}
+
+/// Parsed repository info including the CodSpeed provider
+#[derive(Debug)]
+pub struct ParsedRepository {
+    pub provider: RepositoryProvider,
+    pub owner: String,
+    pub name: String,
+}
+
+/// Parse a git remote URL and extract the provider, owner, and repository name
+pub fn parse_repository_from_remote(remote_url: &str) -> Result<ParsedRepository> {
+    let GitRemote {
+        domain,
+        owner,
+        repository,
+    } = parse_git_remote(remote_url)?;
+    let provider = match domain.as_str() {
+        "github.com" => RepositoryProvider::GitHub,
+        "gitlab.com" => RepositoryProvider::GitLab,
+        domain => bail!("Repository provider {domain} is not supported by CodSpeed"),
+    };
+
+    Ok(ParsedRepository {
+        provider,
+        owner,
+        name: repository,
+    })
 }
 
 pub fn parse_git_remote(remote: &str) -> Result<GitRemote> {
@@ -97,5 +127,45 @@ mod tests {
             repository: "runner",
         }
         "###);
+    }
+
+    #[test]
+    fn test_parse_repository_from_remote() {
+        use crate::run_environment::RepositoryProvider;
+
+        let remote_urls = [
+            (
+                "git@github.com:CodSpeedHQ/codspeed.git",
+                RepositoryProvider::GitHub,
+                "CodSpeedHQ",
+                "codspeed",
+            ),
+            (
+                "https://github.com/CodSpeedHQ/codspeed.git",
+                RepositoryProvider::GitHub,
+                "CodSpeedHQ",
+                "codspeed",
+            ),
+            (
+                "git@gitlab.com:codspeed/runner.git",
+                RepositoryProvider::GitLab,
+                "codspeed",
+                "runner",
+            ),
+            (
+                "https://gitlab.com/codspeed/runner.git",
+                RepositoryProvider::GitLab,
+                "codspeed",
+                "runner",
+            ),
+        ];
+        for (remote_url, expected_provider, expected_owner, expected_name) in
+            remote_urls.into_iter()
+        {
+            let parsed = parse_repository_from_remote(remote_url).unwrap();
+            assert_eq!(parsed.provider, expected_provider);
+            assert_eq!(parsed.owner, expected_owner);
+            assert_eq!(parsed.name, expected_name);
+        }
     }
 }

@@ -77,7 +77,7 @@ mod tests {
             hash,
             // Caution: when changing this value, we need to ensure that
             // the related backend snapshot remains the same
-            @"b2c6175fa81d4c4c5eb215e2e77667891f33abca9f8614b45899e3ee070bdca6"
+            @"0afc09ee58a610d400aa6b3fbdddf628608ed2e11aed39585a50abe96e1c9284"
         );
         assert_json_snapshot!(upload_metadata);
     }
@@ -106,6 +106,12 @@ mod tests {
                     cpu_vendor_id: "GenuineIntel".to_string(),
                     cpu_cores: 6,
                     total_memory_gb: 16,
+                    cpu_flags: vec![
+                        "sse2".to_string(),
+                        "avx".to_string(),
+                        "avx2".to_string(),
+                        "erms".to_string(),
+                    ],
                 },
             },
             run_environment: RunEnvironment::Local,
@@ -139,7 +145,7 @@ mod tests {
             hash,
             // Caution: when changing this value, we need to ensure that
             // the related backend snapshot remains the same
-            @"47b6317da2747edae177d8a99143efc6f7516beb3222b9d45331ba48d4e1c369"
+            @"26c83ef306f189fe5b725043577dbc09a204bbd1c973dd7d1e974ff88235dd84"
         );
         assert_json_snapshot!(upload_metadata);
     }

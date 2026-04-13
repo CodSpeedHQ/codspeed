@@ -1,0 +1,10 @@
+---
+source: src/run_environment/local/provider.rs
+expression: run_part
+---
+{
+  "runId": "test-run-id",
+  "runPartId": "local-job",
+  "jobName": "local-job",
+  "metadata": {}
+}

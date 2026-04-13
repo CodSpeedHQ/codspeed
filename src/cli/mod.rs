@@ -1,9 +1,11 @@
 mod auth;
 pub(crate) mod exec;
+pub(crate) mod experimental;
 pub(crate) mod run;
 mod setup;
 mod shared;
 mod show;
+mod status;
 mod update;
 mod use_mode;
 
@@ -14,7 +16,7 @@ use std::path::PathBuf;
 use crate::{
     api_client::CodSpeedAPIClient,
     config::CodSpeedConfig,
-    local_logger::{CODSPEED_U8_COLOR_CODE, init_local_logger},
+    local_logger::{CODSPEED_U8_COLOR_CODE, IS_TTY, init_local_logger},
     prelude::*,
     project_config::DiscoveredProjectConfig,
 };
@@ -22,6 +24,27 @@ use clap::{
     Parser, Subcommand,
     builder::{Styles, styling},
 };
+use console::Term;
+
+/// Guard that hides the terminal cursor on creation and restores it on drop.
+struct CursorGuard;
+
+impl CursorGuard {
+    fn new() -> Self {
+        if *IS_TTY {
+            let _ = Term::stderr().hide_cursor();
+        }
+        Self
+    }
+}
+
+impl Drop for CursorGuard {
+    fn drop(&mut self) {
+        if *IS_TTY {
+            let _ = Term::stderr().show_cursor();
+        }
+    }
+}
 
 fn create_styles() -> Styles {
     styling::Styles::styled()
@@ -85,7 +108,9 @@ enum Commands {
     /// Manage the CLI authentication state
     Auth(auth::AuthArgs),
     /// Pre-install the codspeed executors
-    Setup,
+    Setup(setup::SetupArgs),
+    /// Show the overall status of CodSpeed (authentication, tools, system)
+    Status,
     /// Set the codspeed mode for the rest of the shell session
     Use(use_mode::UseArgs),
     /// Show the codspeed mode previously set in this shell session with `codspeed use`
@@ -96,6 +121,8 @@ enum Commands {
 
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
+    // Important: keep this after the Cli::parse() because the function can exit the process by itself, skipping the drop of the CursorGuard
+    let _cursor_guard = CursorGuard::new();
     let codspeed_config =
         CodSpeedConfig::load_with_override(cli.config_name.as_deref(), cli.oauth_token.as_deref())?;
     let api_client = CodSpeedAPIClient::try_from((&cli, &codspeed_config))?;
@@ -122,6 +149,7 @@ pub async fn run() -> Result<()> {
 
     match cli.command {
         Commands::Run(args) => {
+            args.shared.experimental.warn_if_active();
             run::run(
                 *args,
                 &api_client,
@@ -132,6 +160,7 @@ pub async fn run() -> Result<()> {
             .await?
         }
         Commands::Exec(args) => {
+            args.shared.experimental.warn_if_active();
             exec::run(
                 *args,
                 &api_client,
@@ -142,7 +171,8 @@ pub async fn run() -> Result<()> {
             .await?
         }
         Commands::Auth(args) => auth::run(args, &api_client, cli.config_name.as_deref()).await?,
-        Commands::Setup => setup::setup(setup_cache_dir).await?,
+        Commands::Setup(args) => setup::run(args, setup_cache_dir).await?,
+        Commands::Status => status::run(&api_client).await?,
         Commands::Use(args) => use_mode::run(args)?,
         Commands::Show => show::run()?,
         Commands::Update => update::run().await?,
@@ -160,7 +190,7 @@ impl Cli {
             config_name: None,
             config: None,
             setup_cache_dir: None,
-            command: Commands::Setup,
+            command: Commands::Setup(setup::SetupArgs::default()),
         }
     }
 }

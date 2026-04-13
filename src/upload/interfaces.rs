@@ -5,7 +5,7 @@ use crate::instruments::InstrumentName;
 use crate::run_environment::{RepositoryProvider, RunEnvironment, RunEnvironmentMetadata, RunPart};
 use crate::system::SystemInfo;
 
-pub const LATEST_UPLOAD_METADATA_VERSION: u32 = 9;
+pub const LATEST_UPLOAD_METADATA_VERSION: u32 = 10;
 
 #[derive(Deserialize, Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
