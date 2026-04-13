@@ -87,7 +87,7 @@ pub fn unwind_data_from_elf(
     Ok((v3, mapping))
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
 

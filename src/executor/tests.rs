@@ -146,6 +146,7 @@ async fn acquire_bpf_instrumentation_lock() -> SemaphorePermit<'static> {
     semaphore.acquire().await.unwrap()
 }
 
+#[cfg(target_os = "linux")]
 mod valgrind {
     use super::*;
     use crate::executor::valgrind::executor::ValgrindExecutor;
@@ -377,6 +378,7 @@ fi
     }
 }
 
+#[cfg(target_os = "linux")]
 #[test_with::env(GITHUB_ACTIONS)]
 mod memory {
     use super::*;
