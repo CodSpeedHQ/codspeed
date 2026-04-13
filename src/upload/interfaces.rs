@@ -7,7 +7,7 @@ use crate::system::SystemInfo;
 
 pub const LATEST_UPLOAD_METADATA_VERSION: u32 = 10;
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct UploadMetadata {
     pub repository_provider: RepositoryProvider,
@@ -24,7 +24,7 @@ pub struct UploadMetadata {
     pub run_environment_metadata: RunEnvironmentMetadata,
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Runner {
     pub name: String,

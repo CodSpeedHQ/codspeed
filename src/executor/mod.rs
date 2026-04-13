@@ -73,12 +73,28 @@ pub enum ToolInstallStatus {
     NotInstalled,
 }
 
+/// How well a given executor runs on a given [`SupportedOs`].
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+pub enum ExecutorSupport {
+    /// The executor cannot run on this OS at all — `run_executor` hard-bails.
+    Unsupported,
+    /// The executor runs on this OS, but the user is responsible for installing the required tooling themselves.
+    RequiresManualInstallation,
+    /// The executor runs on this OS and `setup()` knows how to auto-install tooling.
+    FullySupported,
+}
+
 #[async_trait(?Send)]
 pub trait Executor {
     fn name(&self) -> ExecutorName;
 
     /// Report the installation status of the tool(s) this executor depends on.
-    fn tool_status(&self) -> ToolStatus;
+    fn tool_status(&self) -> Option<ToolStatus>;
+
+    /// Declare how well this executor runs on the host system. Drives whether `setup()` is invoked
+    /// (only when [`ExecutorSupport::FullySupported`]) and whether we bail out of running the
+    /// executor at all (on [`ExecutorSupport::Unsupported`]).
+    fn support_level(&self, system_info: &SystemInfo) -> ExecutorSupport;
 
     async fn setup(
         &self,
@@ -107,11 +123,24 @@ pub async fn run_executor(
     execution_context: &ExecutionContext,
     setup_cache_dir: Option<&Path>,
 ) -> Result<()> {
-    if !execution_context.config.skip_setup {
-        executor
-            .setup(&orchestrator.system_info, setup_cache_dir)
-            .await?;
+    match executor.support_level(&orchestrator.system_info) {
+        ExecutorSupport::Unsupported => {
+            bail!(
+                "The {} executor is not supported on {}",
+                executor.name(),
+                orchestrator.system_info.os
+            );
+        }
+        ExecutorSupport::RequiresManualInstallation | ExecutorSupport::FullySupported => {
+            if !execution_context.config.skip_setup {
+                executor
+                    .setup(&orchestrator.system_info, setup_cache_dir)
+                    .await?;
+            }
+        }
+    }
 
+    if !execution_context.config.skip_setup {
         // TODO: refactor and move directly in the Instruments struct as a `setup` method
         if execution_context.config.instruments.is_mongodb_enabled() {
             install_mongodb_tracer().await?;

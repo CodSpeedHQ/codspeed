@@ -1,4 +1,5 @@
 use crate::executor::ExecutorName;
+use crate::executor::ExecutorSupport;
 use crate::executor::ToolStatus;
 use crate::executor::helpers::command::CommandBuilder;
 use crate::executor::helpers::env::get_base_injected_env;
@@ -11,7 +12,7 @@ use crate::executor::{ExecutionContext, Executor};
 use crate::instruments::mongo_tracer::MongoTracer;
 use crate::prelude::*;
 use crate::runner_mode::RunnerMode;
-use crate::system::SystemInfo;
+use crate::system::{SupportedOs, SystemInfo};
 use async_trait::async_trait;
 use ipc_channel::ipc;
 use memtrack::MemtrackIpcClient;
@@ -72,8 +73,15 @@ impl Executor for MemoryExecutor {
         ExecutorName::Memory
     }
 
-    fn tool_status(&self) -> ToolStatus {
-        get_memtrack_status()
+    fn tool_status(&self) -> Option<ToolStatus> {
+        Some(get_memtrack_status())
+    }
+
+    fn support_level(&self, system_info: &SystemInfo) -> ExecutorSupport {
+        match &system_info.os {
+            SupportedOs::Linux(_) => ExecutorSupport::FullySupported,
+            SupportedOs::Macos { .. } => ExecutorSupport::Unsupported,
+        }
     }
 
     async fn setup(

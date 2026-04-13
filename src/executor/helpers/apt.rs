@@ -1,13 +1,13 @@
 use super::run_with_sudo::run_with_sudo;
 use crate::prelude::*;
-use crate::system::SystemInfo;
+use crate::system::{SupportedOs, SystemInfo};
 use std::path::Path;
 use std::process::Command;
 
 const METADATA_FILENAME: &str = "./tmp/codspeed-cache-metadata.txt";
 
 fn is_system_compatible(system_info: &SystemInfo) -> bool {
-    system_info.os == "ubuntu" || system_info.os == "debian"
+    matches!(system_info.os, SupportedOs::Linux(ref distro) if distro.is_supported())
 }
 
 /// Installs packages with caching support.

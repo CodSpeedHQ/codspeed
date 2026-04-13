@@ -22,17 +22,14 @@ pub async fn run(api_client: &CodSpeedAPIClient) -> Result<()> {
     info!("");
 
     // Setup/tools status
-    super::setup::status();
+    super::setup::status()?;
     info!("");
 
     // System info
     info!("{}", style("System").bold());
     info!("  codspeed {VERSION}");
     let system_info = SystemInfo::new()?;
-    info!(
-        "  {} {} ({})",
-        system_info.os, system_info.os_version, system_info.arch
-    );
+    info!("  {} ({})", system_info.os, system_info.arch);
     info!(
         "  {} ({}C / {}GB)",
         system_info.cpu_brand, system_info.cpu_cores, system_info.total_memory_gb

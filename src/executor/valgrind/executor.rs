@@ -3,12 +3,12 @@ use std::path::Path;
 
 use crate::executor::Executor;
 use crate::executor::ToolStatus;
-use crate::executor::{ExecutionContext, ExecutorName};
+use crate::executor::{ExecutionContext, ExecutorName, ExecutorSupport};
 use crate::instruments::mongo_tracer::MongoTracer;
 use crate::prelude::*;
-use crate::system::SystemInfo;
+use crate::system::{SupportedOs, SystemInfo};
 
-use super::setup::{get_valgrind_status, install_valgrind};
+use super::setup::{get_codspeed_valgrind_filename, get_valgrind_status, install_valgrind};
 use super::{helpers::perf_maps::harvest_perf_maps, helpers::venv_compat, measure};
 
 pub struct ValgrindExecutor;
@@ -19,8 +19,21 @@ impl Executor for ValgrindExecutor {
         ExecutorName::Valgrind
     }
 
-    fn tool_status(&self) -> ToolStatus {
-        get_valgrind_status()
+    fn tool_status(&self) -> Option<ToolStatus> {
+        Some(get_valgrind_status())
+    }
+
+    fn support_level(&self, system_info: &SystemInfo) -> ExecutorSupport {
+        match &system_info.os {
+            SupportedOs::Linux(_) => {
+                if get_codspeed_valgrind_filename(system_info).is_ok() {
+                    ExecutorSupport::FullySupported
+                } else {
+                    ExecutorSupport::RequiresManualInstallation
+                }
+            }
+            SupportedOs::Macos { .. } => ExecutorSupport::Unsupported,
+        }
     }
 
     async fn setup(&self, system_info: &SystemInfo, setup_cache_dir: Option<&Path>) -> Result<()> {

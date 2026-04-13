@@ -96,8 +96,12 @@ mod tests {
                 instruments: vec![],
                 executor: ExecutorName::Valgrind,
                 system_info: SystemInfo {
-                    os: "nixos".to_string(),
-                    os_version: "25.11".to_string(),
+                    os: crate::system::SupportedOs::Linux(
+                        crate::system::LinuxDistribution::Other {
+                            name: "nixos".into(),
+                            version: "25.11".into(),
+                        },
+                    ),
                     arch: "x86_64".to_string(),
                     host: "badlands".to_string(),
                     user: "guillaume".to_string(),

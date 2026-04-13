@@ -10,11 +10,11 @@ use crate::executor::helpers::get_bench_command::get_bench_command;
 use crate::executor::helpers::run_command_with_log_pipe::run_command_with_log_pipe;
 use crate::executor::helpers::run_with_env::wrap_with_env;
 use crate::executor::helpers::run_with_sudo::wrap_with_sudo;
-use crate::executor::{ExecutionContext, ExecutorName};
+use crate::executor::{ExecutionContext, ExecutorName, ExecutorSupport};
 use crate::instruments::mongo_tracer::MongoTracer;
 use crate::prelude::*;
 use crate::runner_mode::RunnerMode;
-use crate::system::SystemInfo;
+use crate::system::{SupportedOs, SystemInfo};
 use async_trait::async_trait;
 use std::fs::canonicalize;
 use std::io::Write;
@@ -121,8 +121,18 @@ impl Executor for WallTimeExecutor {
         ExecutorName::WallTime
     }
 
-    fn tool_status(&self) -> ToolStatus {
-        super::perf::setup::get_perf_status()
+    fn tool_status(&self) -> Option<ToolStatus> {
+        self.perf
+            .as_ref()
+            .map(|_| super::perf::setup::get_perf_status())
+    }
+
+    fn support_level(&self, system_info: &SystemInfo) -> ExecutorSupport {
+        match &system_info.os {
+            SupportedOs::Linux(distro) if distro.is_supported() => ExecutorSupport::FullySupported,
+            SupportedOs::Macos { .. } => ExecutorSupport::FullySupported,
+            SupportedOs::Linux(_) => ExecutorSupport::RequiresManualInstallation,
+        }
     }
 
     async fn setup(&self, system_info: &SystemInfo, setup_cache_dir: Option<&Path>) -> Result<()> {

@@ -2,7 +2,7 @@ use crate::cli::run::helpers::download_file;
 use crate::executor::helpers::apt;
 use crate::executor::{ToolInstallStatus, ToolStatus};
 use crate::prelude::*;
-use crate::system::SystemInfo;
+use crate::system::{LinuxDistribution, SupportedOs, SystemInfo};
 use crate::{
     VALGRIND_CODSPEED_DEB_VERSION, VALGRIND_CODSPEED_VERSION, VALGRIND_CODSPEED_VERSION_STRING,
 };
@@ -10,23 +10,37 @@ use semver::Version;
 use std::{env, path::Path, process::Command};
 use url::Url;
 
-fn get_codspeed_valgrind_filename(system_info: &SystemInfo) -> Result<String> {
-    let (version, architecture) = match (
-        system_info.os.as_str(),
-        system_info.os_version.as_str(),
-        system_info.arch.as_str(),
-    ) {
-        ("ubuntu", "22.04", "x86_64") | ("debian", "12", "x86_64") => ("22.04", "amd64"),
-        ("ubuntu", "24.04", "x86_64") => ("24.04", "amd64"),
-        ("ubuntu", "22.04", "aarch64") | ("debian", "12", "aarch64") => ("22.04", "arm64"),
-        ("ubuntu", "24.04", "aarch64") => ("24.04", "arm64"),
+pub(super) fn get_codspeed_valgrind_filename(system_info: &SystemInfo) -> Result<String> {
+    let SupportedOs::Linux(distro) = &system_info.os else {
+        bail!("Unsupported system");
+    };
+
+    let (deb_ubuntu_version, architecture) = match (distro, system_info.arch.as_str()) {
+        (LinuxDistribution::Ubuntu { version }, "x86_64")
+        | (LinuxDistribution::Debian { version }, "x86_64")
+            if version == "22.04" || version == "12" =>
+        {
+            ("22.04", "amd64")
+        }
+        (LinuxDistribution::Ubuntu { version }, "x86_64") if version == "24.04" => {
+            ("24.04", "amd64")
+        }
+        (LinuxDistribution::Ubuntu { version }, "aarch64")
+        | (LinuxDistribution::Debian { version }, "aarch64")
+            if version == "22.04" || version == "12" =>
+        {
+            ("22.04", "arm64")
+        }
+        (LinuxDistribution::Ubuntu { version }, "aarch64") if version == "24.04" => {
+            ("24.04", "arm64")
+        }
         _ => bail!("Unsupported system"),
     };
 
     Ok(format!(
         "valgrind_{}_ubuntu-{}_{}.deb",
         VALGRIND_CODSPEED_DEB_VERSION.as_str(),
-        version,
+        deb_ubuntu_version,
         architecture
     ))
 }
@@ -175,8 +189,9 @@ mod tests {
     #[test]
     fn test_system_info_to_codspeed_valgrind_version_ubuntu() {
         let system_info = SystemInfo {
-            os: "ubuntu".to_string(),
-            os_version: "22.04".to_string(),
+            os: SupportedOs::Linux(LinuxDistribution::Ubuntu {
+                version: "22.04".into(),
+            }),
             arch: "x86_64".to_string(),
             ..SystemInfo::test()
         };
@@ -189,8 +204,9 @@ mod tests {
     #[test]
     fn test_system_info_to_codspeed_valgrind_version_ubuntu_24() {
         let system_info = SystemInfo {
-            os: "ubuntu".to_string(),
-            os_version: "24.04".to_string(),
+            os: SupportedOs::Linux(LinuxDistribution::Ubuntu {
+                version: "24.04".into(),
+            }),
             arch: "x86_64".to_string(),
             ..SystemInfo::test()
         };
@@ -203,8 +219,9 @@ mod tests {
     #[test]
     fn test_system_info_to_codspeed_valgrind_version_debian() {
         let system_info = SystemInfo {
-            os: "debian".to_string(),
-            os_version: "12".to_string(),
+            os: SupportedOs::Linux(LinuxDistribution::Debian {
+                version: "12".into(),
+            }),
             arch: "x86_64".to_string(),
             ..SystemInfo::test()
         };
@@ -217,8 +234,9 @@ mod tests {
     #[test]
     fn test_system_info_to_codspeed_valgrind_version_ubuntu_arm() {
         let system_info = SystemInfo {
-            os: "ubuntu".to_string(),
-            os_version: "22.04".to_string(),
+            os: SupportedOs::Linux(LinuxDistribution::Ubuntu {
+                version: "22.04".into(),
+            }),
             arch: "aarch64".to_string(),
             ..SystemInfo::test()
         };
@@ -226,6 +244,28 @@ mod tests {
             get_codspeed_valgrind_filename(&system_info).unwrap(),
             @"valgrind_3.26.0-0codspeed0_ubuntu-22.04_arm64.deb"
         );
+    }
+
+    #[test]
+    fn test_codspeed_valgrind_filename_unsupported_os() {
+        let system_info = SystemInfo {
+            os: SupportedOs::Macos {
+                version: "14.0".into(),
+            },
+            ..SystemInfo::test()
+        };
+        assert!(get_codspeed_valgrind_filename(&system_info).is_err());
+    }
+
+    #[test]
+    fn test_codspeed_valgrind_filename_unsupported_distro() {
+        let system_info = SystemInfo {
+            os: SupportedOs::Linux(LinuxDistribution::Ubuntu {
+                version: "20.04".into(),
+            }),
+            ..SystemInfo::test()
+        };
+        assert!(get_codspeed_valgrind_filename(&system_info).is_err());
     }
 
     #[test]

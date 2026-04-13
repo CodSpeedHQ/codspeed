@@ -1,9 +1,10 @@
 use std::process::Command;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
 
 use crate::prelude::*;
+use crate::system::os::SupportedOs;
 
 fn get_user() -> Result<String> {
     let user_output = Command::new("whoami")
@@ -17,11 +18,12 @@ fn get_user() -> Result<String> {
     Ok(output_str.trim().to_string())
 }
 
-#[derive(Eq, PartialEq, Hash, Serialize, Deserialize, Debug, Clone)]
+#[derive(Eq, PartialEq, Hash, Serialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SystemInfo {
-    pub os: String,
-    pub os_version: String,
+    /// Flattened to the `os` and `osVersion` fields on the wire via [`SupportedOs`]'s serde impl.
+    #[serde(flatten)]
+    pub os: SupportedOs,
     pub arch: String,
     pub host: String,
     pub user: String,
@@ -37,8 +39,9 @@ pub struct SystemInfo {
 impl SystemInfo {
     pub fn test() -> Self {
         SystemInfo {
-            os: "ubuntu".to_string(),
-            os_version: "20.04".to_string(),
+            os: SupportedOs::Linux(crate::system::LinuxDistribution::Ubuntu {
+                version: "20.04".into(),
+            }),
             arch: "x86_64".to_string(),
             host: "host".to_string(),
             user: "user".to_string(),
@@ -96,8 +99,7 @@ fn get_cpu_flags() -> Vec<String> {
 
 impl SystemInfo {
     pub fn new() -> Result<Self> {
-        let os = System::distribution_id();
-        let os_version = System::os_version().ok_or(anyhow!("Failed to get OS version"))?;
+        let os = SupportedOs::from_os(std::env::consts::OS)?;
         let arch = System::cpu_arch();
         let user = get_user()?;
         let host = System::host_name().ok_or(anyhow!("Failed to get host name"))?;
@@ -133,7 +135,6 @@ impl SystemInfo {
 
         Ok(SystemInfo {
             os,
-            os_version,
             arch,
             host,
             user,
