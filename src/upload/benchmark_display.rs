@@ -1,6 +1,9 @@
-use crate::api_client::FetchLocalRunBenchmarkResult;
+use crate::api_client::{
+    CompareRunsBenchmarkResult, FetchLocalRunBenchmarkResult, ResultComparisonCategory,
+};
 use crate::cli::run::helpers;
 use crate::executor::ExecutorName;
+use crate::local_logger::icons::Icon;
 use console::style;
 use std::collections::HashMap;
 use tabled::settings::object::{Columns, Rows};
@@ -8,6 +11,9 @@ use tabled::settings::panel::Panel;
 use tabled::settings::style::HorizontalLine;
 use tabled::settings::{Alignment, Color, Modify, Padding, Style};
 use tabled::{Table, Tabled};
+
+/// Changes below this threshold are displayed as "~0%" to avoid noise.
+pub(super) const CHANGE_DISPLAY_EPSILON: f64 = 0.005;
 
 fn format_with_thousands_sep(n: u64) -> String {
     let s = n.to_string();
@@ -87,9 +93,14 @@ struct MemoryRow {
     alloc_calls: String,
 }
 
-fn build_table_with_style<T: Tabled>(rows: &[T], instrument: &str, icon: &str) -> String {
+fn build_table_with_style<T: Tabled>(rows: &[T], instrument: &str, icon: Icon) -> String {
     // Line after panel header: use ┬ to connect with columns below
-    let header_line = HorizontalLine::full('─', '┬', '├', '┤');
+    let header_line = HorizontalLine::full(
+        Icon::BoxHorizontal.as_char(),
+        Icon::BoxTDown.as_char(),
+        Icon::BoxTRight.as_char(),
+        Icon::BoxTLeft.as_char(),
+    );
     // Line after column headers: keep intersection
     let column_line = HorizontalLine::inherit(Style::modern());
 
@@ -104,7 +115,7 @@ fn build_table_with_style<T: Tabled>(rows: &[T], instrument: &str, icon: &str) -
         .with(
             Style::rounded()
                 .remove_horizontals()
-                .intersection_top('─')
+                .intersection_top(Icon::BoxHorizontal.as_char())
                 .horizontals([(1, header_line), (2, column_line)]),
         )
         .with(Modify::new(Rows::first()).with(Alignment::center()))
@@ -315,6 +326,102 @@ pub fn build_detailed_summary(result: &FetchLocalRunBenchmarkResult) -> String {
             }
         }
     }
+}
+
+#[derive(Tabled)]
+struct ComparisonRow {
+    #[tabled(rename = "Benchmark")]
+    name: String,
+    #[tabled(rename = "Base")]
+    base_value: String,
+    #[tabled(rename = "Head")]
+    head_value: String,
+    #[tabled(rename = "Change")]
+    change: String,
+    #[tabled(rename = "Status")]
+    status: String,
+}
+
+pub fn build_comparison_table(results: &[CompareRunsBenchmarkResult]) -> String {
+    let mut grouped: HashMap<&ExecutorName, Vec<&CompareRunsBenchmarkResult>> = HashMap::new();
+    for result in results {
+        grouped
+            .entry(&result.benchmark.executor)
+            .or_default()
+            .push(result);
+    }
+
+    let executor_order = [
+        ExecutorName::Valgrind,
+        ExecutorName::WallTime,
+        ExecutorName::Memory,
+    ];
+
+    let mut output = String::new();
+    for executor in &executor_order {
+        if let Some(executor_results) = grouped.get(executor) {
+            if !output.is_empty() {
+                output.push('\n');
+            }
+            let rows: Vec<ComparisonRow> = executor_results
+                .iter()
+                .map(|result| {
+                    let format_value = |v: Option<f64>| match v {
+                        Some(v) => match executor {
+                            ExecutorName::Memory => helpers::format_memory(v, Some(1)),
+                            _ => helpers::format_duration(v, Some(2)),
+                        },
+                        None => "-".to_string(),
+                    };
+
+                    let change_str = match result.change {
+                        Some(c) if c.abs() < CHANGE_DISPLAY_EPSILON => {
+                            format!("{}", style(format!("{:.1}%", c * 100.0)).dim())
+                        }
+                        Some(c) if c > 0.0 => {
+                            format!("{}", style(format!("+{:.1}%", c * 100.0)).green().bold())
+                        }
+                        Some(c) => {
+                            format!("{}", style(format!("{:.1}%", c * 100.0)).red().bold())
+                        }
+                        None => "-".to_string(),
+                    };
+
+                    let status_str = match &result.category {
+                        ResultComparisonCategory::New => {
+                            format!("{}", style("New").cyan().bold())
+                        }
+                        ResultComparisonCategory::Improvement => {
+                            format!("{}", style("Improvement").green().bold())
+                        }
+                        ResultComparisonCategory::Regression => {
+                            format!("{}", style("Regression").red().bold())
+                        }
+                        ResultComparisonCategory::Untouched => {
+                            format!("{}", style("No Change").dim())
+                        }
+                        _ => format!("{}", &result.status),
+                    };
+
+                    ComparisonRow {
+                        name: result.benchmark.name.clone(),
+                        base_value: format_value(result.base_value),
+                        head_value: format!("{}", style(format_value(result.value)).cyan()),
+                        change: change_str,
+                        status: status_str,
+                    }
+                })
+                .collect();
+
+            output.push_str(&build_table_with_style(
+                &rows,
+                executor.label(),
+                executor.icon(),
+            ));
+        }
+    }
+
+    output
 }
 
 #[cfg(test)]

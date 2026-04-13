@@ -81,37 +81,10 @@ nest! {
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-pub struct FetchLocalRunReportVars {
+pub struct FetchLocalRunVars {
     pub owner: String,
     pub name: String,
     pub run_id: String,
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
-pub enum ReportConclusion {
-    AcknowledgedFailure,
-    Failure,
-    MissingBaseRun,
-    NoBenchmarks,
-    Success,
-}
-
-impl Display for ReportConclusion {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ReportConclusion::AcknowledgedFailure => {
-                write!(f, "{}", style("Acknowledged Failure").yellow().bold())
-            }
-            ReportConclusion::Failure => write!(f, "{}", style("Failure").red().bold()),
-            ReportConclusion::MissingBaseRun => {
-                write!(f, "{}", style("Missing Base Run").yellow().bold())
-            }
-            ReportConclusion::NoBenchmarks => {
-                write!(f, "{}", style("No Benchmarks").yellow().bold())
-            }
-            ReportConclusion::Success => write!(f, "{}", style("Success").green().bold()),
-        }
-    }
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
@@ -123,18 +96,23 @@ pub enum RunStatus {
     Processing,
 }
 
+// Custom deserializer to convert string values to i64
+fn deserialize_i64_from_string<'de, D>(deserializer: D) -> Result<i64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de;
+    let s = String::deserialize(deserializer)?;
+    s.parse().map_err(de::Error::custom)
+}
+
 nest! {
     #[derive(Debug, Deserialize, Serialize)]*
     #[serde(rename_all = "camelCase")]*
-    pub struct FetchLocalRunReportRun {
+    pub struct FetchLocalRunRun {
         pub id: String,
         pub status: RunStatus,
         pub url: String,
-        pub head_reports: Vec<pub struct FetchLocalRunReportHeadReport {
-            pub id: String,
-            pub impact: Option<f64>,
-            pub conclusion: ReportConclusion,
-        }>,
         pub results: Vec<pub struct FetchLocalRunBenchmarkResult {
             pub value: f64,
             pub benchmark: pub struct FetchLocalRunBenchmark {
@@ -166,42 +144,113 @@ nest! {
     }
 }
 
-// Custom deserializer to convert string values to i64
-fn deserialize_i64_from_string<'de, D>(deserializer: D) -> Result<i64, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    use serde::de;
-    let s = String::deserialize(deserializer)?;
-    s.parse().map_err(de::Error::custom)
+nest! {
+    #[derive(Debug, Deserialize, Serialize)]*
+    #[serde(rename_all = "camelCase")]*
+    struct FetchLocalRunData {
+        repository: struct FetchLocalRunRepository {
+            run: FetchLocalRunRun,
+        }
+    }
+}
+
+pub struct FetchLocalRunResponse {
+    pub run: FetchLocalRunRun,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CompareRunsVars {
+    pub owner: String,
+    pub name: String,
+    pub base_run_id: String,
+    pub head_run_id: String,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "PascalCase")]
+pub enum ResultComparisonCategory {
+    Acknowledged,
+    Archived,
+    Ignored,
+    Improvement,
+    New,
+    Regression,
+    Skipped,
+    Untouched,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+pub enum BenchmarkReportStatus {
+    Improvement,
+    Missing,
+    New,
+    NoChange,
+    Regression,
+}
+
+impl Display for BenchmarkReportStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BenchmarkReportStatus::Improvement => {
+                write!(f, "{}", style("Improvement").green().bold())
+            }
+            BenchmarkReportStatus::Missing => write!(f, "{}", style("Missing").yellow().bold()),
+            BenchmarkReportStatus::New => write!(f, "{}", style("New").cyan().bold()),
+            BenchmarkReportStatus::NoChange => write!(f, "{}", style("No Change").dim()),
+            BenchmarkReportStatus::Regression => write!(f, "{}", style("Regression").red().bold()),
+        }
+    }
 }
 
 nest! {
     #[derive(Debug, Deserialize, Serialize)]*
     #[serde(rename_all = "camelCase")]*
-    struct FetchLocalRunReportData {
-        repository: pub struct FetchLocalRunReportRepository {
-            settings: struct FetchLocalRunReportSettings {
-                allowed_regression: f64,
+    pub struct CompareRunsBenchmarkResult {
+        pub value: Option<f64>,
+        pub base_value: Option<f64>,
+        pub change: Option<f64>,
+        pub category: ResultComparisonCategory,
+        pub status: BenchmarkReportStatus,
+        pub benchmark: pub struct CompareRunsBenchmark {
+            pub name: String,
+            pub executor: ExecutorName,
+        },
+    }
+}
+
+nest! {
+    #[derive(Debug, Deserialize, Serialize)]*
+    #[serde(rename_all = "camelCase")]*
+    pub struct CompareRunsHeadRun {
+        pub id: String,
+        pub status: RunStatus,
+    }
+}
+
+nest! {
+    #[derive(Debug, Deserialize, Serialize)]*
+    #[serde(rename_all = "camelCase")]*
+    struct CompareRunsData {
+        repository: struct CompareRunsRepository {
+            paginated_compare_runs: pub struct CompareRunsComparison {
+                pub impact: Option<f64>,
+                pub url: String,
+                pub head_run: CompareRunsHeadRun,
+                pub result_comparisons: Vec<CompareRunsBenchmarkResult>,
             },
-            run: FetchLocalRunReportRun,
         }
     }
 }
 
-nest! {
-    #[derive(Debug, Deserialize, Serialize)]*
-    #[serde(rename_all = "camelCase")]*
-    struct FetchLocalExecReportData {
-        project: pub struct FetchLocalExecReportProject {
-            run: FetchLocalRunReportRun,
-        }
-    }
+pub struct CompareRunsResponse {
+    pub comparison: CompareRunsComparison,
 }
 
-pub struct FetchLocalRunReportResponse {
-    pub allowed_regression: f64,
-    pub run: FetchLocalRunReportRun,
+pub enum CompareRunsOutcome {
+    Success(CompareRunsResponse),
+    BaseRunNotFound,
+    ExecutorMismatch,
 }
 
 #[derive(Serialize, Clone)]
@@ -211,7 +260,7 @@ pub struct GetOrCreateProjectRepositoryVars {
 }
 
 nest! {
-    #[derive(Debug, Deserialize, Serialize)]*
+    #[derive(Debug, Deserialize, Serialize, Clone)]*
     #[serde(rename_all = "camelCase")]*
     struct GetOrCreateProjectRepositoryData {
         get_or_create_project_repository: pub struct GetOrCreateProjectRepositoryPayload {
@@ -231,7 +280,7 @@ pub struct GetRepositoryVars {
 }
 
 nest! {
-    #[derive(Debug, Deserialize, Serialize)]*
+    #[derive(Debug, Deserialize, Serialize, Clone)]*
     #[serde(rename_all = "camelCase")]*
     struct GetRepositoryData {
         repository_overview: Option<pub struct GetRepositoryPayload {
@@ -243,7 +292,29 @@ nest! {
     }
 }
 
+nest! {
+    #[derive(Debug, Deserialize, Serialize)]*
+    #[serde(rename_all = "camelCase")]*
+    struct CurrentUserData {
+        user: Option<pub struct CurrentUserPayload {
+            pub login: String,
+            pub provider: RepositoryProvider,
+        }>,
+    }
+}
+
 impl CodSpeedAPIClient {
+    pub async fn get_current_user(&self) -> Result<Option<CurrentUserPayload>> {
+        let response = self
+            .gql_client
+            .query_unwrap::<CurrentUserData>(include_str!("queries/CurrentUser.gql"))
+            .await;
+        match response {
+            Ok(data) => Ok(data.user),
+            Err(err) => bail!("Failed to get current user: {err}"),
+        }
+    }
+
     pub async fn create_login_session(&self) -> Result<CreateLoginSessionPayload> {
         let response = self
             .unauthenticated_gql_client
@@ -274,26 +345,47 @@ impl CodSpeedAPIClient {
         }
     }
 
-    pub async fn fetch_local_run_report(
-        &self,
-        vars: FetchLocalRunReportVars,
-    ) -> Result<FetchLocalRunReportResponse> {
+    pub async fn compare_runs(&self, vars: CompareRunsVars) -> Result<CompareRunsOutcome> {
         let response = self
             .gql_client
-            .query_with_vars_unwrap::<FetchLocalRunReportData, FetchLocalRunReportVars>(
-                include_str!("queries/FetchLocalRunReport.gql"),
-                vars.clone(),
+            .query_with_vars_unwrap::<CompareRunsData, CompareRunsVars>(
+                include_str!("queries/CompareRuns.gql"),
+                vars,
             )
             .await;
         match response {
-            Ok(response) => Ok(FetchLocalRunReportResponse {
-                allowed_regression: response.repository.settings.allowed_regression,
+            Ok(response) => Ok(CompareRunsOutcome::Success(CompareRunsResponse {
+                comparison: response.repository.paginated_compare_runs,
+            })),
+            Err(err) if err.contains_error_code("UNAUTHENTICATED") => {
+                bail!("Your session has expired, please login again using `codspeed auth login`")
+            }
+            Err(err) if err.contains_error_code("RUN_NOT_FOUND") => {
+                Ok(CompareRunsOutcome::BaseRunNotFound)
+            }
+            Err(err) if err.contains_error_code("NOT_FOUND") => {
+                Ok(CompareRunsOutcome::ExecutorMismatch)
+            }
+            Err(err) => bail!("Failed to compare runs: {err:?}"),
+        }
+    }
+
+    pub async fn fetch_local_run(&self, vars: FetchLocalRunVars) -> Result<FetchLocalRunResponse> {
+        let response = self
+            .gql_client
+            .query_with_vars_unwrap::<FetchLocalRunData, FetchLocalRunVars>(
+                include_str!("queries/FetchLocalRun.gql"),
+                vars,
+            )
+            .await;
+        match response {
+            Ok(response) => Ok(FetchLocalRunResponse {
                 run: response.repository.run,
             }),
             Err(err) if err.contains_error_code("UNAUTHENTICATED") => {
                 bail!("Your session has expired, please login again using `codspeed auth login`")
             }
-            Err(err) => bail!("Failed to fetch local run report: {err}"),
+            Err(err) => bail!("Failed to fetch local run: {err}"),
         }
     }
 

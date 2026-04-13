@@ -30,6 +30,7 @@ pub struct SystemInfo {
     pub cpu_vendor_id: String,
     pub cpu_cores: usize,
     pub total_memory_gb: u64,
+    pub cpu_flags: Vec<String>,
 }
 
 #[cfg(test)]
@@ -46,8 +47,51 @@ impl SystemInfo {
             cpu_vendor_id: "GenuineIntel".to_string(),
             cpu_cores: 2,
             total_memory_gb: 8,
+            cpu_flags: vec![
+                "sse2".to_string(),
+                "avx".to_string(),
+                "avx2".to_string(),
+                "erms".to_string(),
+            ],
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+fn get_cpu_flags() -> Vec<String> {
+    use procfs::Current;
+
+    let cpuinfo = match procfs::CpuInfo::current() {
+        Ok(cpuinfo) => cpuinfo,
+        Err(e) => {
+            warn!("Failed to read /proc/cpuinfo: {e}");
+            return Vec::new();
+        }
+    };
+
+    // /proc/cpuinfo uses "flags" on x86_64 and "Features" on aarch64
+    let field_name = if cfg!(target_arch = "x86_64") {
+        "flags"
+    } else if cfg!(target_arch = "aarch64") {
+        "Features"
+    } else {
+        return Vec::new();
+    };
+
+    let mut flags: Vec<String> = match cpuinfo.get_field(0, field_name) {
+        Some(value) => value.split_whitespace().map(|s| s.to_string()).collect(),
+        None => {
+            warn!("No CPU flags found in /proc/cpuinfo (field: {field_name})");
+            return Vec::new();
+        }
+    };
+    flags.sort();
+    flags
+}
+
+#[cfg(not(target_os = "linux"))]
+fn get_cpu_flags() -> Vec<String> {
+    Vec::new()
 }
 
 impl SystemInfo {
@@ -85,6 +129,8 @@ impl SystemInfo {
         let cpu_name = cpu.name().to_string();
         let cpu_vendor_id = cpu.vendor_id().to_string();
 
+        let cpu_flags = get_cpu_flags();
+
         Ok(SystemInfo {
             os,
             os_version,
@@ -96,6 +142,7 @@ impl SystemInfo {
             cpu_vendor_id,
             cpu_cores,
             total_memory_gb,
+            cpu_flags,
         })
     }
 }

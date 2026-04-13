@@ -1,0 +1,23 @@
+query CompareRuns($owner: String!, $name: String!, $baseRunId: String!, $headRunId: String!) {
+  repository(owner: $owner, name: $name) {
+    paginatedCompareRuns(baseRunId: $baseRunId, headRunId: $headRunId) {
+      impact
+      url
+      headRun {
+        id
+        status
+      }
+      resultComparisons {
+        benchmark {
+          name
+          executor
+        }
+        value
+        baseValue
+        change
+        category
+        status
+      }
+    }
+  }
+}

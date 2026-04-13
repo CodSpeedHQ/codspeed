@@ -55,6 +55,7 @@ impl ExecArgs {
 fn build_orchestrator_config(
     args: ExecArgs,
     target: executor::BenchmarkTarget,
+    poll_results_options: PollResultsOptions,
 ) -> Result<OrchestratorConfig> {
     let modes = args.shared.resolve_modes()?;
     let raw_upload_url = args
@@ -86,8 +87,9 @@ fn build_orchestrator_config(
         allow_empty: args.shared.allow_empty,
         go_runner_version: args.shared.go_runner_version,
         show_full_output: args.shared.show_full_output,
-        poll_results_options: PollResultsOptions::for_exec(),
+        poll_results_options,
         extra_env: HashMap::new(),
+        fair_sched: args.shared.experimental.experimental_fair_sched,
     })
 }
 
@@ -99,12 +101,17 @@ pub async fn run(
     setup_cache_dir: Option<&Path>,
 ) -> Result<()> {
     let merged_args = args.merge_with_project_config(project_config);
+    let base_run_id = merged_args.shared.base.clone();
     let target = executor::BenchmarkTarget::Exec {
         command: merged_args.command.clone(),
         name: merged_args.name.clone(),
         walltime_args: merged_args.walltime_args.clone(),
     };
-    let config = build_orchestrator_config(merged_args, target)?;
+    let config = build_orchestrator_config(
+        merged_args,
+        target,
+        PollResultsOptions::new(false, base_run_id),
+    )?;
 
     execute_config(config, api_client, codspeed_config, setup_cache_dir).await
 }

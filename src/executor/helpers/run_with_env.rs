@@ -54,7 +54,7 @@ fn create_env_file(extra_env: &HashMap<String, String>) -> Result<NamedTempFile>
     let system_env = get_exported_system_env()?;
     let base_injected_env = extra_env
         .iter()
-        .map(|(k, v)| format!("export {k}={v}"))
+        .map(|(k, v)| format!("export {k}='{v}'"))
         .collect::<Vec<_>>()
         .join("\n");
 

@@ -2,12 +2,13 @@ use async_trait::async_trait;
 use std::path::Path;
 
 use crate::executor::Executor;
+use crate::executor::ToolStatus;
 use crate::executor::{ExecutionContext, ExecutorName};
 use crate::instruments::mongo_tracer::MongoTracer;
 use crate::prelude::*;
 use crate::system::SystemInfo;
 
-use super::setup::install_valgrind;
+use super::setup::{get_valgrind_status, install_valgrind};
 use super::{helpers::perf_maps::harvest_perf_maps, helpers::venv_compat, measure};
 
 pub struct ValgrindExecutor;
@@ -16,6 +17,10 @@ pub struct ValgrindExecutor;
 impl Executor for ValgrindExecutor {
     fn name(&self) -> ExecutorName {
         ExecutorName::Valgrind
+    }
+
+    fn tool_status(&self) -> ToolStatus {
+        get_valgrind_status()
     }
 
     async fn setup(&self, system_info: &SystemInfo, setup_cache_dir: Option<&Path>) -> Result<()> {

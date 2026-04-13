@@ -1,5 +1,5 @@
-use crate::binary_installer::ensure_binary_installed;
 use crate::executor::ExecutorName;
+use crate::executor::ToolStatus;
 use crate::executor::helpers::command::CommandBuilder;
 use crate::executor::helpers::env::get_base_injected_env;
 use crate::executor::helpers::get_bench_command::get_bench_command;
@@ -26,8 +26,7 @@ use std::rc::Rc;
 use tempfile::NamedTempFile;
 use tokio::time::{Duration, timeout};
 
-const MEMTRACK_COMMAND: &str = "codspeed-memtrack";
-const MEMTRACK_CODSPEED_VERSION: &str = "1.2.3";
+use super::setup::{MEMTRACK_COMMAND, get_memtrack_status, install_memtrack};
 
 pub struct MemoryExecutor;
 
@@ -73,23 +72,16 @@ impl Executor for MemoryExecutor {
         ExecutorName::Memory
     }
 
+    fn tool_status(&self) -> ToolStatus {
+        get_memtrack_status()
+    }
+
     async fn setup(
         &self,
         _system_info: &SystemInfo,
         _setup_cache_dir: Option<&Path>,
     ) -> Result<()> {
-        let get_memtrack_installer_url = || {
-            format!(
-                "https://github.com/CodSpeedHQ/codspeed/releases/download/memtrack-v{MEMTRACK_CODSPEED_VERSION}/memtrack-installer.sh"
-            )
-        };
-
-        ensure_binary_installed(
-            MEMTRACK_COMMAND,
-            MEMTRACK_CODSPEED_VERSION,
-            get_memtrack_installer_url,
-        )
-        .await
+        install_memtrack().await
     }
 
     async fn run(

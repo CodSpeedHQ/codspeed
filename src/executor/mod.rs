@@ -58,9 +58,27 @@ pub fn get_all_executors() -> Vec<Box<dyn Executor>> {
     ]
 }
 
+/// Installation status of a tool required by an executor.
+pub struct ToolStatus {
+    pub tool_name: String,
+    pub status: ToolInstallStatus,
+}
+
+pub enum ToolInstallStatus {
+    /// Tool is installed with a correct, compatible version.
+    Installed { version: String },
+    /// Tool is installed but has a version issue (wrong version, not a CodSpeed build, etc.).
+    IncorrectVersion { version: String, message: String },
+    /// Tool is not installed at all.
+    NotInstalled,
+}
+
 #[async_trait(?Send)]
 pub trait Executor {
     fn name(&self) -> ExecutorName;
+
+    /// Report the installation status of the tool(s) this executor depends on.
+    fn tool_status(&self) -> ToolStatus;
 
     async fn setup(
         &self,
