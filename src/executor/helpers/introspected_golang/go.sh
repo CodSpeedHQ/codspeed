@@ -18,8 +18,10 @@ if [ "${CODSPEED_RUNNER_MODE:-}" != "walltime" ]; then
     exit 1
 fi
 
-# Find the real go binary, so that we don't end up in infinite recursion
-REAL_GO=$(which -a go | grep -v "$(realpath "$0")" | head -1)
+# Find the real go binary by removing our directory from PATH (same approach as node.sh)
+ORIGINAL_PATH=$(echo "$PATH" | tr ":" "\n" | grep -v "codspeed_introspected_go" | tr "\n" ":")
+REAL_GO=$(env PATH="$ORIGINAL_PATH" which go 2>/dev/null || true)
+debug_log "Real go path: $REAL_GO"
 if [ -z "$REAL_GO" ]; then
     echo "ERROR: Could not find real go binary" >&2
     exit 1
