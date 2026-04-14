@@ -1,7 +1,8 @@
 use std::io::BufReader;
 
-use libc::pid_t;
 use log::debug;
+
+use crate::pid_t;
 use serde::{Deserialize, Serialize};
 
 mod execution_timestamps;

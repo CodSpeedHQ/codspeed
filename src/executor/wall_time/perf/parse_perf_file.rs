@@ -1,11 +1,11 @@
 use super::module_symbols::ModuleSymbols;
 use super::unwind_data::unwind_data_from_elf;
 use crate::prelude::*;
-use libc::pid_t;
 use linux_perf_data::PerfFileReader;
 use linux_perf_data::PerfFileRecord;
 use linux_perf_data::linux_perf_event_reader::EventRecord;
 use linux_perf_data::linux_perf_event_reader::RecordType;
+use runner_shared::pid_t;
 use runner_shared::unwind_data::ProcessUnwindData;
 use runner_shared::unwind_data::UnwindData;
 use std::collections::HashMap;

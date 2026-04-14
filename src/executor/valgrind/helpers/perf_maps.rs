@@ -7,7 +7,7 @@ use std::path::Path;
 /// Extracts a PID from a profile output file path.
 ///
 /// Supports both Callgrind (`<pid>.out`) and Tracegrind (`<pid>.tgtrace`) file formats.
-fn extract_pid_from_profile_file(path: &Path) -> Option<libc::pid_t> {
+fn extract_pid_from_profile_file(path: &Path) -> Option<runner_shared::pid_t> {
     let ext = path.extension()?.to_str()?;
     match ext {
         "out" | "tgtrace" => path.file_stem()?.to_str()?.parse().ok(),

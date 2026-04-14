@@ -1,6 +1,6 @@
 use super::RunnerMode;
 use crate::prelude::*;
-use libc::pid_t;
+use runner_shared::pid_t;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::OnceLock;
