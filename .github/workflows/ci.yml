@@ -30,7 +30,7 @@ jobs:
       - name: "Install rust-toolchain.toml"
         run: rustup toolchain install
       # We use Swatinem/rust-cache to cache cargo registry, index and target in this job
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
 
       # Install memtrack for the memory integration tests
       - name: Install dependencies required for libbpf-sys (vendored feature)
@@ -63,7 +63,7 @@ jobs:
       - name: "Install rust-toolchain.toml"
         run: rustup toolchain install
       # We use Swatinem/rust-cache to cache cargo registry, index and target in this job
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
       - name: Run tests
         run: cargo run -- exec -m simulation,walltime,memory --skip-upload -- ls -la
 
@@ -100,7 +100,7 @@ jobs:
 
       - name: "Install rust-toolchain.toml"
         run: rustup toolchain install
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
       - name: Install cargo codspeed
         uses: taiki-e/install-action@0d865d5cc6d507df4765f1f866bfae8bab4e2a73 # v2
         with:
