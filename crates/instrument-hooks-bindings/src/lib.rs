@@ -163,7 +163,7 @@ mod other_impl {
     pub struct InstrumentHooks;
 
     impl InstrumentHooks {
-        pub fn instance() -> &'static Self {
+        pub fn instance(_integration: &str, _version: &str) -> &'static Self {
             static INSTANCE: InstrumentHooks = InstrumentHooks;
             &INSTANCE
         }
