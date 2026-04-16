@@ -18,6 +18,8 @@ jobs:
       - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
         with:
           extra_args: --all-files
+      - name: Check config schema is up to date
+        run: cargo run --bin generate_config_schema && git diff --exit-code schemas/codspeed.schema.json
 
   tests:
     runs-on: ubuntu-latest
