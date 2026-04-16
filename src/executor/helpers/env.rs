@@ -1,4 +1,5 @@
 use crate::executor::ExecutorConfig;
+#[cfg(unix)]
 use crate::executor::helpers::{introspected_golang, introspected_nodejs};
 use crate::prelude::*;
 use crate::runner_mode::RunnerMode;
@@ -82,17 +83,25 @@ pub fn build_path_env(enable_introspection: bool) -> Result<String> {
         return Ok(path_env);
     }
 
-    let node_path = introspected_nodejs::setup()
-        .map_err(|e| anyhow!("failed to setup NodeJS introspection. {e}"))?;
-    let go_path = introspected_golang::setup()
-        .map_err(|e| anyhow!("failed to setup Go introspection. {e}"))?;
+    #[cfg(unix)]
+    {
+        let node_path = introspected_nodejs::setup()
+            .map_err(|e| anyhow!("failed to setup NodeJS introspection. {e}"))?;
+        let go_path = introspected_golang::setup()
+            .map_err(|e| anyhow!("failed to setup Go introspection. {e}"))?;
 
-    Ok(format!(
-        "{}:{}:{}",
-        node_path.to_string_lossy(),
-        go_path.to_string_lossy(),
-        path_env,
-    ))
+        Ok(format!(
+            "{}:{}:{}",
+            node_path.to_string_lossy(),
+            go_path.to_string_lossy(),
+            path_env,
+        ))
+    }
+    #[cfg(not(unix))]
+    {
+        // Language introspection is not yet supported on non-Unix platforms
+        unimplemented!();
+    }
 }
 
 pub fn is_codspeed_debug_enabled() -> bool {

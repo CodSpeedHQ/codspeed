@@ -1,15 +1,13 @@
 use super::helpers::validate_walltime_results;
 use super::isolation::wrap_with_isolation;
-use super::perf::PerfRunner;
+use super::platform::WalltimePlatform;
 use crate::executor::Executor;
 use crate::executor::ExecutorConfig;
 use crate::executor::ToolStatus;
 use crate::executor::helpers::command::CommandBuilder;
 use crate::executor::helpers::env::{build_path_env, get_base_injected_env};
 use crate::executor::helpers::get_bench_command::get_bench_command;
-use crate::executor::helpers::run_command_with_log_pipe::run_command_with_log_pipe;
 use crate::executor::helpers::run_with_env::wrap_with_env;
-use crate::executor::helpers::run_with_sudo::wrap_with_sudo;
 use crate::executor::{ExecutionContext, ExecutorName, ExecutorSupport};
 use crate::instruments::mongo_tracer::MongoTracer;
 use crate::prelude::*;
@@ -72,13 +70,13 @@ impl Drop for HookScriptsGuard {
 }
 
 pub struct WallTimeExecutor {
-    perf: Option<PerfRunner>,
+    platform: WalltimePlatform,
 }
 
 impl WallTimeExecutor {
     pub fn new() -> Self {
         Self {
-            perf: cfg!(target_os = "linux").then(PerfRunner::new),
+            platform: WalltimePlatform::new(),
         }
     }
 
@@ -122,9 +120,7 @@ impl Executor for WallTimeExecutor {
     }
 
     fn tool_status(&self) -> Option<ToolStatus> {
-        self.perf
-            .as_ref()
-            .map(|_| super::perf::setup::get_perf_status())
+        self.platform.tool_status()
     }
 
     fn support_level(&self, system_info: &SystemInfo) -> ExecutorSupport {
@@ -136,11 +132,7 @@ impl Executor for WallTimeExecutor {
     }
 
     async fn setup(&self, system_info: &SystemInfo, setup_cache_dir: Option<&Path>) -> Result<()> {
-        if self.perf.is_some() {
-            return PerfRunner::setup_environment(system_info, setup_cache_dir).await;
-        }
-
-        Ok(())
+        self.platform.setup(system_info, setup_cache_dir).await
     }
 
     async fn run(
@@ -153,20 +145,10 @@ impl Executor for WallTimeExecutor {
 
             let (_env_file, _script_file, cmd_builder) =
                 WallTimeExecutor::walltime_bench_cmd(&execution_context.config, execution_context)?;
-            if let Some(perf) = &self.perf
-                && execution_context.config.enable_perf
-            {
-                perf.run(
-                    cmd_builder,
-                    &execution_context.config,
-                    &execution_context.profile_folder,
-                )
+
+            self.platform
+                .run_bench_cmd(cmd_builder, execution_context)
                 .await
-            } else {
-                let cmd = wrap_with_sudo(cmd_builder)?.build();
-                debug!("cmd: {cmd:?}");
-                run_command_with_log_pipe(cmd).await
-            }
         };
 
         let status = status.map_err(|e| anyhow!("failed to execute the benchmark process. {e}"))?;
@@ -182,12 +164,7 @@ impl Executor for WallTimeExecutor {
     async fn teardown(&self, execution_context: &ExecutionContext) -> Result<()> {
         debug!("Copying files to the profile folder");
 
-        if let Some(perf) = &self.perf
-            && execution_context.config.enable_perf
-        {
-            perf.save_files_to(&execution_context.profile_folder)
-                .await?;
-        }
+        self.platform.teardown(execution_context).await?;
 
         validate_walltime_results(
             &execution_context.profile_folder,
@@ -198,7 +175,7 @@ impl Executor for WallTimeExecutor {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use tempfile::NamedTempFile;
 
