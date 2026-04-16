@@ -65,7 +65,7 @@ pub fn parse_for_memmap2<P: AsRef<Path>>(
         mut record_iter,
     } = PerfFileReader::parse_pipe(reader)?;
 
-    while let Some(record) = record_iter.next_record(&mut perf_file).unwrap() {
+    while let Some(record) = record_iter.next_record(&mut perf_file)? {
         let PerfFileRecord::EventRecord { record, .. } = record else {
             continue;
         };
