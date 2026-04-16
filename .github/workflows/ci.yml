@@ -65,7 +65,7 @@ jobs:
       # We use Swatinem/rust-cache to cache cargo registry, index and target in this job
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
       - name: Run tests
-        run: cargo run -- exec -m simulation,walltime,memory --skip-upload -- ls -la
+        run: cargo run -- exec -m simulation,walltime,memory --skip-upload --warmup-time 0s --max-rounds 5 -- ls -la
 
   bpf-tests:
     runs-on: ubuntu-latest
