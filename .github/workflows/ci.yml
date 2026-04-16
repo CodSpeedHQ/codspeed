@@ -91,6 +91,21 @@ jobs:
       - name: Clean up
         run: sudo chown -R $USER:$USER . ~/.cargo
 
+  windows-build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: true
+      - name: "Install rust-toolchain.toml"
+        run: rustup toolchain install
+      - name: Add Windows GNU target
+        run: rustup target add x86_64-pc-windows-gnu
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
+      - name: Check codspeed-runner builds on Windows
+        # Instrument hooks fails to build with msvc target, so we use the gnu target for this check for now
+        run: cargo check -p codspeed-runner --target x86_64-pc-windows-gnu
+
   benchmarks:
     runs-on: ubuntu-latest
     steps:

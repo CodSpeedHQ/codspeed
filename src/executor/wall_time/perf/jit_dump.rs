@@ -118,7 +118,7 @@ impl JitDump {
 /// Unwind data is generated as a list
 pub async fn save_symbols_and_harvest_unwind_data_for_pids(
     profile_folder: &Path,
-    pids: &HashSet<libc::pid_t>,
+    pids: &HashSet<runner_shared::pid_t>,
 ) -> Result<HashMap<i32, Vec<(UnwindData, ProcessUnwindData)>>> {
     let mut jit_unwind_data_by_path = HashMap::new();
 

@@ -1,5 +1,6 @@
-use libc::pid_t;
 use serde::{Deserialize, Serialize};
+
+use crate::pid_t;
 use std::io::{BufReader, BufWriter, Read, Write};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

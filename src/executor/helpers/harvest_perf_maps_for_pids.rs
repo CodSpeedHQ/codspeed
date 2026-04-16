@@ -5,7 +5,7 @@ use tokio::fs;
 
 pub async fn harvest_perf_maps_for_pids(
     profile_folder: &Path,
-    pids: &HashSet<libc::pid_t>,
+    pids: &HashSet<runner_shared::pid_t>,
 ) -> Result<()> {
     let perf_maps = pids
         .iter()

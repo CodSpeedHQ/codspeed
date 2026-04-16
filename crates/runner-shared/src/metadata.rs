@@ -1,6 +1,7 @@
 use anyhow::Context;
-use libc::pid_t;
 use serde::{Deserialize, Serialize};
+
+use crate::pid_t;
 use std::collections::HashMap;
 use std::io::BufWriter;
 use std::path::Path;

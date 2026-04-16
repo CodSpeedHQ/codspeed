@@ -13,7 +13,6 @@ itertools = { workspace = true }
 log = { workspace = true }
 rmp = "0.8.14"
 rmp-serde = "1.3.0"
-libc = { workspace = true }
 zstd = "0.13"
 
 [dev-dependencies]

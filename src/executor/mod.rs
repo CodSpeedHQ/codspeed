@@ -4,11 +4,13 @@ pub mod config;
 mod execution_context;
 mod helpers;
 mod interfaces;
+#[cfg(unix)]
 mod memory;
 pub mod orchestrator;
 mod shared;
 #[cfg(test)]
 mod tests;
+#[cfg(unix)]
 mod valgrind;
 mod wall_time;
 
@@ -22,9 +24,7 @@ pub use execution_context::ExecutionContext;
 pub use interfaces::ExecutorName;
 pub use orchestrator::Orchestrator;
 
-use memory::executor::MemoryExecutor;
 use std::path::Path;
-use valgrind::executor::ValgrindExecutor;
 use wall_time::executor::WallTimeExecutor;
 
 impl Display for RunnerMode {
@@ -41,22 +41,47 @@ impl Display for RunnerMode {
 
 pub const EXECUTOR_TARGET: &str = "executor";
 
-pub fn get_executor_from_mode(mode: &RunnerMode) -> Box<dyn Executor> {
-    match mode {
-        #[allow(deprecated)]
-        RunnerMode::Instrumentation | RunnerMode::Simulation => Box::new(ValgrindExecutor),
-        RunnerMode::Walltime => Box::new(WallTimeExecutor::new()),
-        RunnerMode::Memory => Box::new(MemoryExecutor),
+#[cfg(unix)]
+mod platform {
+    use super::*;
+    use memory::executor::MemoryExecutor;
+    use valgrind::executor::ValgrindExecutor;
+
+    pub fn get_executor_from_mode(mode: &RunnerMode) -> Box<dyn Executor> {
+        match mode {
+            #[allow(deprecated)]
+            RunnerMode::Instrumentation | RunnerMode::Simulation => Box::new(ValgrindExecutor),
+            RunnerMode::Walltime => Box::new(WallTimeExecutor::new()),
+            RunnerMode::Memory => Box::new(MemoryExecutor),
+        }
+    }
+
+    pub fn get_all_executors() -> Vec<Box<dyn Executor>> {
+        vec![
+            Box::new(ValgrindExecutor),
+            Box::new(WallTimeExecutor::new()),
+            Box::new(MemoryExecutor),
+        ]
     }
 }
 
-pub fn get_all_executors() -> Vec<Box<dyn Executor>> {
-    vec![
-        Box::new(ValgrindExecutor),
-        Box::new(WallTimeExecutor::new()),
-        Box::new(MemoryExecutor),
-    ]
+#[cfg(not(unix))]
+mod platform {
+    use super::*;
+
+    pub fn get_executor_from_mode(mode: &RunnerMode) -> Box<dyn Executor> {
+        match mode {
+            RunnerMode::Walltime => Box::new(WallTimeExecutor::new()),
+            _ => panic!("{mode} mode is not supported on this platform"),
+        }
+    }
+
+    pub fn get_all_executors() -> Vec<Box<dyn Executor>> {
+        vec![Box::new(WallTimeExecutor::new())]
+    }
 }
+
+pub use platform::{get_all_executors, get_executor_from_mode};
 
 /// Installation status of a tool required by an executor.
 pub struct ToolStatus {
