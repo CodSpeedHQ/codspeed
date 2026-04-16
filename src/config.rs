@@ -1,4 +1,4 @@
-use std::{env, fs, path::PathBuf};
+use std::{fs, path::PathBuf};
 
 use crate::prelude::*;
 use nestify::nest;
@@ -28,12 +28,7 @@ nest! {
 /// If config_name is None, returns ~/.config/codspeed/config.yaml (default)
 /// If config_name is Some, returns ~/.config/codspeed/{config_name}.yaml
 fn get_configuration_file_path(config_name: Option<&str>) -> PathBuf {
-    let config_dir = env::var("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            let home = env::var("HOME").expect("HOME env variable not set");
-            PathBuf::from(home).join(".config")
-        });
+    let config_dir = dirs::config_dir().expect("Could not determine config directory");
     let config_dir = config_dir.join("codspeed");
 
     match config_name {

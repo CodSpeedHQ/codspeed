@@ -691,6 +691,7 @@ dependencies = [
  "clap",
  "console",
  "debugid",
+ "dirs",
  "exec-harness",
  "futures",
  "gimli",
