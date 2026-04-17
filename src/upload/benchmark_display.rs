@@ -444,6 +444,7 @@ mod tests {
                     executor: ExecutorName::Valgrind,
                 },
                 value: 0.001234,
+                issues: None,
                 valgrind: Some(ValgrindResult {
                     time_distribution: Some(TimeDistribution {
                         ir: 0.001048900,  // 85% of 0.001234
@@ -461,6 +462,7 @@ mod tests {
                     executor: ExecutorName::Valgrind,
                 },
                 value: 0.002567,
+                issues: None,
                 valgrind: Some(ValgrindResult {
                     time_distribution: Some(TimeDistribution {
                         ir: 0.001796900,  // 70% of 0.002567
@@ -479,6 +481,7 @@ mod tests {
                     executor: ExecutorName::WallTime,
                 },
                 value: 0.150,
+                issues: None,
                 valgrind: None,
                 walltime: Some(WallTimeResult {
                     iterations: 100.0,
@@ -493,6 +496,7 @@ mod tests {
                     executor: ExecutorName::WallTime,
                 },
                 value: 0.025,
+                issues: None,
                 valgrind: None,
                 walltime: Some(WallTimeResult {
                     iterations: 500.0,
@@ -508,6 +512,7 @@ mod tests {
                     executor: ExecutorName::Memory,
                 },
                 value: 10485760.0,
+                issues: None,
                 valgrind: None,
                 walltime: None,
                 memory: Some(MemoryResult {
@@ -522,6 +527,7 @@ mod tests {
                     executor: ExecutorName::Memory,
                 },
                 value: 1048576.0,
+                issues: None,
                 valgrind: None,
                 walltime: None,
                 memory: Some(MemoryResult {
@@ -547,6 +553,7 @@ mod tests {
                 executor: ExecutorName::Valgrind,
             },
             value: 0.001234, // 1.23 ms
+            issues: None,
             valgrind: None,
             walltime: None,
             memory: None,
@@ -565,6 +572,7 @@ mod tests {
                 executor: ExecutorName::WallTime,
             },
             value: 1.5,
+            issues: None,
             valgrind: None,
             walltime: Some(WallTimeResult {
                 iterations: 50.0,
@@ -587,6 +595,7 @@ mod tests {
                 executor: ExecutorName::Memory,
             },
             value: 1048576.0,
+            issues: None,
             valgrind: None,
             walltime: None,
             memory: Some(MemoryResult {

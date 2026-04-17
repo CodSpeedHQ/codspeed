@@ -10,6 +10,9 @@ query FetchLocalRun($owner: String!, $name: String!, $runId: String!) {
           executor
         }
         value
+        issues {
+          callgraphGenerationFailure
+        }
         valgrind {
           timeDistribution {
             ir

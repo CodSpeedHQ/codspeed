@@ -109,6 +109,14 @@ where
 nest! {
     #[derive(Debug, Deserialize, Serialize)]*
     #[serde(rename_all = "camelCase")]*
+    pub struct BenchmarkIssues {
+        pub callgraph_generation_failure: Option<String>,
+    }
+}
+
+nest! {
+    #[derive(Debug, Deserialize, Serialize)]*
+    #[serde(rename_all = "camelCase")]*
     pub struct FetchLocalRunRun {
         pub id: String,
         pub status: RunStatus,
@@ -119,6 +127,7 @@ nest! {
                 pub name: String,
                 pub executor: ExecutorName,
             },
+            pub issues: Option<BenchmarkIssues>,
             pub valgrind: Option<pub struct ValgrindResult {
                 pub time_distribution: Option<pub struct TimeDistribution {
                     pub ir: f64,
@@ -216,6 +225,9 @@ nest! {
             pub name: String,
             pub executor: ExecutorName,
         },
+        pub result: Option<pub struct CompareRunsBenchmarkResultDetail {
+            pub issues: Option<BenchmarkIssues>,
+        }>,
     }
 }
 
