@@ -12,7 +12,7 @@ use crate::api_client::{
     FetchLocalRunResponse, FetchLocalRunVars, RunStatus,
 };
 use crate::local_logger::icons::Icon;
-use crate::local_logger::{start_spinner, stop_spinner};
+use crate::local_logger::{IS_TTY, start_spinner, stop_spinner};
 use crate::prelude::*;
 
 use super::UploadResult;
@@ -228,6 +228,9 @@ fn warn_callgraph_failures(names: &[&str]) {
 }
 
 fn show_comparison_suggestion(run_id: &str) {
+    if !*IS_TTY {
+        return;
+    }
     info!(
         "\n{} {}",
         style("To compare future runs against this one, use:").dim(),
