@@ -141,11 +141,11 @@ mod tests {
         let mut builder = CommandBuilder::new("valgrind");
         builder
             .arg("my-program")
-            .wrap("setarch", ["x86_64", "-R"])
+            .wrap("setarch", ["x86_64", "--addr-no-randomize"])
             .wrap("sudo", ["-n"]);
         assert_eq!(
             builder.as_command_line(),
-            "sudo -n setarch x86_64 -R valgrind my-program"
+            "sudo -n setarch x86_64 --addr-no-randomize valgrind my-program"
         );
     }
 

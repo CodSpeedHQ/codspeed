@@ -97,7 +97,7 @@ pub async fn measure(
 
     // Create the command
     let mut cmd = Command::new("setarch");
-    cmd.arg(ARCH).arg("-R");
+    cmd.arg(ARCH).arg("--addr-no-randomize");
     // Configure the environment
     cmd.envs(get_base_injected_env(
         RunnerMode::Simulation,
