@@ -1,8 +1,10 @@
 //! Based on this: https://github.com/mstange/samply/blob/4a5afec57b7c68b37ecde12b5a258de523e89463/samply/src/linux_shared/svma_file_range.rs#L8
 
 use anyhow::Context;
+use log::trace;
 use object::Object;
 use object::ObjectSegment;
+use std::path::{Path, PathBuf};
 
 // A file range in an object file, such as a segment or a section,
 // for which we know the corresponding Stated Virtual Memory Address (SVMA).
@@ -187,4 +189,176 @@ pub fn relative_address_base(object_file: &object::File) -> u64 {
 
 pub fn compute_base_avma(base_svma: u64, load_bias: u64) -> u64 {
     base_svma.wrapping_add(load_bias)
+}
+
+const DEFAULT_DEBUG_DIR: &str = "/usr/lib/debug";
+
+/// Search for a separate debug info file.
+///
+/// Tries two mechanisms in order:
+/// 1. **Build-ID path**: `<debug_dir>/.build-id/<XX>/<YYYYYY...>.debug`
+/// 2. **`.gnu_debuglink`** with GDB search order and CRC32 validation
+///
+/// This is the same order GDB uses (see [Separate Debug Files]). Build-ID is
+/// preferred because it's a cryptographic hash of the binary contents, so a
+/// match cannot be a false positive — whereas `.gnu_debuglink` matches by
+/// filename and relies on a CRC32 check. On Debian/Ubuntu, `*-dbg` and
+/// `*-dbgsym` packages install their files under `/usr/lib/debug/.build-id/`,
+/// so this path is what actually resolves stripped system libraries in
+/// practice.
+///
+/// [Separate Debug Files]: https://sourceware.org/gdb/current/onlinedocs/gdb.html/Separate-Debug-Files.html
+pub fn find_debug_file(object: &object::File, binary_path: &Path) -> Option<PathBuf> {
+    find_debug_file_in(object, binary_path, Path::new(DEFAULT_DEBUG_DIR))
+}
+
+fn find_debug_file_in(
+    object: &object::File,
+    binary_path: &Path,
+    debug_dir: &Path,
+) -> Option<PathBuf> {
+    if let Some(path) = find_debug_file_by_build_id(object, debug_dir) {
+        return Some(path);
+    }
+    find_debug_file_by_debuglink(object, binary_path, debug_dir)
+}
+
+/// Tries to find a debug file using the build-id.
+///
+/// ## How it works
+///
+/// For build-id a05cfb6313fe06a13c9b4b5cb86c2069faa3951f, the debug file lives at:
+/// ```text
+///  /usr/lib/debug/.build-id/a0/5cfb6313fe06a13c9b4b5cb86c2069faa3951f.debug
+///                           ^^ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+///                           first byte (2 hex chars) as subdir
+///                                  rest as the filename
+/// ```
+fn find_debug_file_by_build_id(object: &object::File, debug_dir: &Path) -> Option<PathBuf> {
+    let build_id = object.build_id().ok()??;
+    if build_id.is_empty() {
+        return None;
+    }
+
+    let hex = build_id
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
+    let path = debug_dir
+        .join(".build-id")
+        .join(&hex[..2])
+        .join(format!("{}.debug", &hex[2..]));
+
+    if path.exists() {
+        return Some(path);
+    }
+
+    None
+}
+
+fn find_debug_file_by_debuglink(
+    object: &object::File,
+    binary_path: &Path,
+    debug_dir: &Path,
+) -> Option<PathBuf> {
+    let (debuglink, expected_crc) = object.gnu_debuglink().ok()??;
+    let debuglink = std::str::from_utf8(debuglink).ok()?;
+    let dir = binary_path.parent()?;
+
+    let candidates = [
+        dir.join(debuglink),
+        dir.join(".debug").join(debuglink),
+        debug_dir
+            .join(dir.strip_prefix("/").unwrap_or(dir))
+            .join(debuglink),
+    ];
+
+    candidates.into_iter().find(|p| {
+        let Ok(content) = std::fs::read(p) else {
+            return false;
+        };
+        let actual_crc = crc32fast::hash(&content);
+        if actual_crc != expected_crc {
+            trace!(
+                "CRC mismatch for {}: expected {expected_crc:#x}, got {actual_crc:#x}",
+                p.display()
+            );
+            return false;
+        }
+        true
+    })
+}
+
+/// Copy `binary` and `debug_file` in a fresh tempdir, renaming the debug
+/// file to match the binary's `.gnu_debuglink` basename so `find_debug_file`
+/// resolves the pair.
+///
+/// Returns `(TempDir, staged_binary, staged_debug_file)`. Keep the `TempDir`
+/// alive for the duration of the test — dropping it removes the files.
+#[cfg(all(test, target_os = "linux"))]
+pub(super) fn setup_debuglink_tmpdir(
+    binary: &Path,
+    debug_file: &Path,
+) -> (tempfile::TempDir, PathBuf, PathBuf) {
+    let src = std::fs::read(binary).unwrap();
+    let object = object::File::parse(&*src).unwrap();
+    let (debuglink, _crc) = object
+        .gnu_debuglink()
+        .unwrap()
+        .expect("binary has no .gnu_debuglink");
+    let debuglink = std::str::from_utf8(debuglink).unwrap();
+
+    let dir = tempfile::tempdir().unwrap();
+    let staged_binary = dir.path().join("binary");
+    let staged_debug = dir.path().join(debuglink);
+    std::fs::copy(binary, &staged_binary).unwrap();
+    std::fs::copy(debug_file, &staged_debug).unwrap();
+
+    (dir, staged_binary, staged_debug)
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+
+    // The fixtures `testdata/perf_map/libc.so.6` and `libc.so.6.debug` are the
+    // stripped libc plus its separate debug file from Ubuntu 22.04's `libc6`
+    // and `libc6-dbg` packages.
+    const LIBC_PATH: &str = "testdata/perf_map/libc.so.6";
+    const LIBC_DEBUG_PATH: &str = "testdata/perf_map/libc.so.6.debug";
+
+    #[test]
+    fn test_find_debug_file_by_build_id() {
+        // Ubuntu's `libc6-dbg` installs its debug file under
+        // `/usr/lib/debug/.build-id/<xx>/<rest>.debug`. Reproduce that layout
+        // in a tempdir and confirm we resolve it via the build-id note.
+        let binary_path = Path::new(LIBC_PATH);
+        let content = std::fs::read(binary_path).unwrap();
+        let object = object::File::parse(&*content).unwrap();
+
+        let build_id = object.build_id().unwrap().unwrap();
+        let hex: String = build_id.iter().map(|b| format!("{b:02x}")).collect();
+
+        let tmp = tempfile::tempdir().unwrap();
+        let debug_file_dir = tmp.path().join(".build-id").join(&hex[..2]);
+        std::fs::create_dir_all(&debug_file_dir).unwrap();
+
+        let debug_file_path = debug_file_dir.join(format!("{}.debug", &hex[2..]));
+        std::fs::copy(LIBC_DEBUG_PATH, &debug_file_path).unwrap();
+
+        let result = find_debug_file_in(&object, binary_path, tmp.path());
+        assert_eq!(result, Some(debug_file_path));
+    }
+
+    #[test]
+    fn test_find_debug_file_by_debuglink() {
+        let (_dir, binary, debug_file) =
+            setup_debuglink_tmpdir(Path::new(LIBC_PATH), Path::new(LIBC_DEBUG_PATH));
+        let content = std::fs::read(&binary).unwrap();
+        let object = object::File::parse(&*content).unwrap();
+
+        let empty_debug_dir = tempfile::tempdir().unwrap();
+        let result = find_debug_file_in(&object, &binary, empty_debug_dir.path());
+        assert_eq!(result, Some(debug_file));
+    }
 }

@@ -690,6 +690,7 @@ dependencies = [
  "bincode",
  "clap",
  "console",
+ "crc32fast",
  "debugid",
  "exec-harness",
  "futures",

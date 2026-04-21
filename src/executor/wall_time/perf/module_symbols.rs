@@ -1,7 +1,9 @@
 use crate::executor::wall_time::perf::elf_helper;
+use log::trace;
 use object::{Object, ObjectSymbol, ObjectSymbolTable};
 use runner_shared::module_symbols::SYMBOLS_MAP_SUFFIX;
 use std::{
+    collections::HashSet,
     fmt::Debug,
     io::{BufWriter, Write},
     path::Path,
@@ -55,11 +57,8 @@ impl ModuleSymbols {
         )
     }
 
-    /// Extract symbols from an ELF file (pid-agnostic, load_bias = 0).
-    pub fn from_elf<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
-        let content = std::fs::read(path.as_ref())?;
-        let object = object::File::parse(&*content)?;
-
+    /// Extract raw symbols from an object file's `.symtab` and `.dynsym` tables.
+    fn extract_symbols_from_object(object: &object::File) -> Vec<Symbol> {
         let mut symbols = Vec::new();
 
         if let Some(symbol_table) = object.symbol_table() {
@@ -80,6 +79,44 @@ impl ModuleSymbols {
                     name: symbol.name().ok()?.to_string(),
                 })
             }));
+        }
+
+        symbols
+    }
+
+    /// Extract symbols from an ELF file (pid-agnostic, load_bias = 0).
+    ///
+    /// If the binary has a `.gnu_debuglink` pointing to a separate debug file,
+    /// symbols from that file are merged in. This provides full symbol coverage
+    /// for stripped system libraries when debug packages are installed.
+    pub fn from_elf<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
+        let content = std::fs::read(path.as_ref())?;
+        let object = object::File::parse(&*content)?;
+
+        let mut symbols = Self::extract_symbols_from_object(&object);
+
+        // Merge symbols from a separate debug file if available
+        if let Some(debug_path) = elf_helper::find_debug_file(&object, path.as_ref()) {
+            trace!(
+                "Merging symbols from debug file {:?} for {:?}",
+                debug_path,
+                path.as_ref()
+            );
+            let debug_symbols = std::fs::read(&debug_path).ok().and_then(|c| {
+                object::File::parse(&*c)
+                    .ok()
+                    .map(|o| Self::extract_symbols_from_object(&o))
+            });
+
+            if let Some(debug_symbols) = debug_symbols {
+                let existing: HashSet<(u64, String)> =
+                    symbols.iter().map(|s| (s.addr, s.name.clone())).collect();
+                symbols.extend(
+                    debug_symbols
+                        .into_iter()
+                        .filter(|s| !existing.contains(&(s.addr, s.name.clone()))),
+                );
+            }
         }
 
         // Filter out
@@ -226,5 +263,46 @@ mod tests {
         const MODULE_PATH: &str = "testdata/perf_map/ty_walltime";
         let module_symbols = ModuleSymbols::from_elf(MODULE_PATH).unwrap();
         insta::assert_debug_snapshot!(module_symbols);
+    }
+
+    #[test]
+    fn test_stripped_binary_merges_debug_file_symbols() {
+        // The stripped binary has only .dynsym, the .debug file has the full .symtab.
+        // from_elf should merge both via .gnu_debuglink.
+        let stripped_only =
+            ModuleSymbols::from_elf("testdata/perf_map/cpp_my_benchmark_stripped.bin").unwrap();
+        let full = ModuleSymbols::from_elf("testdata/perf_map/cpp_my_benchmark.bin").unwrap();
+
+        assert!(
+            stripped_only.symbols().len() == full.symbols().len(),
+            "stripped+debug ({}) should have the same number of symbols as the original ({})",
+            stripped_only.symbols().len(),
+            full.symbols().len(),
+        );
+    }
+
+    #[test]
+    fn test_libc_symbols_merge_with_debug_file() {
+        // libc.so.6 ships with .dynsym populated, so from_elf alone would skip
+        // the debug file under a naive fallback. Merging must pick up .symtab
+        // symbols like `_int_malloc` that only live in the debug file —
+        // this is the coverage needed for full libc symbolication.
+        let (_dir, binary, _debug_file) = elf_helper::setup_debuglink_tmpdir(
+            Path::new("testdata/perf_map/libc.so.6"),
+            Path::new("testdata/perf_map/libc.so.6.debug"),
+        );
+
+        let module_symbols = ModuleSymbols::from_elf(&binary).unwrap();
+        assert!(
+            module_symbols.symbols().iter().any(|s| s.name == "malloc"),
+            "libc dynsym symbol `malloc` should be present"
+        );
+        assert!(
+            module_symbols
+                .symbols()
+                .iter()
+                .any(|s| s.name == "_int_malloc"),
+            "internal libc symbol `_int_malloc` should be merged in from the debug file"
+        );
     }
 }

@@ -1,3 +1,4 @@
+use super::elf_helper::find_debug_file;
 use super::parse_perf_file::LoadedModule;
 use crate::executor::wall_time::perf::module_symbols::ModuleSymbols;
 use crate::prelude::*;
@@ -43,7 +44,10 @@ pub trait ModuleDebugInfoExt {
 }
 
 impl ModuleDebugInfoExt for ModuleDebugInfo {
-    /// Create debug info from existing symbols by looking up file/line in DWARF
+    /// Create debug info from existing symbols by looking up file/line in DWARF.
+    ///
+    /// If the binary has no DWARF sections, tries to find a separate debug file
+    /// via `.gnu_debuglink` (e.g. installed by `libc6-dbg`).
     fn from_symbols<P: AsRef<Path>>(
         path: P,
         symbols: &ModuleSymbols,
@@ -52,7 +56,25 @@ impl ModuleDebugInfoExt for ModuleDebugInfo {
         let content = std::fs::read(path.as_ref())?;
         let object = object::File::parse(&*content)?;
 
-        let ctx = Self::create_dwarf_context(&object).context("Failed to create DWARF context")?;
+        // If the binary has no DWARF, try a separate debug file via .gnu_debuglink
+        let ctx = if object.section_by_name(".debug_info").is_some() {
+            Self::create_dwarf_context(&object).context("Failed to create DWARF context")?
+        } else {
+            let debug_path = find_debug_file(&object, path.as_ref()).with_context(|| {
+                format!(
+                    "No DWARF in {:?} and no separate debug file found",
+                    path.as_ref()
+                )
+            })?;
+            trace!(
+                "Using separate debug file {debug_path:?} for {:?}",
+                path.as_ref()
+            );
+            let debug_content = std::fs::read(&debug_path)?;
+            let debug_object = object::File::parse(&*debug_content)?;
+            Self::create_dwarf_context(&debug_object)
+                .context("Failed to create DWARF context from debug file")?
+        };
         let (mut min_addr, mut max_addr) = (None, None);
         let debug_infos = symbols
             .symbols()
@@ -211,6 +233,31 @@ mod tests {
         let module_debug_info =
             ModuleDebugInfo::from_symbols(MODULE_PATH, &module_symbols, load_bias).unwrap();
         insta::assert_debug_snapshot!(module_debug_info.debug_infos);
+    }
+
+    #[rstest::rstest]
+    #[case::cpp(
+        "testdata/perf_map/cpp_my_benchmark_stripped.bin",
+        "testdata/perf_map/cpp_my_benchmark.debug"
+    )]
+    #[case::libc("testdata/perf_map/libc.so.6", "testdata/perf_map/libc.so.6.debug")]
+    fn test_stripped_binary_with_debuglink_resolves_debug_info(
+        #[case] binary: &str,
+        #[case] debug_file: &str,
+    ) {
+        let (_dir, binary, _debug_file) = super::super::elf_helper::setup_debuglink_tmpdir(
+            Path::new(binary),
+            Path::new(debug_file),
+        );
+
+        let module_symbols = ModuleSymbols::from_elf(&binary).unwrap();
+        assert!(!module_symbols.symbols().is_empty());
+
+        let module_debug_info = ModuleDebugInfo::from_symbols(&binary, &module_symbols, 0).unwrap();
+        assert!(
+            !module_debug_info.debug_infos.is_empty(),
+            "DWARF should resolve via .gnu_debuglink"
+        );
     }
 
     #[test]
