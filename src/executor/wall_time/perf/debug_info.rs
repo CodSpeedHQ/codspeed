@@ -60,12 +60,13 @@ impl ModuleDebugInfoExt for ModuleDebugInfo {
         let ctx = if object.section_by_name(".debug_info").is_some() {
             Self::create_dwarf_context(&object).context("Failed to create DWARF context")?
         } else {
-            let debug_path = find_debug_file(&object, path.as_ref()).with_context(|| {
-                format!(
+            let Some(debug_path) = find_debug_file(&object, path.as_ref()) else {
+                warn_missing_libc_debug_info(path.as_ref());
+                anyhow::bail!(
                     "No DWARF in {:?} and no separate debug file found",
                     path.as_ref()
-                )
-            })?;
+                );
+            };
             trace!(
                 "Using separate debug file {debug_path:?} for {:?}",
                 path.as_ref()
@@ -127,6 +128,25 @@ impl ModuleDebugInfoExt for ModuleDebugInfo {
             debug_infos,
         })
     }
+}
+
+fn is_libc_filename(file_name: &str) -> bool {
+    file_name.starts_with("libc.so") || file_name.starts_with("libc-")
+}
+
+fn warn_missing_libc_debug_info(path: &Path) {
+    let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
+        return;
+    };
+    if !is_libc_filename(file_name) {
+        return;
+    }
+
+    warn!(
+        "Debug info for {} not found. Install libc6-dbg (Debian/Ubuntu) or \
+         glibc-debuginfo (Fedora/RHEL) to fix missing symbols in the flamegraph",
+        path.display()
+    );
 }
 
 /// Compute debug info once per unique ELF path from deduplicated symbols.
@@ -258,6 +278,16 @@ mod tests {
             !module_debug_info.debug_infos.is_empty(),
             "DWARF should resolve via .gnu_debuglink"
         );
+    }
+
+    #[rstest::rstest]
+    #[case::libc_so_6("libc.so.6", true)]
+    #[case::libc_so("libc.so", true)]
+    #[case::libc_versioned("libc-2.31.so", true)]
+    #[case::libm("libm.so.6", false)]
+    #[case::random("my_binary", false)]
+    fn test_is_libc_filename(#[case] name: &str, #[case] expected: bool) {
+        assert_eq!(super::is_libc_filename(name), expected);
     }
 
     #[test]
