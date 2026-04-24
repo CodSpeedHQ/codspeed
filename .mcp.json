@@ -1,6 +1,7 @@
 {
   "mcpServers": {
     "CodSpeed": {
+      "type": "http",
       "url": "https://mcp.codspeed.io/mcp"
     }
   }
