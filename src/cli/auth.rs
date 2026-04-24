@@ -1,3 +1,4 @@
+use std::io::Read;
 use std::time::Duration;
 
 use crate::api_client::{CodSpeedAPIClient, GetRepositoryVars};
@@ -22,7 +23,11 @@ pub struct AuthArgs {
 #[derive(Debug, Subcommand)]
 enum AuthCommands {
     /// Login to CodSpeed
-    Login,
+    Login {
+        /// Read the token from standard input instead of running the OAuth flow
+        #[arg(long)]
+        with_token: bool,
+    },
     /// Show the authentication status
     Status,
 }
@@ -33,7 +38,7 @@ pub async fn run(
     config_name: Option<&str>,
 ) -> Result<()> {
     match args.command {
-        AuthCommands::Login => login(api_client, config_name).await?,
+        AuthCommands::Login { with_token } => login(api_client, config_name, with_token).await?,
         AuthCommands::Status => status(api_client).await?,
     }
     Ok(())
@@ -41,46 +46,62 @@ pub async fn run(
 
 const LOGIN_SESSION_MAX_DURATION: Duration = Duration::from_secs(60 * 5); // 5 minutes
 
-async fn login(api_client: &CodSpeedAPIClient, config_name: Option<&str>) -> Result<()> {
+async fn login(
+    api_client: &CodSpeedAPIClient,
+    config_name: Option<&str>,
+    with_token: bool,
+) -> Result<()> {
     debug!("Login to CodSpeed");
-    start_group!("Creating login session");
-    let login_session_payload = api_client.create_login_session().await?;
-    end_group!();
 
-    if open::that(&login_session_payload.callback_url).is_ok() {
-        info!("Your browser has been opened to complete the login process");
+    let token = if with_token {
+        let mut buf = String::new();
+        std::io::stdin().read_to_string(&mut buf)?;
+        let token = buf.trim().to_owned();
+        if token.is_empty() {
+            bail!("No token provided on stdin");
+        }
+        token
     } else {
-        warn!("Failed to open the browser automatically, please open the URL manually");
-    }
-    info!(
-        "Authentication URL: {}\n",
-        style(login_session_payload.callback_url)
-            .blue()
-            .bold()
-            .underlined()
-    );
+        start_group!("Creating login session");
+        let login_session_payload = api_client.create_login_session().await?;
+        end_group!();
 
-    start_group!("Waiting for the login to be completed");
-    let token;
-    let start = Instant::now();
-    loop {
-        if start.elapsed() > LOGIN_SESSION_MAX_DURATION {
-            bail!("Login session expired, please try again");
+        if open::that(&login_session_payload.callback_url).is_ok() {
+            info!("Your browser has been opened to complete the login process");
+        } else {
+            warn!("Failed to open the browser automatically, please open the URL manually");
         }
+        info!(
+            "Authentication URL: {}\n",
+            style(login_session_payload.callback_url)
+                .blue()
+                .bold()
+                .underlined()
+        );
 
-        match api_client
-            .consume_login_session(&login_session_payload.session_id)
-            .await?
-            .token
-        {
-            Some(token_from_api) => {
-                token = token_from_api;
-                break;
+        start_group!("Waiting for the login to be completed");
+        let token;
+        let start = Instant::now();
+        loop {
+            if start.elapsed() > LOGIN_SESSION_MAX_DURATION {
+                bail!("Login session expired, please try again");
             }
-            None => sleep(Duration::from_secs(5)).await,
+
+            match api_client
+                .consume_login_session(&login_session_payload.session_id)
+                .await?
+                .token
+            {
+                Some(token_from_api) => {
+                    token = token_from_api;
+                    break;
+                }
+                None => sleep(Duration::from_secs(5)).await,
+            }
         }
-    }
-    end_group!();
+        end_group!();
+        token
+    };
 
     let mut config = CodSpeedConfig::load_with_override(config_name, None)?;
     config.auth.token = Some(token);
