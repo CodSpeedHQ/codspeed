@@ -1,32 +1,25 @@
 use super::experimental::ExperimentalArgs;
 use crate::VERSION;
 use crate::executor::config::SimulationTool;
-use crate::local_logger::CODSPEED_U8_COLOR_CODE;
-use crate::local_logger::icons::Icon;
 use crate::prelude::*;
 use crate::run_environment::interfaces::RepositoryProvider;
 use crate::runner_mode::{RunnerMode, load_shell_session_mode};
 use clap::Args;
 use clap::ValueEnum;
-use console::style;
 use std::path::PathBuf;
 
 pub(crate) fn show_banner() {
-    let logo = r#"   ______            __ _____                         __
+    let banner = format!(
+        r#"
+   ______            __ _____                         __
   / ____/____   ____/ // ___/ ____   ___   ___   ____/ /
  / /    / __ \ / __  / \__ \ / __ \ / _ \ / _ \ / __  /
 / /___ / /_/ // /_/ / ___/ // /_/ //  __//  __// /_/ /
 \____/ \____/ \__,_/ /____// .___/ \___/ \___/ \__,_/
-                          /_/"#;
-
-    let version_tag = style(format!("v{VERSION}")).bold();
-    let url = style("codspeed.io").color256(CODSPEED_U8_COLOR_CODE);
-    let separator = style(Icon::Separator.to_string().repeat(52)).dim();
-
-    eprintln!(
-        "\n{}\n  {separator}\n  {url}  {version_tag}\n",
-        style(logo).color256(CODSPEED_U8_COLOR_CODE).bold()
+  https://codspeed.io     /_/          runner v{VERSION}
+"#
     );
+    println!("{banner}");
     debug!("codspeed v{VERSION}");
 }
 
