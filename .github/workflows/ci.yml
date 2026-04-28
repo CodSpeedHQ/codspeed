@@ -128,7 +128,7 @@ jobs:
       - name: Build benchmarks
         run: cargo codspeed build -p runner-shared
       - name: Run benchmarks
-        uses: CodSpeedHQ/action@db35df748deb45fdef0960669f57d627c1956c30 # v4
+        uses: CodSpeedHQ/action@c381be0bfd20e844fb45594f6aa182ffcd94545c # v4
         with:
           mode: simulation
           run: cargo codspeed run -p runner-shared
