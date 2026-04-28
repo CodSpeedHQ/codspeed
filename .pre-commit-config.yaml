@@ -20,7 +20,7 @@ repos:
       - id: clippy
         args: [--all-targets, --, -D, warnings]
   - repo: https://github.com/cpp-linter/cpp-linter-hooks
-    rev: v0.8.1
+    rev: v1.4.0
     hooks:
       - id: clang-format
         files: ^crates/memtrack/src/ebpf/c/.*\.(c|h|bpf\.c)$
