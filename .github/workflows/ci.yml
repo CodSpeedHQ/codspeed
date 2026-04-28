@@ -7,7 +7,11 @@ on:
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -19,6 +23,7 @@ jobs:
         with:
           extra_args: --all-files
       - name: Check config schema is up to date
+        if: matrix.os == 'ubuntu-latest'
         run: cargo run --bin generate_config_schema && git diff --exit-code schemas/codspeed.schema.json
 
   tests:
