@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           submodules: true
-      - uses: moonrepo/setup-rust@abb2d32350334249b178c401e5ec5836e0cd88d3 # v1
+      - uses: ./.github/actions/install-rust
         with:
           components: rustfmt, clippy
       - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
@@ -34,10 +34,7 @@ jobs:
           lfs: true
           submodules: true
 
-      - name: "Install rust-toolchain.toml"
-        run: rustup toolchain install
-      # We use Swatinem/rust-cache to cache cargo registry, index and target in this job
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
+      - uses: ./.github/actions/install-rust
 
       # Install memtrack for the memory integration tests
       - name: Install dependencies required for libbpf-sys (vendored feature)
@@ -57,7 +54,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           submodules: true
-      - uses: moonrepo/setup-rust@abb2d32350334249b178c401e5ec5836e0cd88d3 # v1
+      - uses: ./.github/actions/install-rust
       - name: Run tests
         run: cargo test -p exec-harness
 
@@ -67,10 +64,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           submodules: true
-      - name: "Install rust-toolchain.toml"
-        run: rustup toolchain install
-      # We use Swatinem/rust-cache to cache cargo registry, index and target in this job
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
+      - uses: ./.github/actions/install-rust
       - name: Run tests
         run: cargo run -- exec -m simulation,walltime,memory --skip-upload --warmup-time 0s --max-rounds 5 -- ls -la
 
@@ -80,10 +74,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           submodules: true
-      - name: "Install rust-toolchain.toml"
-        run: rustup toolchain install
-      # We use Swatinem/rust-cache to cache cargo registry, index and target in this job
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
+      - uses: ./.github/actions/install-rust
       - name: Install exec-harness
         run: |
           cargo install --path crates/exec-harness --locked
@@ -98,7 +89,7 @@ jobs:
         with:
           lfs: true
           submodules: true
-      - uses: moonrepo/setup-rust@abb2d32350334249b178c401e5ec5836e0cd88d3 # v1
+      - uses: ./.github/actions/install-rust
       - name: Install dependencies required for libbpf-sys (vendored feature)
         run: sudo apt-get update && sudo apt-get install -y autopoint bison flex
 
@@ -122,9 +113,7 @@ jobs:
         with:
           submodules: true
 
-      - name: "Install rust-toolchain.toml"
-        run: rustup toolchain install
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
+      - uses: ./.github/actions/install-rust
       - name: Install cargo codspeed
         uses: taiki-e/install-action@0c7a94999971db56e9df89df226240aab222e776 # v2
         with:
