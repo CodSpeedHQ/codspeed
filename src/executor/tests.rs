@@ -1,31 +1,34 @@
-use super::ExecutorConfig;
-use crate::executor::ExecutionContext;
-use crate::executor::Executor;
-use crate::system::SystemInfo;
-use rstest_reuse::{self, *};
-use shell_quote::{Bash, QuoteRefExt};
-use tempfile::TempDir;
-use tokio::sync::{OnceCell, Semaphore, SemaphorePermit};
+// Shared test helpers. On non-linux platforms, the only consumer is the `walltime` mod, which is
+// gated behind `GITHUB_ACTIONS`. Apply the same gate here so dead-code lints don't fire on macOS
+// without the env var. On linux, valgrind always uses these helpers, so no gate is needed.
+#[cfg_attr(not(target_os = "linux"), test_with::env(GITHUB_ACTIONS))]
+mod helpers {
+    pub use crate::executor::{ExecutionContext, Executor, ExecutorConfig};
+    pub use crate::system::SystemInfo;
+    pub use rstest_reuse::{self, *};
+    pub use shell_quote::{Bash, QuoteRefExt};
+    pub use tempfile::TempDir;
+    pub use tokio::sync::{OnceCell, Semaphore, SemaphorePermit};
 
-const TESTS: [&str; 6] = [
-    // Simple echo command
-    "echo 'Hello, World!'",
-    // Multi-line commands without semicolons
-    "echo \"Working\"
+    pub const TESTS: [&str; 6] = [
+        // Simple echo command
+        "echo 'Hello, World!'",
+        // Multi-line commands without semicolons
+        "echo \"Working\"
 echo \"with\"
 echo \"multiple lines\"",
-    // Multi-line commands with semicolons
-    "echo \"Working\";
+        // Multi-line commands with semicolons
+        "echo \"Working\";
 echo \"with\";
 echo \"multiple lines\";",
-    // Directory change and validation
-    "cd /tmp
+        // Directory change and validation
+        "cd /tmp
 # Check that the directory is actually changed
 if [ $(basename $(pwd)) != \"tmp\" ]; then
   exit 1
 fi",
-    // Quote escaping test
-    "#!/bin/bash
+        // Quote escaping test
+        "#!/bin/bash
 VALUE=\"He said \\\"Hello 'world'\\\" & echo \\$HOME\"
 if [ \"$VALUE\" = \"He said \\\"Hello 'world'\\\" & echo \\$HOME\" ]; then
   echo \"Quote test passed\"
@@ -33,8 +36,8 @@ else
   echo \"ERROR: Quote handling failed\"
   exit 1
 fi",
-    // Command substitution test
-    "#!/bin/bash
+        // Command substitution test
+        "#!/bin/bash
 RESULT=$(echo \"test 'nested' \\\"quotes\\\" here\")
 COUNT=$(echo \"$RESULT\" | wc -w)
 if [ \"$COUNT\" -eq \"4\" ]; then
@@ -43,112 +46,115 @@ else
   echo \"ERROR: Expected 4 words, got $COUNT\"
   exit 1
 fi",
-];
+    ];
 
-fn env_var_validation_script(env: &str, expected: &str) -> String {
-    let expected: String = expected.quoted(Bash);
-    format!(
-        r#"
+    pub fn env_var_validation_script(env: &str, expected: &str) -> String {
+        let expected: String = expected.quoted(Bash);
+        format!(
+            r#"
 if [ "${env}" != {expected} ]; then
   echo "FAIL: Environment variable not set correctly"
   echo "Got: '${env}'"
   exit 1
 fi
 "#
-    )
-}
-
-const ENV_TESTS: [(&str, &str); 8] = [
-    // Mixed quotes, backticks, and shell metacharacters
-    (
-        "quotes_and_escapes",
-        r#""'He said "Hello 'world' `date`" & echo "done" with \\n\\t\\"#,
-    ),
-    // Multiline content with tabs and trailing whitespace
-    (
-        "multiline_and_whitespace",
-        "Line 1\nLine 2\tTabbed\n   \t  ",
-    ),
-    // Shell metacharacters: pipes, redirects, operators
-    (
-        "shell_metacharacters",
-        r#"*.txt | grep "test" && echo "found" || echo "error" ; ls > /tmp/out"#,
-    ),
-    // Variable expansion and command substitution
-    (
-        "variables_and_commands",
-        r#"$HOME ${PATH} $((1+1)) $(echo "embedded") VAR="value with spaces""#,
-    ),
-    // Unicode characters and ANSI escape sequences
-    (
-        "unicode_and_special",
-        "🚀 café naïve\u{200b}hidden\x1b[31mRed\x1b[0m\x01\x02",
-    ),
-    // Complex mix of quoting styles with shell operators
-    (
-        "complex_mixed",
-        r#"start'single'middle"double"end $VAR | cmd && echo "done" || fail"#,
-    ),
-    // Empty string edge case
-    ("empty", ""),
-    // Whitespace-only content
-    ("space_only", "   "),
-];
-
-#[template]
-#[rstest::rstest]
-#[case(TESTS[0])]
-#[case(TESTS[1])]
-#[case(TESTS[2])]
-#[case(TESTS[3])]
-#[case(TESTS[4])]
-#[case(TESTS[5])]
-fn test_cases(#[case] cmd: &str) {}
-
-#[template]
-#[rstest::rstest]
-#[case(ENV_TESTS[0])]
-#[case(ENV_TESTS[1])]
-#[case(ENV_TESTS[2])]
-#[case(ENV_TESTS[3])]
-#[case(ENV_TESTS[4])]
-#[case(ENV_TESTS[5])]
-#[case(ENV_TESTS[6])]
-#[case(ENV_TESTS[7])]
-fn env_test_cases(#[case] env_case: (&str, &str)) {}
-
-async fn create_test_setup(config: ExecutorConfig) -> (ExecutionContext, TempDir) {
-    let temp_dir = TempDir::new().unwrap();
-
-    let mut config = config;
-
-    // Provide a test token so authentication doesn't fail
-    if config.token.is_none() {
-        config.token = Some("test-token".to_string());
+        )
     }
 
-    let profile_folder = temp_dir.path().to_path_buf();
-    let execution_context = ExecutionContext::new(config, profile_folder);
+    pub const ENV_TESTS: [(&str, &str); 8] = [
+        // Mixed quotes, backticks, and shell metacharacters
+        (
+            "quotes_and_escapes",
+            r#""'He said "Hello 'world' `date`" & echo "done" with \\n\\t\\"#,
+        ),
+        // Multiline content with tabs and trailing whitespace
+        (
+            "multiline_and_whitespace",
+            "Line 1\nLine 2\tTabbed\n   \t  ",
+        ),
+        // Shell metacharacters: pipes, redirects, operators
+        (
+            "shell_metacharacters",
+            r#"*.txt | grep "test" && echo "found" || echo "error" ; ls > /tmp/out"#,
+        ),
+        // Variable expansion and command substitution
+        (
+            "variables_and_commands",
+            r#"$HOME ${PATH} $((1+1)) $(echo "embedded") VAR="value with spaces""#,
+        ),
+        // Unicode characters and ANSI escape sequences
+        (
+            "unicode_and_special",
+            "🚀 café naïve\u{200b}hidden\x1b[31mRed\x1b[0m\x01\x02",
+        ),
+        // Complex mix of quoting styles with shell operators
+        (
+            "complex_mixed",
+            r#"start'single'middle"double"end $VAR | cmd && echo "done" || fail"#,
+        ),
+        // Empty string edge case
+        ("empty", ""),
+        // Whitespace-only content
+        ("space_only", "   "),
+    ];
 
-    (execution_context, temp_dir)
-}
+    #[template]
+    #[rstest::rstest]
+    #[case(TESTS[0])]
+    #[case(TESTS[1])]
+    #[case(TESTS[2])]
+    #[case(TESTS[3])]
+    #[case(TESTS[4])]
+    #[case(TESTS[5])]
+    pub fn test_cases(#[case] cmd: &str) {}
 
-// Uprobes set by memtrack, lead to crashes in valgrind because they work by setting breakpoints on the first
-// instruction. Valgrind doesn't rethrow those breakpoint exceptions, which makes the test crash.
-//
-// Therefore, we can only execute either valgrind or memtrack at any time, and not both at the same time.
-static BPF_INSTRUMENTATION_LOCK: OnceCell<Semaphore> = OnceCell::const_new();
+    #[template]
+    #[rstest::rstest]
+    #[case(ENV_TESTS[0])]
+    #[case(ENV_TESTS[1])]
+    #[case(ENV_TESTS[2])]
+    #[case(ENV_TESTS[3])]
+    #[case(ENV_TESTS[4])]
+    #[case(ENV_TESTS[5])]
+    #[case(ENV_TESTS[6])]
+    #[case(ENV_TESTS[7])]
+    pub fn env_test_cases(#[case] env_case: (&str, &str)) {}
 
-async fn acquire_bpf_instrumentation_lock() -> SemaphorePermit<'static> {
-    let semaphore = BPF_INSTRUMENTATION_LOCK
-        .get_or_init(|| async { Semaphore::new(1) })
-        .await;
-    semaphore.acquire().await.unwrap()
+    pub async fn create_test_setup(config: ExecutorConfig) -> (ExecutionContext, TempDir) {
+        let temp_dir = TempDir::new().unwrap();
+
+        let mut config = config;
+
+        // Provide a test token so authentication doesn't fail
+        if config.token.is_none() {
+            config.token = Some("test-token".to_string());
+        }
+
+        let profile_folder = temp_dir.path().to_path_buf();
+        let execution_context = ExecutionContext::new(config, profile_folder);
+
+        (execution_context, temp_dir)
+    }
+
+    // Uprobes set by memtrack, lead to crashes in valgrind because they work by setting breakpoints on the first
+    // instruction. Valgrind doesn't rethrow those breakpoint exceptions, which makes the test crash.
+    //
+    // Therefore, we can only execute either valgrind or memtrack at any time, and not both at the same time.
+    #[cfg(target_os = "linux")]
+    pub static BPF_INSTRUMENTATION_LOCK: OnceCell<Semaphore> = OnceCell::const_new();
+
+    #[cfg(target_os = "linux")]
+    pub async fn acquire_bpf_instrumentation_lock() -> SemaphorePermit<'static> {
+        let semaphore = BPF_INSTRUMENTATION_LOCK
+            .get_or_init(|| async { Semaphore::new(1) })
+            .await;
+        semaphore.acquire().await.unwrap()
+    }
 }
 
 #[cfg(target_os = "linux")]
 mod valgrind {
-    use super::*;
+    use super::helpers::*;
     use crate::executor::valgrind::executor::ValgrindExecutor;
 
     async fn get_valgrind_executor() -> (SemaphorePermit<'static>, &'static ValgrindExecutor) {
@@ -209,7 +215,7 @@ mod valgrind {
 
 #[test_with::env(GITHUB_ACTIONS)]
 mod walltime {
-    use super::*;
+    use super::helpers::*;
     use crate::executor::wall_time::executor::WallTimeExecutor;
 
     async fn get_walltime_executor() -> (SemaphorePermit<'static>, WallTimeExecutor) {
@@ -381,7 +387,7 @@ fi
 #[cfg(target_os = "linux")]
 #[test_with::env(GITHUB_ACTIONS)]
 mod memory {
-    use super::*;
+    use super::helpers::*;
     use crate::executor::memory::executor::MemoryExecutor;
 
     async fn get_memory_executor() -> (

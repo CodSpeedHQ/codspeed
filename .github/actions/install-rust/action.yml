@@ -1,0 +1,18 @@
+name: Install Rust
+description: Install the Rust toolchain via rustup and set up Swatinem/rust-cache.
+inputs:
+  components:
+    description: Comma-separated list of additional rustup components to install (e.g. "rustfmt, clippy").
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Install rust-toolchain.toml
+      shell: bash
+      run: rustup toolchain install
+    - name: Install additional rustup components
+      if: inputs.components != ''
+      shell: bash
+      run: echo "${{ inputs.components }}" | tr ',' '\n' | xargs rustup component add
+    - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
