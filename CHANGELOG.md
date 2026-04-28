@@ -5,6 +5,26 @@
 
 
 
+## [4.15.0] - 2026-04-28
+
+### <!-- 0 -->🚀 Features
+- Revert logo changes by @GuillaumeLagrange
+- Display N/A rather than NaN/inf in the benchmarks results table by @GuillaumeLagrange in [#314](https://github.com/CodSpeedHQ/runner/pull/314)
+- Only wrap walltime command with sudo on linux by @GuillaumeLagrange
+- Add `--with-token` flag to read token from stdin by @fargito in [#313](https://github.com/CodSpeedHQ/runner/pull/313)
+- Warn when libc debug info is not found by @not-matthias in [#310](https://github.com/CodSpeedHQ/runner/pull/310)
+- Resolve debug info and symbols from separate debug files by @not-matthias in [#303](https://github.com/CodSpeedHQ/runner/pull/303)
+
+### <!-- 6 -->🧪 Testing
+- Add libc debuglink/build-id fixtures by @not-matthias
+- Add stripped binary and debug file test fixtures by @not-matthias
+
+### <!-- 7 -->⚙️ Internals
+- Bump exec-harness version
+- Add macos basic run test by @GuillaumeLagrange in [#319](https://github.com/CodSpeedHQ/runner/pull/319)
+- Remove DumpPerfMapAtExit in favor of custom dumper by @not-matthias in [#295](https://github.com/CodSpeedHQ/runner/pull/295)
+
+
 ## [4.14.0] - 2026-04-17
 
 ### <!-- 0 -->🚀 Features
@@ -1093,6 +1113,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[4.15.0]: https://github.com/CodSpeedHQ/runner/compare/v4.14.0..v4.15.0
 [4.14.0]: https://github.com/CodSpeedHQ/runner/compare/v4.13.0..v4.14.0
 [4.13.0]: https://github.com/CodSpeedHQ/runner/compare/v4.12.1..v4.13.0
 [4.12.1]: https://github.com/CodSpeedHQ/runner/compare/v4.12.0..v4.12.1
