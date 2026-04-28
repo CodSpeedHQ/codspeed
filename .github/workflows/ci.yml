@@ -121,7 +121,7 @@ jobs:
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
       - name: Install cargo codspeed
-        uses: taiki-e/install-action@0c7a94999971db56e9df89df226240aab222e776 # v2
+        uses: taiki-e/install-action@1329c298aa20c3257846c9b2e0e55967df3e3c37 # v2
         with:
           tool: cargo-codspeed
 
