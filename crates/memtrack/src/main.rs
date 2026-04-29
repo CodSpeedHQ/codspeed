@@ -200,6 +200,22 @@ fn track_command(
         .join()
         .map_err(|_| anyhow::anyhow!("Failed to join writer thread"))??;
 
+    // Read the eBPF dropped-event counter after the run is complete.
+    // A non-zero value means the ring buffer overflowed and the trace is
+    // incomplete.
+    let dropped_events = tracker_arc
+        .lock()
+        .map_err(|_| anyhow!("tracker mutex poisoned"))?
+        .dropped_events_count()
+        .context("Failed to read memtrack dropped-event counter")?;
+    if dropped_events > 0 {
+        bail!(
+            "Memtrack ring buffer overflowed: {dropped_events} events lost, aborting since the trace is incomplete.\n\
+               Try reducing the benchmark's allocation rate (fewer iterations or smaller inputs), \
+               or report it at https://github.com/CodSpeedHQ/codspeed/issues."
+        );
+    }
+
     // IPC thread will exit when channel closes
     drop(ipc_handle);
 

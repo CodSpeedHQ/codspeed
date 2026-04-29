@@ -43,6 +43,8 @@ BPF_HASH_MAP(pids_ppid, __u32, __u32, 10000);
 BPF_RINGBUF(events, 16 * 1024 * 1024);
 /* Map to control whether tracking is enabled (0 = disabled, 1 = enabled) */
 BPF_ARRAY_MAP(tracking_enabled, __u8, 1);
+/*  Counter for events that couldn't be added to the ring buffer */
+BPF_ARRAY_MAP(dropped_events, __u64, 1);
 
 /* == Code that tracks process forks and execs == */
 
@@ -129,29 +131,34 @@ static __always_inline __u64* take_param(void* map) {
 /* Macro to handle common event submission boilerplate
  * Usage: SUBMIT_EVENT(event_type, { e->data.foo = bar; })
  */
-#define SUBMIT_EVENT(evt_type, fill_data)                              \
-    {                                                                  \
-        __u64 tid = bpf_get_current_pid_tgid();                        \
-        __u32 pid = tid >> 32;                                         \
-                                                                       \
-        if (!is_tracked(pid) || !is_enabled()) {                       \
-            return 0;                                                  \
-        }                                                              \
-                                                                       \
-        struct event* e = bpf_ringbuf_reserve(&events, sizeof(*e), 0); \
-        if (!e) {                                                      \
-            return 0;                                                  \
-        }                                                              \
-                                                                       \
-        e->header.timestamp = bpf_ktime_get_ns();                      \
-        e->header.pid = pid;                                           \
-        e->header.tid = tid & 0xFFFFFFFF;                              \
-        e->header.event_type = evt_type;                               \
-                                                                       \
-        fill_data;                                                     \
-                                                                       \
-        bpf_ringbuf_submit(e, 0);                                      \
-        return 0;                                                      \
+#define SUBMIT_EVENT(evt_type, fill_data)                               \
+    {                                                                   \
+        __u64 tid = bpf_get_current_pid_tgid();                         \
+        __u32 pid = tid >> 32;                                          \
+                                                                        \
+        if (!is_tracked(pid) || !is_enabled()) {                        \
+            return 0;                                                   \
+        }                                                               \
+                                                                        \
+        struct event* e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);  \
+        if (!e) {                                                       \
+            __u32 zero = 0;                                             \
+            __u64* drops = bpf_map_lookup_elem(&dropped_events, &zero); \
+            if (drops) {                                                \
+                __sync_fetch_and_add(drops, 1);                         \
+            }                                                           \
+            return 0;                                                   \
+        }                                                               \
+                                                                        \
+        e->header.timestamp = bpf_ktime_get_ns();                       \
+        e->header.pid = pid;                                            \
+        e->header.tid = tid & 0xFFFFFFFF;                               \
+        e->header.event_type = evt_type;                                \
+                                                                        \
+        fill_data;                                                      \
+                                                                        \
+        bpf_ringbuf_submit(e, 0);                                       \
+        return 0;                                                       \
     }
 
 /* Helper to submit an allocation event (malloc, calloc) */

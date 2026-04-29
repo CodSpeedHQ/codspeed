@@ -99,4 +99,10 @@ impl Tracker {
     pub fn disable(&mut self) -> anyhow::Result<()> {
         self.bpf.disable_tracking()
     }
+
+    /// Number of events the kernel dropped because the ring buffer was full.
+    /// A non-zero value means the resulting trace is incomplete.
+    pub fn dropped_events_count(&self) -> anyhow::Result<u64> {
+        self.bpf.dropped_events_count()
+    }
 }

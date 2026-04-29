@@ -228,6 +228,24 @@ impl MemtrackBpf {
         Ok(())
     }
 
+    /// Read the count of events dropped because the ring buffer was full.
+    pub fn dropped_events_count(&self) -> Result<u64> {
+        let key = 0u32;
+        let value = self
+            .skel
+            .maps
+            .dropped_events
+            .lookup(&key.to_le_bytes(), libbpf_rs::MapFlags::ANY)
+            .context("Failed to read dropped_events counter")?
+            .ok_or_else(|| anyhow!("dropped_events slot 0 missing"))?;
+
+        let bytes: [u8; 8] = value
+            .as_slice()
+            .try_into()
+            .map_err(|_| anyhow!("dropped_events value has unexpected size"))?;
+        Ok(u64::from_le_bytes(bytes))
+    }
+
     /// Disable event tracking
     pub fn disable_tracking(&mut self) -> Result<()> {
         let key = 0u32;
