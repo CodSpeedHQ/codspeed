@@ -292,6 +292,7 @@ impl RunEnvironmentProvider for GitHubActionsProvider {
         // Check if a static token is already set
         if config.token.is_some() {
             announcement!(
+                "OIDC Authentication",
                 "You can now authenticate your CI workflows using OpenID Connect (OIDC) tokens instead of `CODSPEED_TOKEN` secrets.\n\
                 This makes integrating and authenticating jobs safer and simpler.\n\
                 Learn more at https://codspeed.io/docs/integrations/ci/github-actions/configuration#oidc-recommended\n"
@@ -320,6 +321,7 @@ impl RunEnvironmentProvider for GitHubActionsProvider {
             }
 
             announcement!(
+                "OIDC Authentication",
                 "You can now authenticate your CI workflows using OpenID Connect (OIDC).\n\
                 This makes integrating and authenticating jobs safer and simpler.\n\
                 Learn more at https://codspeed.io/docs/integrations/ci/github-actions/configuration#oidc-recommended\n"
