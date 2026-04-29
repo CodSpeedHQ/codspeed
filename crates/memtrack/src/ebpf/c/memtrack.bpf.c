@@ -40,7 +40,7 @@ BPF_HASH_MAP(tracked_pids, __u32, __u8, 10000);
 /* Map to store parent-child relationships to detect hierarchy */
 BPF_HASH_MAP(pids_ppid, __u32, __u32, 10000);
 /* Ring buffer for sending events to userspace */
-BPF_RINGBUF(events, 256 * 1024);
+BPF_RINGBUF(events, 16 * 1024 * 1024);
 /* Map to control whether tracking is enabled (0 = disabled, 1 = enabled) */
 BPF_ARRAY_MAP(tracking_enabled, __u8, 1);
 
