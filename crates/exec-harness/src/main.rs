@@ -20,6 +20,13 @@ struct Args {
     #[arg(short, long, global = true, env = "CODSPEED_RUNNER_MODE", hide = true)]
     measurement_mode: Option<MeasurementMode>,
 
+    /// Allow the benchmarked command to exit with a non-zero status code.
+    ///
+    /// When set, a non-zero exit from the benchmarked process is logged as a
+    /// warning and measurement continues, instead of aborting.
+    #[arg(short = 'i', long, default_value = "false")]
+    ignore_failure: bool,
+
     #[command(flatten)]
     walltime_args: WalltimeExecutionArgs,
 
@@ -51,6 +58,7 @@ fn main() -> Result<()> {
             command: args.command,
             name: args.name,
             walltime_args: args.walltime_args,
+            ignore_failure: args.ignore_failure,
         }],
     };
 

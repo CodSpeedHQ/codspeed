@@ -10,6 +10,7 @@ pub fn run_rounds(
     bench_uri: String,
     command: Vec<String>,
     config: &ExecutionOptions,
+    ignore_failure: bool,
 ) -> Result<Vec<u128>> {
     let warmup_time_ns = config.warmup_time_ns;
     let hooks = InstrumentHooks::instance(INTEGRATION_NAME, INTEGRATION_VERSION);
@@ -27,7 +28,14 @@ pub fn run_rounds(
         let bench_round_end_ts_ns = InstrumentHooks::current_timestamp();
 
         if !status.success() {
-            bail!("Command exited with non-zero status: {status}");
+            if ignore_failure {
+                warn!(
+                    "Command exited with non-zero status: {status}; \
+                     continuing because --ignore-failure is set"
+                );
+            } else {
+                bail!("Command exited with non-zero status: {status}");
+            }
         }
 
         Ok((bench_round_start_ts_ns, bench_round_end_ts_ns))

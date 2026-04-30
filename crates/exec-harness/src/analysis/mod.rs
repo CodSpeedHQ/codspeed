@@ -27,7 +27,14 @@ pub fn perform(commands: Vec<BenchmarkCommand>) -> Result<()> {
         let status = status.context("Failed to execute command")?;
 
         if !status.success() {
-            bail!("Command exited with non-zero status: {status}");
+            if benchmark_cmd.ignore_failure {
+                warn!(
+                    "Command exited with non-zero status: {status}; \
+                     continuing because --ignore-failure is set"
+                );
+            } else {
+                bail!("Command exited with non-zero status: {status}");
+            }
         }
 
         hooks.set_executed_benchmark(&name_and_uri.uri).unwrap();
@@ -68,7 +75,14 @@ pub fn perform_with_valgrind(commands: Vec<BenchmarkCommand>) -> Result<()> {
         bail_if_command_spawned_subprocesses_under_valgrind(child.id())?;
 
         if !status.success() {
-            bail!("Command exited with non-zero status: {status}");
+            if benchmark_cmd.ignore_failure {
+                warn!(
+                    "Command exited with non-zero status: {status}; \
+                     continuing because --ignore-failure is set"
+                );
+            } else {
+                bail!("Command exited with non-zero status: {status}");
+            }
         }
     }
 
