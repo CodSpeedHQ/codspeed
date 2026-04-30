@@ -17,6 +17,11 @@ query CompareRuns($owner: String!, $name: String!, $baseRunId: String!, $headRun
         change
         category
         status
+        result {
+          issues {
+            callgraphGenerationFailure
+          }
+        }
       }
     }
   }
