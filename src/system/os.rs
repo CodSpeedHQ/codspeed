@@ -26,7 +26,12 @@ impl SupportedOs {
         match os {
             "linux" => {
                 let os_id = System::distribution_id();
-                Ok(Self::Linux(LinuxDistribution::from_id(&os_id, &os_version)))
+                let os_id_like = System::distribution_id_like();
+                Ok(Self::Linux(LinuxDistribution::from_id_like(
+                    &os_id,
+                    &os_id_like,
+                    &os_version,
+                )))
             }
             "macos" => Ok(Self::Macos {
                 version: os_version,
@@ -99,6 +104,21 @@ impl LinuxDistribution {
         }
     }
 
+    /// Build a [`LinuxDistribution`] from the `sysinfo`-reported `os_id` and `os_id_like` fields.
+    /// This is needed to handle cases like PopOS (`os_id` = "pop" and `os_id_like` = ["ubuntu"]).
+    fn from_id_like(os_id: &str, os_id_like: &[String], version: &str) -> Self {
+        let by_id = Self::from_id(os_id, version);
+        if matches!(by_id, Self::Other { .. }) {
+            for like_id in os_id_like {
+                let by_like_id = Self::from_id(like_id, version);
+                if !matches!(by_like_id, Self::Other { .. }) {
+                    return by_like_id;
+                }
+            }
+        }
+        by_id
+    }
+
     /// The distro id as it appears on the wire (matches `sysinfo::System::distribution_id()`).
     pub fn id(&self) -> &str {
         match self {
@@ -136,5 +156,43 @@ mod tests {
     fn from_os_bails_on_unsupported() {
         let err = SupportedOs::from_os("windows").unwrap_err();
         assert_eq!(err.to_string(), "Unsupported operating system: windows");
+    }
+
+    #[test]
+    fn pop_os_resolves_to_ubuntu_via_id_like() {
+        // Pop!_OS: ID=pop, ID_LIKE="ubuntu debian"
+        let distro = LinuxDistribution::from_id_like(
+            "pop",
+            &[String::from("ubuntu"), String::from("debian")],
+            "24.04",
+        );
+        assert!(
+            matches!(distro, LinuxDistribution::Ubuntu { .. }),
+            "got {distro}"
+        );
+    }
+
+    #[test]
+    fn ubuntu_resolves_directly_without_id_like() {
+        // Ubuntu laptop: ID=ubuntu, ID_LIKE="debian" — primary id wins, no fallback needed
+        let distro = LinuxDistribution::from_id_like("ubuntu", &[String::from("debian")], "24.04");
+        assert!(
+            matches!(distro, LinuxDistribution::Ubuntu { .. }),
+            "got {distro}"
+        );
+    }
+
+    #[test]
+    fn centos_with_unrecognized_parents_is_other() {
+        // CentOS server: ID=centos, ID_LIKE="rhel fedora" — neither parent is known
+        let distro = LinuxDistribution::from_id_like(
+            "centos",
+            &[String::from("rhel"), String::from("fedora")],
+            "9",
+        );
+        assert!(
+            matches!(&distro, LinuxDistribution::Other { name, .. } if name == "centos"),
+            "got {distro}"
+        );
     }
 }
