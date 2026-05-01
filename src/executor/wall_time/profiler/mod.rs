@@ -6,6 +6,8 @@
 
 pub mod perf;
 
+const WALLTIME_METADATA_CURRENT_VERSION: u64 = 1;
+
 use crate::executor::ExecutorConfig;
 use crate::executor::ToolStatus;
 use crate::executor::helpers::command::CommandBuilder;

@@ -12,6 +12,7 @@ use crate::executor::helpers::run_with_sudo::run_with_sudo;
 use crate::executor::helpers::run_with_sudo::wrap_with_sudo;
 use crate::executor::shared::fifo::FifoBenchmarkData;
 use crate::executor::shared::fifo::RunnerFifo;
+use crate::executor::wall_time::profiler::WALLTIME_METADATA_CURRENT_VERSION;
 use crate::executor::wall_time::profiler::perf::perf_executable::get_working_perf_executable;
 use crate::prelude::*;
 use anyhow::Context;
@@ -23,7 +24,7 @@ use runner_shared::artifacts::ArtifactExt;
 use runner_shared::artifacts::ExecutionTimestamps;
 use runner_shared::fifo::Command as FifoCommand;
 use runner_shared::fifo::IntegrationMode;
-use runner_shared::metadata::PerfMetadata;
+use runner_shared::metadata::WalltimeMetadata;
 use std::path::Path;
 use std::path::PathBuf;
 use std::{cell::OnceCell, process::ExitStatus};
@@ -42,7 +43,6 @@ mod unwind_data;
 pub mod fifo;
 pub mod perf_executable;
 
-const PERF_METADATA_CURRENT_VERSION: u64 = 1;
 const PERF_PIPEDATA_FILE_NAME: &str = "perf.pipedata";
 
 pub struct PerfRunner {
@@ -334,8 +334,8 @@ impl BenchmarkData {
 
         debug!("Saving metadata");
         #[allow(deprecated)]
-        let metadata = PerfMetadata {
-            version: PERF_METADATA_CURRENT_VERSION,
+        let metadata = WalltimeMetadata {
+            version: WALLTIME_METADATA_CURRENT_VERSION,
             integration: self
                 .fifo_data
                 .integration
