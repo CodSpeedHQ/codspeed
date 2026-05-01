@@ -106,7 +106,7 @@ pub trait Executor {
 
     /// Runs the executor
     async fn run(
-        &self,
+        &mut self,
         execution_context: &ExecutionContext,
         // TODO: use Instruments instead of directly passing the mongodb tracer
         mongo_tracer: &Option<MongoTracer>,
@@ -118,7 +118,7 @@ pub trait Executor {
 /// Run a single executor: setup → run → teardown → persist logs.
 /// Does NOT upload.
 pub async fn run_executor(
-    executor: &dyn Executor,
+    executor: &mut dyn Executor,
     orchestrator: &Orchestrator,
     execution_context: &ExecutionContext,
     setup_cache_dir: Option<&Path>,

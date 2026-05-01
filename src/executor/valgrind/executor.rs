@@ -50,7 +50,7 @@ impl Executor for ValgrindExecutor {
     }
 
     async fn run(
-        &self,
+        &mut self,
         execution_context: &ExecutionContext,
         mongo_tracer: &Option<MongoTracer>,
     ) -> Result<()> {

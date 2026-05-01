@@ -93,7 +93,7 @@ impl Executor for MemoryExecutor {
     }
 
     async fn run(
-        &self,
+        &mut self,
         execution_context: &ExecutionContext,
         _mongo_tracer: &Option<MongoTracer>,
     ) -> Result<()> {

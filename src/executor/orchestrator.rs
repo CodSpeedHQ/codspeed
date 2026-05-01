@@ -144,7 +144,7 @@ impl Orchestrator {
             let config = self
                 .config
                 .executor_config_for_command(part.command, !part.uses_exec_harness);
-            let executor = get_executor_from_mode(part.mode);
+            let mut executor = get_executor_from_mode(part.mode);
             let profile_folder =
                 self.resolve_profile_folder(&executor.name(), run_part_index, total_parts)?;
 
@@ -154,7 +154,7 @@ impl Orchestrator {
                 activate_rolling_buffer(&part.label);
             }
 
-            run_executor(executor.as_ref(), self, &ctx, setup_cache_dir).await?;
+            run_executor(executor.as_mut(), self, &ctx, setup_cache_dir).await?;
 
             if !self.config.show_full_output {
                 deactivate_rolling_buffer();

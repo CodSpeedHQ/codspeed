@@ -2,32 +2,31 @@
 
 use crate::cli::UnwindingMode;
 use crate::executor::ExecutorConfig;
+use crate::executor::ToolStatus;
 use crate::executor::helpers::command::CommandBuilder;
 use crate::executor::helpers::detect_executable::command_has_executable;
 use crate::executor::helpers::env::is_codspeed_debug_enabled;
 use crate::executor::helpers::env::suppress_go_perf_unwinding_warning;
 use crate::executor::helpers::harvest_perf_maps_for_pids::harvest_perf_maps_for_pids;
-use crate::executor::helpers::run_command_with_log_pipe::run_command_with_log_pipe_and_callback;
 use crate::executor::helpers::run_with_sudo::run_with_sudo;
 use crate::executor::helpers::run_with_sudo::wrap_with_sudo;
 use crate::executor::shared::fifo::FifoBenchmarkData;
-use crate::executor::shared::fifo::RunnerFifo;
+use crate::executor::wall_time::profiler::Profiler;
 use crate::executor::wall_time::profiler::WALLTIME_METADATA_CURRENT_VERSION;
 use crate::executor::wall_time::profiler::perf::perf_executable::get_working_perf_executable;
 use crate::prelude::*;
+use crate::system::SystemInfo;
 use anyhow::Context;
+use async_trait::async_trait;
 use fifo::PerfFifo;
 use parse_perf_file::MemmapRecordsOutput;
 use perf_executable::get_compression_flags;
 use perf_executable::get_event_flags;
 use runner_shared::artifacts::ArtifactExt;
 use runner_shared::artifacts::ExecutionTimestamps;
-use runner_shared::fifo::Command as FifoCommand;
-use runner_shared::fifo::IntegrationMode;
 use runner_shared::metadata::WalltimeMetadata;
 use std::path::Path;
 use std::path::PathBuf;
-use std::{cell::OnceCell, process::ExitStatus};
 
 mod debug_info;
 mod elf_helper;
@@ -45,13 +44,40 @@ pub mod perf_executable;
 
 const PERF_PIPEDATA_FILE_NAME: &str = "perf.pipedata";
 
-pub struct PerfRunner {
-    benchmark_data: OnceCell<BenchmarkData>,
+pub struct PerfProfiler {
+    /// Set by [`Profiler::wrap`]; used by the FIFO hooks to control event
+    /// recording on the live `perf record` process.
+    perf_fifo: Option<PerfFifo>,
+
+    /// Path to the file that the wrapped command pipes `perf record`'s
+    /// stdout into. Set by [`Profiler::wrap`]; consumed by [`Profiler::finalize`].
+    perf_file_path: Option<PathBuf>,
 }
 
-impl PerfRunner {
-    pub async fn setup_environment(
-        system_info: &crate::system::SystemInfo,
+impl PerfProfiler {
+    pub fn new() -> Self {
+        Self {
+            perf_fifo: None,
+            perf_file_path: None,
+        }
+    }
+
+    fn perf_fifo_mut(&mut self) -> anyhow::Result<&mut PerfFifo> {
+        self.perf_fifo
+            .as_mut()
+            .context("PerfProfiler::wrap must be called before FIFO hooks")
+    }
+}
+
+#[async_trait(?Send)]
+impl Profiler for PerfProfiler {
+    fn tool_status(&self) -> Option<ToolStatus> {
+        Some(setup::get_perf_status())
+    }
+
+    async fn setup(
+        &self,
+        system_info: &SystemInfo,
         setup_cache_dir: Option<&Path>,
     ) -> anyhow::Result<()> {
         setup::install_perf(system_info, setup_cache_dir).await?;
@@ -81,20 +107,14 @@ impl PerfRunner {
         Ok(())
     }
 
-    pub fn new() -> Self {
-        Self {
-            benchmark_data: OnceCell::new(),
-        }
-    }
-
-    pub async fn run(
-        &self,
+    async fn wrap(
+        &mut self,
         mut cmd_builder: CommandBuilder,
         config: &ExecutorConfig,
         profile_folder: &Path,
-    ) -> anyhow::Result<ExitStatus> {
+    ) -> anyhow::Result<CommandBuilder> {
         let perf_fifo = PerfFifo::new()?;
-        let runner_fifo = RunnerFifo::new()?;
+        let perf_file_path = profile_folder.join(PERF_PIPEDATA_FILE_NAME);
 
         // Infer the unwinding mode from the benchmark cmd
         let (cg_mode, stack_size) = if let Some(mode) = config.perf_unwinding_mode {
@@ -169,7 +189,7 @@ impl PerfRunner {
         let raw_command = format!(
             "set -o pipefail && {} | cat > {}",
             &cmd_builder.as_command_line(),
-            self.get_perf_file_path(profile_folder).to_string_lossy()
+            perf_file_path.to_string_lossy()
         );
 
         let mut wrapped_builder = CommandBuilder::new("bash");
@@ -180,33 +200,47 @@ impl PerfRunner {
             wrapped_builder.current_dir(cwd);
         }
 
-        let cmd = wrap_with_sudo(wrapped_builder)?.build();
-        debug!("cmd: {cmd:?}");
+        let wrapped_builder = wrap_with_sudo(wrapped_builder)?;
 
-        let on_process_started = |mut child: std::process::Child| async move {
-            // If we output pipedata, we do not parse the perf map during teardown yet, so we need to parse memory
-            // maps as we receive the `CurrentBenchmark` fifo commands.
-            let (data, exit_status) = Self::handle_fifo(runner_fifo, perf_fifo, &mut child).await?;
-            self.benchmark_data.set(data).unwrap_or_else(|_| {
-                error!("Failed to set benchmark data in PerfRunner");
-            });
-            Ok(exit_status)
-        };
-        run_command_with_log_pipe_and_callback(cmd, on_process_started).await
+        self.perf_fifo = Some(perf_fifo);
+        self.perf_file_path = Some(perf_file_path);
+
+        Ok(wrapped_builder)
     }
 
-    pub async fn save_files_to(&self, profile_folder: &Path) -> anyhow::Result<()> {
+    async fn on_start_benchmark(&mut self) -> anyhow::Result<()> {
+        self.perf_fifo_mut()?.start_events().await
+    }
+
+    async fn on_stop_benchmark(&mut self) -> anyhow::Result<()> {
+        self.perf_fifo_mut()?.stop_events().await
+    }
+
+    async fn on_ping(&mut self) -> anyhow::Result<bool> {
+        Ok(self.perf_fifo_mut()?.ping().await.is_ok())
+    }
+
+    async fn finalize(
+        &self,
+        fifo_data: &FifoBenchmarkData,
+        timestamps: &ExecutionTimestamps,
+        profile_folder: &Path,
+    ) -> anyhow::Result<()> {
         let start = std::time::Instant::now();
 
-        let bench_data = self
-            .benchmark_data
-            .get()
-            .expect("Benchmark order is not available");
+        let perf_file_path = self
+            .perf_file_path
+            .as_ref()
+            .context("PerfProfiler::wrap must be called before finalize")?;
+
+        let bench_data = BenchmarkData {
+            fifo_data,
+            marker_result: timestamps,
+        };
 
         // Append perf maps, unwind info and other metadata
-        if let Err(BenchmarkDataSaveError::MissingIntegration) = bench_data
-            .save_to(profile_folder, &self.get_perf_file_path(profile_folder))
-            .await
+        if let Err(BenchmarkDataSaveError::MissingIntegration) =
+            bench_data.save_to(profile_folder, perf_file_path).await
         {
             warn!(
                 "Perf is enabled, but failed to detect benchmarks. If you wish to disable this warning, set CODSPEED_PERF_ENABLED=false"
@@ -214,81 +248,31 @@ impl PerfRunner {
             return Ok(());
         }
 
-        let elapsed = start.elapsed();
-        debug!("Perf teardown took: {elapsed:?}");
+        debug!("Perf teardown took: {:?}", start.elapsed());
         Ok(())
-    }
-
-    async fn handle_fifo(
-        mut runner_fifo: RunnerFifo,
-        mut perf_fifo: PerfFifo,
-        child: &mut std::process::Child,
-    ) -> anyhow::Result<(BenchmarkData, std::process::ExitStatus)> {
-        let on_cmd = async |cmd: &FifoCommand| {
-            #[allow(deprecated)]
-            match cmd {
-                FifoCommand::StartBenchmark => {
-                    perf_fifo.start_events().await?;
-                }
-                FifoCommand::StopBenchmark => {
-                    perf_fifo.stop_events().await?;
-                }
-                FifoCommand::PingProfiler => {
-                    if perf_fifo.ping().await.is_err() {
-                        return Ok(Some(FifoCommand::Err));
-                    }
-                    return Ok(Some(FifoCommand::Ack));
-                }
-                FifoCommand::GetIntegrationMode => {
-                    return Ok(Some(FifoCommand::IntegrationModeResponse(
-                        IntegrationMode::Walltime,
-                    )));
-                }
-                _ => {}
-            }
-
-            Ok(None)
-        };
-
-        let (marker_result, fifo_data, exit_status) =
-            runner_fifo.handle_fifo_messages(child, on_cmd).await?;
-
-        Ok((
-            BenchmarkData {
-                fifo_data,
-                marker_result,
-            },
-            exit_status,
-        ))
-    }
-
-    fn get_perf_file_path<P: AsRef<Path>>(&self, profile_folder: P) -> PathBuf {
-        profile_folder.as_ref().join(PERF_PIPEDATA_FILE_NAME)
     }
 }
 
-pub struct BenchmarkData {
-    fifo_data: FifoBenchmarkData,
-    marker_result: ExecutionTimestamps,
+struct BenchmarkData<'a> {
+    fifo_data: &'a FifoBenchmarkData,
+    marker_result: &'a ExecutionTimestamps,
 }
 
 #[derive(Debug)]
-pub enum BenchmarkDataSaveError {
+enum BenchmarkDataSaveError {
     MissingIntegration,
     FailedToParsePerfFile,
     FailedToHarvestPerfMaps,
     FailedToHarvestJitDumps,
 }
 
-impl BenchmarkData {
-    pub async fn save_to<P: AsRef<std::path::Path>>(
+impl BenchmarkData<'_> {
+    async fn save_to(
         &self,
-        path: P,
-        perf_file_path: P,
+        path: &Path,
+        perf_file_path: &Path,
     ) -> Result<(), BenchmarkDataSaveError> {
-        self.marker_result.save_to(&path).unwrap();
-
-        let path_ref = path.as_ref();
+        self.marker_result.save_to(path).unwrap();
 
         let pid_filter = if self.fifo_data.is_exec_harness() {
             parse_perf_file::PidFilter::All
@@ -301,36 +285,31 @@ impl BenchmarkData {
         let MemmapRecordsOutput {
             loaded_modules_by_path,
             tracked_pids,
-        } = {
-            parse_perf_file::parse_for_memmap2(perf_file_path, pid_filter).map_err(|e| {
-                error!("Failed to parse perf file: {e}");
-                BenchmarkDataSaveError::FailedToParsePerfFile
-            })?
-        };
+        } = parse_perf_file::parse_for_memmap2(perf_file_path, pid_filter).map_err(|e| {
+            error!("Failed to parse perf file: {e}");
+            BenchmarkDataSaveError::FailedToParsePerfFile
+        })?;
 
         // Harvest the perf maps generated by python. This will copy the perf
         // maps from /tmp to the profile folder. We have to write our own perf
         // maps to these files AFTERWARDS, otherwise it'll be overwritten!
         debug!("Harvesting perf maps and jit dumps for pids: {tracked_pids:?}");
-        harvest_perf_maps_for_pids(path_ref, &tracked_pids)
+        harvest_perf_maps_for_pids(path, &tracked_pids)
             .await
             .map_err(|e| {
                 error!("Failed to harvest perf maps: {e}");
                 BenchmarkDataSaveError::FailedToHarvestPerfMaps
             })?;
         let jit_unwind_data_by_pid =
-            jit_dump::save_symbols_and_harvest_unwind_data_for_pids(path_ref, &tracked_pids)
+            jit_dump::save_symbols_and_harvest_unwind_data_for_pids(path, &tracked_pids)
                 .await
                 .map_err(|e| {
                     error!("Failed to harvest jit dumps: {e}");
                     BenchmarkDataSaveError::FailedToHarvestJitDumps
                 })?;
 
-        let artifacts = save_artifacts::save_artifacts(
-            path_ref,
-            &loaded_modules_by_path,
-            &jit_unwind_data_by_pid,
-        );
+        let artifacts =
+            save_artifacts::save_artifacts(path, &loaded_modules_by_path, &jit_unwind_data_by_pid);
 
         debug!("Saving metadata");
         #[allow(deprecated)]
@@ -353,7 +332,7 @@ impl BenchmarkData {
             debug_info_by_pid: Default::default(),
             ignored_modules: Default::default(),
         };
-        metadata.save_to(&path).unwrap();
+        metadata.save_to(path).unwrap();
 
         Ok(())
     }

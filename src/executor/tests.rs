@@ -150,20 +150,19 @@ mod valgrind {
     use super::helpers::*;
     use crate::executor::valgrind::executor::ValgrindExecutor;
 
-    async fn get_valgrind_executor() -> (SemaphorePermit<'static>, &'static ValgrindExecutor) {
-        static VALGRIND_EXECUTOR: OnceCell<ValgrindExecutor> = OnceCell::const_new();
+    async fn get_valgrind_executor() -> (SemaphorePermit<'static>, ValgrindExecutor) {
+        static VALGRIND_SETUP: OnceCell<()> = OnceCell::const_new();
 
-        let executor = VALGRIND_EXECUTOR
+        VALGRIND_SETUP
             .get_or_init(|| async {
                 let executor = ValgrindExecutor;
                 let system_info = SystemInfo::new().unwrap();
                 executor.setup(&system_info, None).await.unwrap();
-                executor
             })
             .await;
         let _lock = acquire_bpf_instrumentation_lock().await;
 
-        (_lock, executor)
+        (_lock, ValgrindExecutor)
     }
 
     fn valgrind_config(command: &str) -> ExecutorConfig {
@@ -176,7 +175,7 @@ mod valgrind {
     #[apply(test_cases)]
     #[test_log::test(tokio::test)]
     async fn test_valgrind_executor(#[case] cmd: &str) {
-        let (_lock, executor) = get_valgrind_executor().await;
+        let (_lock, mut executor) = get_valgrind_executor().await;
 
         let config = valgrind_config(cmd);
         // Unset GITHUB_ACTIONS to force LocalProvider which supports repository_override
@@ -190,7 +189,7 @@ mod valgrind {
     #[apply(env_test_cases)]
     #[test_log::test(tokio::test)]
     async fn test_valgrind_executor_with_env(#[case] env_case: (&str, &str)) {
-        let (_lock, executor) = get_valgrind_executor().await;
+        let (_lock, mut executor) = get_valgrind_executor().await;
 
         let (env_var, env_value) = env_case;
         temp_env::async_with_vars(
@@ -245,7 +244,7 @@ mod walltime {
     #[rstest::rstest]
     #[test_log::test(tokio::test)]
     async fn test_walltime_executor(#[case] cmd: &str, #[values(false, true)] enable_perf: bool) {
-        let (_permit, executor) = get_walltime_executor().await;
+        let (_permit, mut executor) = get_walltime_executor().await;
 
         let config = walltime_config(cmd, enable_perf);
         // Unset GITHUB_ACTIONS to force LocalProvider which supports repository_override
@@ -263,7 +262,7 @@ mod walltime {
         #[case] env_case: (&str, &str),
         #[values(false, true)] enable_perf: bool,
     ) {
-        let (_permit, executor) = get_walltime_executor().await;
+        let (_permit, mut executor) = get_walltime_executor().await;
 
         let (env_var, env_value) = env_case;
         temp_env::async_with_vars(
@@ -282,7 +281,7 @@ mod walltime {
     #[rstest::rstest]
     #[test_log::test(tokio::test)]
     async fn test_walltime_executor_in_working_dir(#[values(false, true)] enable_perf: bool) {
-        let (_permit, executor) = get_walltime_executor().await;
+        let (_permit, mut executor) = get_walltime_executor().await;
 
         let cmd = r#"
 if [ "$(basename "$(pwd)")" != "within_sub_directory" ]; then
@@ -314,7 +313,7 @@ fi
     #[rstest::rstest]
     #[test_log::test(tokio::test)]
     async fn test_walltime_executor_fails(#[values(false, true)] enable_perf: bool) {
-        let (_permit, executor) = get_walltime_executor().await;
+        let (_permit, mut executor) = get_walltime_executor().await;
 
         let config = walltime_config("exit 1", enable_perf);
         // Unset GITHUB_ACTIONS to force LocalProvider which supports repository_override
@@ -354,7 +353,7 @@ fi
     async fn test_exec_harness(#[case] cmd: &str) {
         use exec_harness::walltime::WalltimeExecutionArgs;
 
-        let (_permit, executor) = get_walltime_executor().await;
+        let (_permit, mut executor) = get_walltime_executor().await;
 
         let walltime_args = WalltimeExecutionArgs {
             warmup_time: Some("0s".to_string()),
@@ -420,7 +419,7 @@ mod memory {
     #[apply(test_cases)]
     #[test_log::test(tokio::test)]
     async fn test_memory_executor(#[case] cmd: &str) {
-        let (_permit, _lock, executor) = get_memory_executor().await;
+        let (_permit, _lock, mut executor) = get_memory_executor().await;
 
         // Unset GITHUB_ACTIONS to force LocalProvider which supports repository_override
         temp_env::async_with_vars(&[("GITHUB_ACTIONS", None::<&str>)], async {
@@ -434,7 +433,7 @@ mod memory {
     #[apply(env_test_cases)]
     #[test_log::test(tokio::test)]
     async fn test_memory_executor_with_env(#[case] env_case: (&str, &str)) {
-        let (_permit, _lock, executor) = get_memory_executor().await;
+        let (_permit, _lock, mut executor) = get_memory_executor().await;
 
         let (env_var, env_value) = env_case;
         temp_env::async_with_vars(
@@ -466,7 +465,7 @@ fi
         );
         let config = memory_config(&cmd);
         let (execution_context, _temp_dir) = create_test_setup(config).await;
-        let (_permit, _lock, executor) = get_memory_executor().await;
+        let (_permit, _lock, mut executor) = get_memory_executor().await;
 
         temp_env::async_with_vars(&[("PATH", Some(&modified_path))], async {
             executor.run(&execution_context, &None).await.unwrap();

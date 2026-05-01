@@ -63,9 +63,9 @@ pub trait Profiler {
     /// Post-run: harvest any side artifacts (perf maps, jit dumps, module
     /// info) and write the unified profile metadata into `profile_folder`.
     async fn finalize(
-        &mut self,
-        fifo_data: FifoBenchmarkData,
-        timestamps: ExecutionTimestamps,
+        &self,
+        fifo_data: &FifoBenchmarkData,
+        timestamps: &ExecutionTimestamps,
         profile_folder: &Path,
     ) -> anyhow::Result<()>;
 }
