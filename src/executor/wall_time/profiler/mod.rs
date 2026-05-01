@@ -4,6 +4,8 @@
 //! (perf, samply, instruments, ...) and produces a unified set of artifacts
 //! in the profile folder.
 
+pub mod perf;
+
 use crate::executor::ExecutorConfig;
 use crate::executor::ToolStatus;
 use crate::executor::helpers::command::CommandBuilder;

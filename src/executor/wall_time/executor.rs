@@ -1,6 +1,6 @@
 use super::helpers::validate_walltime_results;
 use super::isolation::wrap_with_isolation;
-use super::perf::PerfRunner;
+use super::profiler::perf::PerfRunner;
 use crate::executor::Executor;
 use crate::executor::ExecutorConfig;
 use crate::executor::ToolStatus;
@@ -124,7 +124,7 @@ impl Executor for WallTimeExecutor {
     fn tool_status(&self) -> Option<ToolStatus> {
         self.perf
             .as_ref()
-            .map(|_| super::perf::setup::get_perf_status())
+            .map(|_| super::profiler::perf::setup::get_perf_status())
     }
 
     fn support_level(&self, system_info: &SystemInfo) -> ExecutorSupport {
