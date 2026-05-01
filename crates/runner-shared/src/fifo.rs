@@ -31,7 +31,7 @@ pub enum MarkerType {
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IntegrationMode {
-    Perf,
+    Walltime,
     Simulation,
     Analysis,
 }

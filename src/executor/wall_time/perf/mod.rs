@@ -240,7 +240,7 @@ impl PerfRunner {
                 }
                 FifoCommand::GetIntegrationMode => {
                     return Ok(Some(FifoCommand::IntegrationModeResponse(
-                        IntegrationMode::Perf,
+                        IntegrationMode::Walltime,
                     )));
                 }
                 _ => {}
