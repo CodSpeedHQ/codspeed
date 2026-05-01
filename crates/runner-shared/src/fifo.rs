@@ -46,7 +46,7 @@ pub enum Command {
     StopBenchmark,
     Ack,
     #[deprecated(note = "Use `GetIntegrationMode` instead")]
-    PingPerf,
+    PingProfiler,
     SetIntegration {
         name: String,
         version: String,

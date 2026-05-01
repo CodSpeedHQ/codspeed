@@ -232,7 +232,7 @@ impl PerfRunner {
                 FifoCommand::StopBenchmark => {
                     perf_fifo.stop_events().await?;
                 }
-                FifoCommand::PingPerf => {
+                FifoCommand::PingProfiler => {
                     if perf_fifo.ping().await.is_err() {
                         return Ok(Some(FifoCommand::Err));
                     }
