@@ -134,6 +134,10 @@ pub fn get_compression_flags<S: AsRef<Path>>(perf_executable: S) -> Result<Optio
 
     if has_zstd {
         debug!("perf supports zstd compression");
+        if std::env::var("CODSPEED_PERF_DISABLE_COMPRESSION").is_ok() {
+            info!("CODSPEED_PERF_DISABLE_COMPRESSION is set, disabling perf compression");
+            return Ok(None);
+        }
         // 3 is a widely adopted default level (AWS Athena, Python, ...)
         Ok(Some("--compression-level=3".to_string()))
     } else {
