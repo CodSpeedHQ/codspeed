@@ -47,8 +47,8 @@ pub enum MessageFormat {
 impl RunArgs {
     /// Constructs a new `RunArgs` with default values for testing purposes
     pub fn test() -> Self {
-        use super::PerfRunArgs;
         use super::experimental::ExperimentalArgs;
+        use super::{PerfRunArgs, ProfilerRunArgs};
         use crate::RunnerMode;
 
         Self {
@@ -68,9 +68,12 @@ impl RunArgs {
                 go_runner_version: None,
                 show_full_output: false,
                 base: None,
-                perf_run_args: PerfRunArgs {
-                    enable_perf: false,
-                    perf_unwinding_mode: None,
+                profiler_run_args: ProfilerRunArgs {
+                    enable_profiler: false,
+                    enable_perf: None,
+                    perf: PerfRunArgs {
+                        perf_unwinding_mode: None,
+                    },
                 },
                 experimental: ExperimentalArgs {
                     experimental_fair_sched: false,
@@ -109,8 +112,8 @@ fn build_orchestrator_config(
         targets,
         modes,
         instruments,
-        perf_unwinding_mode: args.shared.perf_run_args.perf_unwinding_mode,
-        enable_perf: args.shared.perf_run_args.enable_perf,
+        perf_unwinding_mode: args.shared.profiler_run_args.perf.perf_unwinding_mode,
+        enable_profiler: args.shared.profiler_run_args.resolve_enable_profiler(),
         simulation_tool: args.shared.simulation_tool.unwrap_or_default(),
         profile_folder: args.shared.profile_folder,
         skip_upload: args.shared.skip_upload,

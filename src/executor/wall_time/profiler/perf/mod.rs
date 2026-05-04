@@ -243,7 +243,7 @@ impl Profiler for PerfProfiler {
             bench_data.save_to(profile_folder, perf_file_path).await
         {
             warn!(
-                "Perf is enabled, but failed to detect benchmarks. If you wish to disable this warning, set CODSPEED_PERF_ENABLED=false"
+                "Perf is enabled, but failed to detect benchmarks. If you wish to disable this warning, set CODSPEED_PROFILER_ENABLED=false"
             );
             return Ok(());
         }

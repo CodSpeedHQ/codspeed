@@ -58,7 +58,7 @@ pub struct OrchestratorConfig {
 
     pub modes: Vec<RunnerMode>,
     pub instruments: Instruments,
-    pub enable_perf: bool,
+    pub enable_profiler: bool,
     /// Stack unwinding mode for perf (if enabled)
     pub perf_unwinding_mode: Option<UnwindingMode>,
 
@@ -94,7 +94,7 @@ pub struct ExecutorConfig {
     pub command: String,
 
     pub instruments: Instruments,
-    pub enable_perf: bool,
+    pub enable_profiler: bool,
     /// Stack unwinding mode for perf (if enabled)
     pub perf_unwinding_mode: Option<UnwindingMode>,
 
@@ -174,7 +174,7 @@ impl OrchestratorConfig {
             working_directory: self.working_directory.clone(),
             command,
             instruments: self.instruments.clone(),
-            enable_perf: self.enable_perf,
+            enable_profiler: self.enable_profiler,
             perf_unwinding_mode: self.perf_unwinding_mode,
             simulation_tool: self.simulation_tool,
             skip_run: self.skip_run,
@@ -203,7 +203,7 @@ impl OrchestratorConfig {
             modes: vec![RunnerMode::Simulation],
             instruments: Instruments::test(),
             perf_unwinding_mode: None,
-            enable_perf: false,
+            enable_profiler: false,
             simulation_tool: SimulationTool::default(),
             profile_folder: None,
             skip_upload: false,

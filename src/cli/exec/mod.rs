@@ -75,8 +75,8 @@ fn build_orchestrator_config(
         targets: vec![target],
         modes,
         instruments: Instruments { mongodb: None }, // exec doesn't support MongoDB
-        perf_unwinding_mode: args.shared.perf_run_args.perf_unwinding_mode,
-        enable_perf: args.shared.perf_run_args.enable_perf,
+        perf_unwinding_mode: args.shared.profiler_run_args.perf.perf_unwinding_mode,
+        enable_profiler: args.shared.profiler_run_args.resolve_enable_profiler(),
         simulation_tool: args.shared.simulation_tool.unwrap_or_default(),
         profile_folder: args.shared.profile_folder,
         skip_upload: args.shared.skip_upload,

@@ -232,10 +232,10 @@ mod walltime {
         (permit, WallTimeExecutor::new())
     }
 
-    fn walltime_config(command: &str, enable_perf: bool) -> ExecutorConfig {
+    fn walltime_config(command: &str, enable_profiler: bool) -> ExecutorConfig {
         ExecutorConfig {
             command: command.to_string(),
-            enable_perf,
+            enable_profiler,
             ..ExecutorConfig::test()
         }
     }
@@ -243,10 +243,13 @@ mod walltime {
     #[apply(test_cases)]
     #[rstest::rstest]
     #[test_log::test(tokio::test)]
-    async fn test_walltime_executor(#[case] cmd: &str, #[values(false, true)] enable_perf: bool) {
+    async fn test_walltime_executor(
+        #[case] cmd: &str,
+        #[values(false, true)] enable_profiler: bool,
+    ) {
         let (_permit, mut executor) = get_walltime_executor().await;
 
-        let config = walltime_config(cmd, enable_perf);
+        let config = walltime_config(cmd, enable_profiler);
         // Unset GITHUB_ACTIONS to force LocalProvider which supports repository_override
         temp_env::async_with_vars(&[("GITHUB_ACTIONS", None::<&str>)], async {
             let (execution_context, _temp_dir) = create_test_setup(config).await;
@@ -260,7 +263,7 @@ mod walltime {
     #[test_log::test(tokio::test)]
     async fn test_walltime_executor_with_env(
         #[case] env_case: (&str, &str),
-        #[values(false, true)] enable_perf: bool,
+        #[values(false, true)] enable_profiler: bool,
     ) {
         let (_permit, mut executor) = get_walltime_executor().await;
 
@@ -269,7 +272,7 @@ mod walltime {
             &[(env_var, Some(env_value)), ("GITHUB_ACTIONS", None)],
             async {
                 let cmd = env_var_validation_script(env_var, env_value);
-                let config = walltime_config(&cmd, enable_perf);
+                let config = walltime_config(&cmd, enable_profiler);
                 let (execution_context, _temp_dir) = create_test_setup(config).await;
                 executor.run(&execution_context, &None).await.unwrap();
             },
@@ -280,7 +283,7 @@ mod walltime {
     // Ensure that the working directory is used correctly
     #[rstest::rstest]
     #[test_log::test(tokio::test)]
-    async fn test_walltime_executor_in_working_dir(#[values(false, true)] enable_perf: bool) {
+    async fn test_walltime_executor_in_working_dir(#[values(false, true)] enable_profiler: bool) {
         let (_permit, mut executor) = get_walltime_executor().await;
 
         let cmd = r#"
@@ -290,7 +293,7 @@ if [ "$(basename "$(pwd)")" != "within_sub_directory" ]; then
 fi
 "#;
 
-        let mut config = walltime_config(cmd, enable_perf);
+        let mut config = walltime_config(cmd, enable_profiler);
 
         let dir = TempDir::new().unwrap();
         config.working_directory = Some(
@@ -312,10 +315,10 @@ fi
     // Ensure that commands that fail actually fail
     #[rstest::rstest]
     #[test_log::test(tokio::test)]
-    async fn test_walltime_executor_fails(#[values(false, true)] enable_perf: bool) {
+    async fn test_walltime_executor_fails(#[values(false, true)] enable_profiler: bool) {
         let (_permit, mut executor) = get_walltime_executor().await;
 
-        let config = walltime_config("exit 1", enable_perf);
+        let config = walltime_config("exit 1", enable_profiler);
         // Unset GITHUB_ACTIONS to force LocalProvider which supports repository_override
         temp_env::async_with_vars(&[("GITHUB_ACTIONS", None::<&str>)], async {
             let (execution_context, _temp_dir) = create_test_setup(config).await;

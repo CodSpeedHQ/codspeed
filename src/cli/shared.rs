@@ -109,7 +109,7 @@ pub struct ExecAndRunSharedArgs {
     pub base: Option<String>,
 
     #[command(flatten)]
-    pub perf_run_args: PerfRunArgs,
+    pub profiler_run_args: ProfilerRunArgs,
 
     #[command(flatten)]
     pub experimental: ExperimentalArgs,
@@ -151,15 +151,39 @@ pub enum UnwindingMode {
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct PerfRunArgs {
-    /// Enable the linux perf profiler to collect granular performance data.
+pub struct ProfilerRunArgs {
+    /// Enable a profiler to collect granular performance data.
     /// This is only supported on Linux.
-    #[arg(long, env = "CODSPEED_PERF_ENABLED", default_value_t = true)]
-    pub enable_perf: bool,
+    #[arg(long, env = "CODSPEED_PROFILER_ENABLED", default_value_t = true)]
+    pub enable_profiler: bool,
 
+    /// Deprecated alias for --enable-profiler / CODSPEED_PROFILER_ENABLED.
+    #[arg(long, env = "CODSPEED_PERF_ENABLED", hide = true)]
+    pub enable_perf: Option<bool>,
+
+    #[command(flatten)]
+    pub perf: PerfRunArgs,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct PerfRunArgs {
     /// The unwinding mode that should be used with perf to collect the call stack.
     #[arg(long, env = "CODSPEED_PERF_UNWINDING_MODE")]
     pub perf_unwinding_mode: Option<UnwindingMode>,
+}
+
+impl ProfilerRunArgs {
+    /// Resolves the effective `enable_profiler` value, honoring the deprecated
+    /// `--enable-perf` / `CODSPEED_PERF_ENABLED` flag with a warning.
+    pub fn resolve_enable_profiler(&self) -> bool {
+        let Some(legacy) = self.enable_perf else {
+            return self.enable_profiler;
+        };
+        log::warn!(
+            "CODSPEED_PERF_ENABLED / --enable-perf is deprecated; use CODSPEED_PROFILER_ENABLED / --enable-profiler instead."
+        );
+        legacy
+    }
 }
 
 /// Parser for go-runner version that validates semver format

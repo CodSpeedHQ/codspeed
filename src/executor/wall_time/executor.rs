@@ -176,7 +176,7 @@ impl Executor for WallTimeExecutor {
         } = self;
 
         let status = match profiler.as_mut() {
-            Some(profiler) if execution_context.config.enable_perf => {
+            Some(profiler) if execution_context.config.enable_profiler => {
                 run_with_profiler(
                     profiler.as_mut(),
                     cmd_builder,
