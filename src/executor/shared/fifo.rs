@@ -6,11 +6,11 @@ use runner_shared::artifacts::ExecutionTimestamps;
 use runner_shared::fifo::{Command as FifoCommand, MarkerType};
 use runner_shared::fifo::{RUNNER_ACK_FIFO, RUNNER_CTL_FIFO};
 use std::cmp::Ordering;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::{collections::HashSet, time::Duration};
 use tokio::io::AsyncWriteExt;
 use tokio::net::unix::pid_t;
-use tokio::net::unix::pipe::OpenOptions as TokioPipeOpenOptions;
 use tokio::net::unix::pipe::Receiver as TokioPipeReader;
 use tokio::net::unix::pipe::Sender as TokioPipeSender;
 use tokio::time::error::Elapsed;
@@ -38,8 +38,8 @@ impl GenericFifo {
         create_fifo(ctl_fifo)?;
         create_fifo(ack_fifo)?;
 
-        let ctl_sender = get_pipe_open_options().open_sender(ctl_fifo)?;
-        let ack_reader = get_pipe_open_options().open_receiver(ack_fifo)?;
+        let ctl_sender = open_fifo_sender(ctl_fifo)?;
+        let ack_reader = open_fifo_receiver(ack_fifo)?;
 
         Ok(Self {
             ctl_path: ctl_fifo.to_path_buf(),
@@ -85,12 +85,27 @@ pub struct RunnerFifo {
     ctl_reader: FramedRead<TokioPipeReader, LengthDelimitedCodec>,
 }
 
-fn get_pipe_open_options() -> TokioPipeOpenOptions {
-    #[cfg_attr(not(target_os = "linux"), allow(unused_mut))]
-    let mut options = TokioPipeOpenOptions::new();
-    #[cfg(target_os = "linux")]
-    options.read_write(true);
-    options
+/// Open a FIFO in O_RDWR | O_NONBLOCK mode.
+///
+/// Tokio's `OpenOptions::read_write(true)` is Linux-only, but the underlying O_RDWR
+/// trick works on every Unix: opening a FIFO read-write avoids the deadlock where
+/// `open(O_WRONLY)` blocks (or returns ENXIO under O_NONBLOCK) until a reader is
+/// connected, and vice versa. Since we open both ends before the peer process
+/// (the integration) is even spawned, we need this on macOS too.
+fn open_fifo_rdwr(path: &Path) -> anyhow::Result<std::fs::File> {
+    Ok(std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(path)?)
+}
+
+fn open_fifo_sender(path: &Path) -> anyhow::Result<TokioPipeSender> {
+    Ok(TokioPipeSender::from_file(open_fifo_rdwr(path)?)?)
+}
+
+fn open_fifo_receiver(path: &Path) -> anyhow::Result<TokioPipeReader> {
+    Ok(TokioPipeReader::from_file(open_fifo_rdwr(path)?)?)
 }
 
 impl RunnerFifo {
@@ -102,8 +117,8 @@ impl RunnerFifo {
         create_fifo(ctl_path)?;
         create_fifo(ack_path)?;
 
-        let ack_fifo = get_pipe_open_options().open_sender(ack_path)?;
-        let ctl_fifo = get_pipe_open_options().open_receiver(ctl_path)?;
+        let ack_fifo = open_fifo_sender(ack_path)?;
+        let ctl_fifo = open_fifo_receiver(ctl_path)?;
 
         let codec = LengthDelimitedCodec::builder()
             .length_field_length(4)
@@ -288,7 +303,7 @@ mod tests {
         let ack_path = temp_dir.path().join("ack_fifo");
 
         let mut fifo = RunnerFifo::open(&ctl_path, &ack_path).unwrap();
-        let mut writer = get_pipe_open_options().open_sender(&ctl_path).unwrap();
+        let mut writer = open_fifo_sender(&ctl_path).unwrap();
 
         let cmd = FifoCommand::Ack;
         let payload = bincode::serialize(&cmd).unwrap();
