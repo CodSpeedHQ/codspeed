@@ -2,6 +2,7 @@ use super::helpers::validate_walltime_results;
 use super::isolation::wrap_with_isolation;
 use super::profiler::Profiler;
 use super::profiler::perf::PerfProfiler;
+use super::profiler::samply::SamplyProfiler;
 use crate::executor::Executor;
 use crate::executor::ExecutorConfig;
 use crate::executor::ToolStatus;
@@ -91,6 +92,8 @@ impl WallTimeExecutor {
     pub fn new() -> Self {
         let profiler: Option<Box<dyn Profiler>> = if cfg!(target_os = "linux") {
             Some(Box::new(PerfProfiler::new()))
+        } else if cfg!(target_os = "macos") {
+            Some(Box::new(SamplyProfiler::new()))
         } else {
             None
         };

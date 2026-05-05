@@ -5,6 +5,7 @@
 //! in the profile folder.
 
 pub mod perf;
+pub mod samply;
 
 const WALLTIME_METADATA_CURRENT_VERSION: u64 = 1;
 
