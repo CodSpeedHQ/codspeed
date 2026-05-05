@@ -111,7 +111,7 @@ impl PerfRunner {
         } else if command_has_executable(&config.command, &["pytest", "uv", "python", "python3"]) {
             // Note that the higher the stack size, the larger the file, although it is mitigated
             // by zstd compression
-            (UnwindingMode::Dwarf, Some(16 * 1024))
+            (UnwindingMode::Dwarf, Some(32 * 1024))
         } else {
             // Default to dwarf unwinding since it works well with most binaries.
             debug!("No call graph mode detected, defaulting to dwarf");
