@@ -124,6 +124,36 @@ fn save_symbols(
     mappings_by_pid
 }
 
+fn is_libc_path(path: &Path) -> bool {
+    let Some(filename) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    // Match libc.so.6, libc-2.31.so, etc. but not unrelated libs like libc-client.so
+    filename.starts_with("libc.so")
+        || (filename.starts_with("libc-")
+            && filename.as_bytes().get(5).is_some_and(u8::is_ascii_digit))
+}
+
+fn warn_missing_libc_debug_info(
+    loaded_modules_by_path: &HashMap<PathBuf, LoadedModule>,
+    debug_info_by_elf_path: &HashMap<PathBuf, ModuleDebugInfo>,
+) {
+    for (path, loaded_module) in loaded_modules_by_path {
+        if !is_libc_path(path) || loaded_module.module_symbols.is_none() {
+            continue;
+        }
+        if debug_info_by_elf_path.contains_key(path) {
+            continue;
+        }
+        warn!(
+            "libc debug info not found for {}. Flamegraphs may contain \
+             unsymbolicated libc frames. Install debug symbols \
+             (e.g., `apt install libc6-dbg`) to fix this.",
+            path.display()
+        );
+    }
+}
+
 /// Compute debug info from symbols and build per-pid debug info mappings.
 fn save_debug_info(
     loaded_modules_by_path: &HashMap<PathBuf, LoadedModule>,
@@ -135,6 +165,8 @@ fn save_debug_info(
     debug!("Saving debug_info");
 
     let debug_info_by_elf_path = debug_info_by_path(loaded_modules_by_path);
+
+    warn_missing_libc_debug_info(loaded_modules_by_path, &debug_info_by_elf_path);
 
     for path in debug_info_by_elf_path.keys() {
         get_or_insert_key(path_to_key, path);
