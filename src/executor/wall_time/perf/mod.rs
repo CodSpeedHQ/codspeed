@@ -300,6 +300,7 @@ impl BenchmarkData {
         let MemmapRecordsOutput {
             loaded_modules_by_path,
             tracked_pids,
+            jit_dump_paths_by_pid,
         } = {
             parse_perf_file::parse_for_memmap2(perf_file_path, pid_filter).map_err(|e| {
                 error!("Failed to parse perf file: {e}");
@@ -317,13 +318,15 @@ impl BenchmarkData {
                 error!("Failed to harvest perf maps: {e}");
                 BenchmarkDataSaveError::FailedToHarvestPerfMaps
             })?;
-        let jit_unwind_data_by_pid =
-            jit_dump::save_symbols_and_harvest_unwind_data_for_pids(path_ref, &tracked_pids)
-                .await
-                .map_err(|e| {
-                    error!("Failed to harvest jit dumps: {e}");
-                    BenchmarkDataSaveError::FailedToHarvestJitDumps
-                })?;
+        let jit_unwind_data_by_pid = jit_dump::save_symbols_and_harvest_unwind_data_for_pids(
+            path_ref,
+            &jit_dump_paths_by_pid,
+        )
+        .await
+        .map_err(|e| {
+            error!("Failed to harvest jit dumps: {e}");
+            BenchmarkDataSaveError::FailedToHarvestJitDumps
+        })?;
 
         let artifacts = save_artifacts::save_artifacts(
             path_ref,
