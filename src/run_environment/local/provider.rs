@@ -5,7 +5,8 @@ use uuid::Uuid;
 
 use crate::api_client::{
     CodSpeedAPIClient, GetOrCreateProjectRepositoryPayload, GetOrCreateProjectRepositoryVars,
-    GetRepositoryPayload, GetRepositoryVars,
+    SessionAndRepositoryOverview, SessionAndRepositoryOverviewError,
+    SessionAndRepositoryOverviewVars,
 };
 use crate::cli::run::helpers::{find_repository_root, parse_repository_from_remote};
 use crate::executor::config::OrchestratorConfig;
@@ -21,6 +22,14 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 
 static FAKE_COMMIT_REF: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+/// Prints user-facing messages emitted before the logger is initialized.
+/// We do this because we initialize the logger after creating the provider.
+/// It is error-prone, a better solution would be to setup a minimal logger that gets flushed once
+/// the actual logger is initialized, but it is good enough for now.
+fn log_pre_init(message: &str) {
+    eprintln!("{message}");
+}
 
 #[derive(Debug)]
 pub struct LocalProvider {
@@ -51,6 +60,8 @@ struct ResolvedRepository {
 }
 
 impl LocalProvider {
+    /// Create a new `LocalProvider`, resolving repository information from git and/or the API as needed.
+    /// Since the logger is not setup yet, we use `log_pre_init` for any user-facing messages during resolution.
     pub async fn new(
         config: &OrchestratorConfig,
         api_client: &impl LocalProviderApiClient,
@@ -63,10 +74,10 @@ impl LocalProvider {
             .map(|ctx| ctx.root_path.clone())
             .unwrap_or_else(|| current_dir.to_string_lossy().to_string());
 
-        let resolved = if !config.skip_upload {
-            Self::resolve_repository(config, api_client, git_context.as_ref()).await?
-        } else {
+        let resolved = if config.skip_upload {
             Self::dummy_resolved_repository(git_context.as_ref())
+        } else {
+            Self::resolve_repository(config, api_client, git_context.as_ref()).await?
         };
 
         let expected_run_parts_count = config.expected_run_parts_count();
@@ -109,16 +120,15 @@ impl LocalProvider {
         }
     }
 
-    /// Resolve repository information from override, git remote, or API fallback
+    /// Resolve repository information from override, git remote, or API fallback.
     ///
-    /// When there is no explicit repository override, this flow also makes sure the user is logged in with a valid token
-    /// 1. Repo found
-    ///    a. Logged in: user is set, repositoryOverview is set — repo found
-    ///    b. NOT logged in: user is null, repositoryOverview is set => bails with "session expired"
+    /// For the override and git-remote paths, this also validates the token
+    /// up front (auth + `CREATE_LOCAL_RUN` access on the target repo) so an
+    /// invalid or mis-scoped token surfaces before any benchmark runs rather
+    /// than as a 401 from the upload endpoint.
     ///
-    /// 2. REPOSITORY_NOT_FOUND => falls through to `get_or_create_project_repository`
-    ///    a. Logged in: `get_or_create_project_repository` succeeds
-    ///    b. NOT logged in: `get_or_create_project_repository` fails, bail with "session expired"
+    /// The project-repository fallback skips the explicit auth check and
+    /// relies on `get_or_create_project_repository` to surface auth errors.
     async fn resolve_repository(
         config: &OrchestratorConfig,
         api_client: &impl LocalProviderApiClient,
@@ -126,43 +136,80 @@ impl LocalProvider {
     ) -> Result<ResolvedRepository> {
         // Priority 1: Use explicit repository override
         if let Some(repo_override) = &config.repository_override {
-            return Self::resolve_from_override(repo_override, git_context);
+            return Self::resolve_from_override(api_client, repo_override, git_context).await;
         }
 
         // Priority 2: Try to use git remote if repository exists in CodSpeed
         if let Some(ctx) = git_context {
             if let Some(resolved) =
-                Self::try_resolve_from_codspeed_repository(api_client, ctx).await?
+                Self::try_resolve_from_detected_repository(api_client, ctx).await?
             {
                 return Ok(resolved);
             }
+        } else {
+            log_pre_init(&format!(
+                "Not inside a git repository, the run will be uploaded to a {} CodSpeed project not associated with any repository.",
+                crate::cli::exec::DEFAULT_REPOSITORY_NAME
+            ));
         }
 
         // Priority 3: Fallback to project repository
         Self::resolve_as_project_repository(api_client).await
     }
 
-    /// Resolve repository from explicit override configuration
-    fn resolve_from_override(
+    /// Resolve repository from explicit override configuration, validating
+    /// the token has `CREATE_LOCAL_RUN` access on the target repo.
+    async fn resolve_from_override(
+        api_client: &impl LocalProviderApiClient,
         repo_override: &RepositoryOverride,
         git_context: Option<&GitContext>,
     ) -> Result<ResolvedRepository> {
+        let overview = Self::fetch_repository_overview(
+            api_client,
+            &repo_override.owner,
+            &repo_override.repository,
+            Some(&repo_override.repository_provider),
+        )
+        .await?;
+
+        let Some(overview) = overview else {
+            bail!(
+                "Explicitly requested repository {}/{} not found on CodSpeed. Is the repository enabled on CodSpeed?\n\
+                Check out https://codspeed.io/docs for instructions on how to enable CodSpeed.
+                You can also run without the repository override to automatically detect repositories, and fallback to an isolated \
+                CodSpeed run if needed.",
+                repo_override.owner,
+                repo_override.repository,
+            );
+        };
+
+        if !overview.has_write_access {
+            bail!(
+                "You are not authorized to create runs on {}/{}.\n\
+                Ask a repository to give you write access to the repository.
+                You can also run without the repository override to automatically fallback to an isolated CodSpeed run.",
+                overview.owner,
+                overview.name,
+            );
+        }
+
         let (ref_, head_ref) = git_context
             .map(|ctx| Self::get_git_ref_info(&ctx.root_path))
             .transpose()?
             .unwrap_or_else(|| (FAKE_COMMIT_REF.to_string(), None));
 
         Ok(ResolvedRepository {
-            provider: repo_override.repository_provider.clone(),
-            owner: repo_override.owner.clone(),
-            name: repo_override.repository.clone(),
+            provider: overview.provider,
+            owner: overview.owner,
+            name: overview.name,
             ref_,
             head_ref,
         })
     }
 
-    /// Try to resolve repository from git remote, validating it exists in CodSpeed
-    async fn try_resolve_from_codspeed_repository(
+    /// Try to resolve repository from git remote, validating it exists in
+    /// CodSpeed and that the token has `CREATE_LOCAL_RUN` access.
+    async fn try_resolve_from_detected_repository(
         api_client: &impl LocalProviderApiClient,
         git_context: &GitContext,
     ) -> Result<Option<ResolvedRepository>> {
@@ -175,36 +222,62 @@ impl LocalProvider {
         let parsed = parse_repository_from_remote(remote.url().unwrap())?;
         let (provider, owner, name) = (parsed.provider, parsed.owner, parsed.name);
 
-        // Check if repository exists in CodSpeed
-        // Note: we only check existence here, we don't check that
-        // - the provider is properly setup
-        // - the provider has access to the repository
-        //
-        // If the repo exists, but these two conditions are not satisfied, the upload will fail
-        // later on, but by checking repository existence here we catch most of the cases where the
-        // user would run their benchmarks, but fail to upload afterwards.
-        let exists = api_client
-            .get_repository(GetRepositoryVars {
-                owner: owner.clone(),
-                name: name.clone(),
-                provider: provider.clone(),
-            })
-            .await?
-            .is_some();
+        let Some(overview) =
+            Self::fetch_repository_overview(api_client, &owner, &name, Some(&provider)).await?
+        else {
+            log_pre_init(&format!(
+                "Repostory {owner}/{name} not found on CodSpeed.\n\
+                Check out https://codspeed.io/docs for instructions on how to enable CodSpeed.\n\
+                Falling back to an isolated CodSpeed run.",
+            ));
+            return Ok(None);
+        };
 
-        if !exists {
+        if !overview.has_write_access {
+            log_pre_init(&format!(
+                "You are not authorized to create runs on {}/{}.\n\
+                To fix this, ask a repository admin to give you write access to the repository.\n\
+                Falling back to an isolated CodSpeed run.",
+                overview.owner, overview.name,
+            ));
             return Ok(None);
         }
 
         let (ref_, head_ref) = Self::get_git_ref_info(&git_context.root_path)?;
 
         Ok(Some(ResolvedRepository {
-            provider,
-            owner,
-            name,
+            provider: overview.provider,
+            owner: overview.owner,
+            name: overview.name,
             ref_,
             head_ref,
         }))
+    }
+
+    /// Run the combined session+repository query, mapping the auth error to
+    /// the standard "re-authenticate" message and folding "repo not found"
+    /// into `Ok(None)`.
+    async fn fetch_repository_overview(
+        api_client: &impl LocalProviderApiClient,
+        owner: &str,
+        name: &str,
+        provider: Option<&RepositoryProvider>,
+    ) -> Result<Option<crate::api_client::RepositoryOverviewPayload>> {
+        let payload = api_client
+            .session_and_repository_overview(SessionAndRepositoryOverviewVars {
+                owner: owner.to_string(),
+                name: name.to_string(),
+                provider: provider.cloned(),
+            })
+            .await
+            .map_err(|err| match err {
+                SessionAndRepositoryOverviewError::Unauthenticated => {
+                    anyhow!("Invalid token. Run `codspeed auth login` to re-authenticate.")
+                }
+                SessionAndRepositoryOverviewError::Other(err) => err,
+            })?;
+
+        Ok(payload.repository_overview)
     }
 
     /// Resolve repository by creating/getting a project repository
@@ -317,8 +390,10 @@ impl RunEnvironmentProvider for LocalProvider {
 
 #[async_trait(?Send)]
 pub trait LocalProviderApiClient {
-    async fn get_repository(&self, vars: GetRepositoryVars)
-    -> Result<Option<GetRepositoryPayload>>;
+    async fn session_and_repository_overview(
+        &self,
+        vars: SessionAndRepositoryOverviewVars,
+    ) -> std::result::Result<SessionAndRepositoryOverview, SessionAndRepositoryOverviewError>;
 
     async fn get_or_create_project_repository(
         &self,
@@ -328,11 +403,11 @@ pub trait LocalProviderApiClient {
 
 #[async_trait(?Send)]
 impl LocalProviderApiClient for CodSpeedAPIClient {
-    async fn get_repository(
+    async fn session_and_repository_overview(
         &self,
-        vars: GetRepositoryVars,
-    ) -> Result<Option<GetRepositoryPayload>> {
-        self.get_repository(vars).await
+        vars: SessionAndRepositoryOverviewVars,
+    ) -> std::result::Result<SessionAndRepositoryOverview, SessionAndRepositoryOverviewError> {
+        self.session_and_repository_overview(vars).await
     }
 
     async fn get_or_create_project_repository(
@@ -382,8 +457,14 @@ mod tests {
         format!("{}/", dir.to_string_lossy())
     }
 
-    /// A mock API client that returns a found repository for `get_repository`
-    /// and a fixed project repository for `get_or_create_project_repository`.
+    use crate::api_client::{RepositoryOverviewPayload, SessionPayload};
+
+    fn fake_session() -> SessionPayload {
+        SessionPayload { user: None }
+    }
+
+    /// A mock API client that returns a found repository (with write access)
+    /// from `session_and_repository_overview`.
     struct MockApiClientRepoFound;
 
     impl MockApiClientRepoFound {
@@ -394,13 +475,20 @@ mod tests {
 
     #[async_trait(?Send)]
     impl LocalProviderApiClient for MockApiClientRepoFound {
-        async fn get_repository(
+        async fn session_and_repository_overview(
             &self,
-            _vars: GetRepositoryVars,
-        ) -> Result<Option<GetRepositoryPayload>> {
-            Ok(Some(GetRepositoryPayload {
-                id: "my-repo-id".into(),
-            }))
+            vars: SessionAndRepositoryOverviewVars,
+        ) -> std::result::Result<SessionAndRepositoryOverview, SessionAndRepositoryOverviewError>
+        {
+            Ok(SessionAndRepositoryOverview {
+                session: fake_session(),
+                repository_overview: Some(RepositoryOverviewPayload {
+                    owner: vars.owner,
+                    name: vars.name,
+                    provider: vars.provider.unwrap_or(RepositoryProvider::GitHub),
+                    has_write_access: true,
+                }),
+            })
         }
 
         async fn get_or_create_project_repository(
@@ -411,8 +499,8 @@ mod tests {
         }
     }
 
-    /// A mock API client that returns no repository for `get_repository`,
-    /// falling back to a fixed project repository.
+    /// A mock API client that returns no repository, falling back to a fixed
+    /// project repository.
     struct MockApiClientRepoNotFound;
 
     impl MockApiClientRepoNotFound {
@@ -423,11 +511,15 @@ mod tests {
 
     #[async_trait(?Send)]
     impl LocalProviderApiClient for MockApiClientRepoNotFound {
-        async fn get_repository(
+        async fn session_and_repository_overview(
             &self,
-            _vars: GetRepositoryVars,
-        ) -> Result<Option<GetRepositoryPayload>> {
-            Ok(None)
+            _vars: SessionAndRepositoryOverviewVars,
+        ) -> std::result::Result<SessionAndRepositoryOverview, SessionAndRepositoryOverviewError>
+        {
+            Ok(SessionAndRepositoryOverview {
+                session: fake_session(),
+                repository_overview: None,
+            })
         }
 
         async fn get_or_create_project_repository(

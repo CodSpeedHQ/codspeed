@@ -1,0 +1,8 @@
+query Session {
+  session {
+    user {
+      login
+      provider
+    }
+  }
+}

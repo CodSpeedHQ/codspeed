@@ -1,6 +1,0 @@
-query CurrentUser {
-  user {
-    login
-    provider
-  }
-}

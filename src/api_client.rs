@@ -35,6 +35,12 @@ impl CodSpeedAPIClient {
         }
     }
 
+    /// Returns a client that uses `token` for authentication, regardless of
+    /// the token this client was built with.
+    pub fn with_token(&self, token: String) -> Self {
+        Self::new(Some(token), self.api_url.clone())
+    }
+
     /// The token this client currently authenticates with, if any.
     ///
     /// Note: this is not necessarily the token the client was built with —
@@ -302,47 +308,141 @@ nest! {
     }
 }
 
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct GetRepositoryVars {
-    pub owner: String,
-    pub name: String,
-    pub provider: RepositoryProvider,
-}
-
 nest! {
     #[derive(Debug, Deserialize, Serialize, Clone)]*
     #[serde(rename_all = "camelCase")]*
-    struct GetRepositoryData {
-        repository_overview: Option<pub struct GetRepositoryPayload {
-            pub id: String,
-        }>,
-        user: Option<pub struct GetRepositoryUser {
-            pub id: String,
-        }>,
-    }
-}
-
-nest! {
-    #[derive(Debug, Deserialize, Serialize)]*
-    #[serde(rename_all = "camelCase")]*
-    struct CurrentUserData {
-        user: Option<pub struct CurrentUserPayload {
+    pub struct SessionPayload {
+        pub user: Option<pub struct SessionUser {
             pub login: String,
             pub provider: RepositoryProvider,
         }>,
     }
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionData {
+    session: SessionPayload,
+}
+
+/// Outcome of [`CodSpeedAPIClient::session`]. The CLI distinguishes
+/// "no/expired token" from any other error so it can render a clear message.
+pub enum SessionError {
+    /// Token is missing or no longer valid.
+    Unauthenticated,
+    /// Anything else (network, server error, etc).
+    Other(anyhow::Error),
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryOverviewPayload {
+    pub owner: String,
+    pub name: String,
+    pub provider: RepositoryProvider,
+    pub has_write_access: bool,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionAndRepositoryOverviewVars {
+    pub owner: String,
+    pub name: String,
+    pub provider: Option<RepositoryProvider>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionAndRepositoryOverviewData {
+    session: SessionPayload,
+    repository_overview: Option<RepositoryOverviewPayload>,
+}
+
+pub struct SessionAndRepositoryOverview {
+    pub session: SessionPayload,
+    pub repository_overview: Option<RepositoryOverviewPayload>,
+}
+
+/// Outcome of [`CodSpeedAPIClient::session_and_repository_overview`]. A
+/// missing repository is folded into the success path (`repository_overview`
+/// becomes `None`); only a missing/expired token or a transport-level
+/// failure surfaces here.
+pub enum SessionAndRepositoryOverviewError {
+    Unauthenticated,
+    Other(anyhow::Error),
+}
+
 impl CodSpeedAPIClient {
-    pub async fn get_current_user(&self) -> Result<Option<CurrentUserPayload>> {
+    /// Introspect the token currently configured on this client.
+    ///
+    /// Returns the linked user (when applicable). Used to verify a token's
+    /// validity without conflating it with repository-level access checks —
+    /// those are done with [`Self::session_and_repository_overview`].
+    pub async fn session(&self) -> std::result::Result<SessionPayload, SessionError> {
         let response = self
             .gql_client
-            .query_unwrap::<CurrentUserData>(include_str!("queries/CurrentUser.gql"))
+            .query_unwrap::<SessionData>(include_str!("queries/Session.gql"))
             .await;
         match response {
-            Ok(data) => Ok(data.user),
-            Err(err) => bail!("Failed to get current user: {err}"),
+            Ok(data) => Ok(data.session),
+            Err(err) if err.contains_error_code("UNAUTHENTICATED") => {
+                Err(SessionError::Unauthenticated)
+            }
+            Err(err) => Err(SessionError::Other(anyhow!(
+                "Failed to validate token: {err}"
+            ))),
+        }
+    }
+
+    /// Validate the token and look up a candidate repository in one
+    /// round-trip. Used by `auth status` (with a detected git remote) and
+    /// the up-front check in `run`/`exec`.
+    ///
+    /// `repositoryOverview` is nullable in the schema, so a missing
+    /// repository surfaces as `repository_overview: None` on the success
+    /// path. The server still returns a `REPOSITORY_NOT_FOUND` error in
+    /// that case to avoid leaking existence info, but the partial-data
+    /// payload carries the `session` field — we deserialize it from the
+    /// error and treat the call as successful for the session's purposes.
+    pub async fn session_and_repository_overview(
+        &self,
+        vars: SessionAndRepositoryOverviewVars,
+    ) -> std::result::Result<SessionAndRepositoryOverview, SessionAndRepositoryOverviewError> {
+        let response = self
+            .gql_client
+            .query_with_vars_unwrap::<
+                SessionAndRepositoryOverviewData,
+                SessionAndRepositoryOverviewVars,
+            >(
+                include_str!("queries/SessionAndRepositoryOverview.gql"),
+                vars,
+            )
+            .await;
+        match response {
+            Ok(data) => Ok(SessionAndRepositoryOverview {
+                session: data.session,
+                repository_overview: data.repository_overview,
+            }),
+            Err(err) if err.contains_error_code("UNAUTHENTICATED") => {
+                Err(SessionAndRepositoryOverviewError::Unauthenticated)
+            }
+            Err(err) if err.contains_error_code("REPOSITORY_NOT_FOUND") => {
+                match err.data::<SessionAndRepositoryOverviewData>() {
+                    Some(Ok(data)) => Ok(SessionAndRepositoryOverview {
+                        session: data.session,
+                        repository_overview: None,
+                    }),
+                    Some(Err(decode_err)) => Err(SessionAndRepositoryOverviewError::Other(
+                        anyhow!("Failed to deserialize partial response data: {decode_err}"),
+                    )),
+                    None => Err(SessionAndRepositoryOverviewError::Other(anyhow!(
+                        "Server returned REPOSITORY_NOT_FOUND without partial data: {err}"
+                    ))),
+                }
+            }
+            Err(err) => Err(SessionAndRepositoryOverviewError::Other(anyhow!(
+                "Failed to validate token and repository: {err}"
+            ))),
         }
     }
 
@@ -440,38 +540,6 @@ impl CodSpeedAPIClient {
                 bail!("Your session has expired, please login again using `codspeed auth login`")
             }
             Err(err) => bail!("Failed to get or create project repository: {err}"),
-        }
-    }
-
-    /// Check if a repository exists in CodSpeed.
-    /// Returns Some(payload) if the repository exists, None otherwise.
-    pub async fn get_repository(
-        &self,
-        vars: GetRepositoryVars,
-    ) -> Result<Option<GetRepositoryPayload>> {
-        let response = self
-            .gql_client
-            .query_with_vars_unwrap::<GetRepositoryData, GetRepositoryVars>(
-                include_str!("queries/GetRepository.gql"),
-                vars.clone(),
-            )
-            .await;
-        match response {
-            Ok(response) => {
-                if response.user.is_none() {
-                    bail!(
-                        "Your session has expired, please login again using `codspeed auth login`"
-                    );
-                }
-                Ok(response.repository_overview)
-            }
-            Err(err) if err.contains_error_code("REPOSITORY_NOT_FOUND") => Ok(None),
-            Err(err) if err.contains_error_code("UNAUTHENTICATED") => {
-                bail!("Your session has expired, please login again using `codspeed auth login`")
-            }
-            Err(err) => {
-                bail!("Failed to get repository: {err}")
-            }
         }
     }
 }
