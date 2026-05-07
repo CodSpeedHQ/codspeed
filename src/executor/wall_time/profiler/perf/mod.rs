@@ -8,11 +8,11 @@ use crate::executor::helpers::detect_executable::command_has_executable;
 use crate::executor::helpers::env::is_codspeed_debug_enabled;
 use crate::executor::helpers::env::suppress_go_perf_unwinding_warning;
 use crate::executor::helpers::harvest_perf_maps_for_pids::harvest_perf_maps_for_pids;
-use crate::executor::helpers::run_with_sudo::run_with_sudo;
 use crate::executor::helpers::run_with_sudo::wrap_with_sudo;
 use crate::executor::shared::fifo::FifoBenchmarkData;
 use crate::executor::wall_time::profiler::Profiler;
 use crate::executor::wall_time::profiler::WALLTIME_METADATA_CURRENT_VERSION;
+use crate::executor::wall_time::profiler::linux_sysctl::ensure_linux_profiling_sysctls;
 use crate::executor::wall_time::profiler::perf::perf_executable::get_working_perf_executable;
 use crate::prelude::*;
 use crate::system::SystemInfo;
@@ -81,30 +81,7 @@ impl Profiler for PerfProfiler {
         setup_cache_dir: Option<&Path>,
     ) -> anyhow::Result<()> {
         setup::install_perf(system_info, setup_cache_dir).await?;
-
-        let sysctl_read = |name: &str| -> anyhow::Result<i64> {
-            let output = std::process::Command::new("sysctl").arg(name).output()?;
-            let output = String::from_utf8(output.stdout)?;
-
-            Ok(output
-                .split(" = ")
-                .last()
-                .context("Couldn't find the value in sysctl output")?
-                .trim()
-                .parse::<i64>()?)
-        };
-
-        // Allow access to kernel symbols
-        if sysctl_read("kernel.kptr_restrict")? != 0 {
-            run_with_sudo("sysctl", ["-w", "kernel.kptr_restrict=0"])?;
-        }
-
-        // Allow non-root profiling
-        if sysctl_read("kernel.perf_event_paranoid")? != -1 {
-            run_with_sudo("sysctl", ["-w", "kernel.perf_event_paranoid=-1"])?;
-        }
-
-        Ok(())
+        ensure_linux_profiling_sysctls()
     }
 
     async fn wrap(

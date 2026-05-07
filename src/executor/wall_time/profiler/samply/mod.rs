@@ -4,7 +4,9 @@ use crate::executor::ExecutorConfig;
 use crate::executor::helpers::command::CommandBuilder;
 use crate::executor::shared::fifo::FifoBenchmarkData;
 use crate::executor::wall_time::profiler::Profiler;
+use crate::executor::wall_time::profiler::linux_sysctl::ensure_linux_profiling_sysctls;
 use crate::prelude::*;
+use crate::system::SystemInfo;
 use async_trait::async_trait;
 use runner_shared::artifacts::ArtifactExt;
 use runner_shared::artifacts::ExecutionTimestamps;
@@ -32,6 +34,14 @@ impl SamplyProfiler {
 
 #[async_trait(?Send)]
 impl Profiler for SamplyProfiler {
+    async fn setup(
+        &self,
+        _system_info: &SystemInfo,
+        _setup_cache_dir: Option<&Path>,
+    ) -> anyhow::Result<()> {
+        ensure_linux_profiling_sysctls()
+    }
+
     async fn wrap(
         &mut self,
         mut cmd_builder: CommandBuilder,
