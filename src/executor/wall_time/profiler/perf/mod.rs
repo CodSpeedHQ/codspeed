@@ -10,7 +10,9 @@ use crate::executor::helpers::env::suppress_go_perf_unwinding_warning;
 use crate::executor::helpers::harvest_perf_maps_for_pids::harvest_perf_maps_for_pids;
 use crate::executor::helpers::run_with_sudo::wrap_with_sudo;
 use crate::executor::shared::fifo::FifoBenchmarkData;
+use crate::executor::wall_time::profiler::NO_BENCHMARKS_DETECTED_WARNING;
 use crate::executor::wall_time::profiler::Profiler;
+use crate::executor::wall_time::profiler::SAMPLING_RATE_HZ;
 use crate::executor::wall_time::profiler::WALLTIME_METADATA_CURRENT_VERSION;
 use crate::executor::wall_time::profiler::linux_sysctl::ensure_linux_profiling_sysctls;
 use crate::executor::wall_time::profiler::perf::perf_executable::get_working_perf_executable;
@@ -146,7 +148,7 @@ impl Profiler for PerfProfiler {
             // Required for matching the markers and URIs to the samples.
             "-k",
             "CLOCK_MONOTONIC",
-            "--freq=997", // Use a prime number to avoid synchronization with periodic tasks
+            &format!("--freq={SAMPLING_RATE_HZ}"),
             "--delay=-1",
             "-g",
             "--user-callchains",
@@ -219,9 +221,7 @@ impl Profiler for PerfProfiler {
         if let Err(BenchmarkDataSaveError::MissingIntegration) =
             bench_data.save_to(profile_folder, perf_file_path).await
         {
-            warn!(
-                "Perf is enabled, but failed to detect benchmarks. If you wish to disable this warning, set CODSPEED_PROFILER_ENABLED=false"
-            );
+            warn!("{NO_BENCHMARKS_DETECTED_WARNING}");
             return Ok(());
         }
 

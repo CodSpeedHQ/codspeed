@@ -14,10 +14,11 @@ use runner_shared::metadata::WalltimeMetadata;
 use std::path::Path;
 use std::path::PathBuf;
 
+use super::NO_BENCHMARKS_DETECTED_WARNING;
+use super::SAMPLING_RATE_HZ;
 use super::WALLTIME_METADATA_CURRENT_VERSION;
 
 const SAMPLY_OUTPUT_FILE_NAME: &str = "samply-profile.json.gz";
-const SAMPLY_RATE_HZ: &str = "997";
 
 pub struct SamplyProfiler {
     /// Set by [`Profiler::wrap`]. Currently unused after `wrap` returns —
@@ -50,14 +51,19 @@ impl Profiler for SamplyProfiler {
     ) -> anyhow::Result<CommandBuilder> {
         let output_path = profile_folder.join(SAMPLY_OUTPUT_FILE_NAME);
 
-        let mut samply_builder = CommandBuilder::new("samply");
+        // samply is bundled into this binary as the `samply` subcommand;
+        // re-exec ourselves so we don't depend on a system install.
+        let current_exe = std::env::current_exe()
+            .context("failed to resolve current executable for bundled samply")?;
+        let mut samply_builder = CommandBuilder::new(current_exe);
         samply_builder.args([
+            "samply",
             "record",
             "--presymbolicate",
             "--no-open",
             "--save-only",
             "--rate",
-            SAMPLY_RATE_HZ,
+            &SAMPLING_RATE_HZ.to_string(),
         ]);
         samply_builder.arg("-o");
         samply_builder.arg(&output_path);
@@ -75,9 +81,7 @@ impl Profiler for SamplyProfiler {
         profile_folder: &Path,
     ) -> anyhow::Result<()> {
         let Some(integration) = fifo_data.integration.clone() else {
-            warn!(
-                "Walltime profiling is enabled, but failed to detect benchmarks. If you wish to disable this warning, set CODSPEED_PROFILER_ENABLED=false"
-            );
+            warn!("{NO_BENCHMARKS_DETECTED_WARNING}");
             return Ok(());
         };
 

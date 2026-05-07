@@ -2,6 +2,7 @@ mod auth;
 pub(crate) mod exec;
 pub(crate) mod experimental;
 pub(crate) mod run;
+mod samply;
 mod setup;
 mod shared;
 mod show;
@@ -117,6 +118,17 @@ enum Commands {
     Show,
     /// Update the CodSpeed CLI to the latest version
     Update,
+
+    #[command(flatten)]
+    Internal(InternalCommands),
+}
+
+/// Subcommands the CLI uses to re-invoke itself; not user-facing entry points.
+#[derive(Subcommand, Debug)]
+enum InternalCommands {
+    /// Run the bundled samply profiler. Args are forwarded to samply.
+    #[command(disable_help_flag = true, disable_help_subcommand = true)]
+    Samply(samply::SamplyArgs),
 }
 
 pub async fn run() -> Result<()> {
@@ -157,7 +169,7 @@ pub async fn run() -> Result<()> {
     let setup_cache_dir = setup_cache_dir.as_deref();
 
     match cli.command {
-        Commands::Run(_) | Commands::Exec(_) => {} // Run and Exec are responsible for their own logger initialization
+        Commands::Run(_) | Commands::Exec(_) | Commands::Internal(InternalCommands::Samply(_)) => {} // these are responsible for their own logger initialization
         _ => {
             init_local_logger()?;
         }
@@ -190,6 +202,7 @@ pub async fn run() -> Result<()> {
         Commands::Use(args) => use_mode::run(args)?,
         Commands::Show => show::run()?,
         Commands::Update => update::run().await?,
+        Commands::Internal(InternalCommands::Samply(args)) => samply::run(args)?,
     }
     Ok(())
 }
