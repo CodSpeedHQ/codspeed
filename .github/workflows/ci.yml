@@ -80,6 +80,9 @@ jobs:
           cargo install --path crates/exec-harness --locked
 
       - name: Run tests
+        env:
+          # Profiling system commands (e.g. `ls`) with samply is not yet supported on MacOS
+          CODSPEED_PROFILER_ENABLED: "false"
         run: cargo run -- exec -m walltime --skip-upload --warmup-time 0s --max-rounds 5 -- ls -la
 
   bpf-tests:
