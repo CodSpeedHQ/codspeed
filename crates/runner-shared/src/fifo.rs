@@ -25,7 +25,11 @@ const _: () = assert!(
 pub enum MarkerType {
     SampleStart(u64),
     SampleEnd(u64),
+    // Old name is kept as an alias for backwards compatibility.
+    #[serde(alias = "BenchmarkStart")]
     RoundStart(u64),
+    // Old name is kept as an alias for backwards compatibility.
+    #[serde(alias = "BenchmarkEnd")]
     RoundEnd(u64),
 }
 
