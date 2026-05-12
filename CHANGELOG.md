@@ -5,6 +5,41 @@
 
 
 
+## [4.16.0] - 2026-05-12
+
+### <!-- 0 -->🚀 Features
+- Bundle samply via library crate by @not-matthias
+- Add samply profiler for macOS by @not-matthias
+- Rename CODSPEED_PERF_ENABLED to CODSPEED_PROFILER_ENABLED by @not-matthias
+- Add Profiler trait abstraction by @not-matthias
+- Restore cursor on ctrl c by @GuillaumeLagrange in [#341](https://github.com/CodSpeedHQ/runner/pull/341)
+- Validate tokens and repository access up front by @GuillaumeLagrange
+
+### <!-- 1 -->🐛 Bug Fixes
+- Disable PYTHON_PERF_JIT_SUPPORT on macOS by @not-matthias
+- Use mach_absolute_time for FIFO timestamps on macOS by @not-matthias
+- Use O_RDWR to open FIFOs on all Unix platforms by @not-matthias
+
+### <!-- 10 -->💼 Other
+- Make api_client the single source of truth for the auth token by @GuillaumeLagrange
+- Bump gql_client to partial-data fork by @GuillaumeLagrange
+
+### <!-- 2 -->🏗️ Refactor
+- Centralize internal re-exec via InternalCommands::get_command_builder by @not-matthias in [#338](https://github.com/CodSpeedHQ/runner/pull/338)
+- Rename Benchmark FIFO commands/markers to Profiler/Round by @not-matthias
+- Rename Profiler::wrap to wrap_command by @not-matthias
+- Share Linux profiler sysctl setup by @not-matthias
+- Port PerfRunner to Profiler trait by @not-matthias
+- Rename PerfMetadata to WalltimeMetadata by @not-matthias
+- Move perf module under profiler/ by @not-matthias
+- Rename FifoCommand::PingPerf to PingProfiler by @not-matthias
+- Rename IntegrationMode::Perf to Walltime by @not-matthias
+
+### <!-- 7 -->⚙️ Internals
+- Disable profiler in macos-basic-run-test by @not-matthias
+- Upload the basic run to validate auth of integration test by @GuillaumeLagrange
+
+
 ## [4.15.1] - 2026-05-06
 
 ### <!-- 0 -->🚀 Features
@@ -1131,6 +1166,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[4.16.0]: https://github.com/CodSpeedHQ/runner/compare/v4.15.1..v4.16.0
 [4.15.1]: https://github.com/CodSpeedHQ/runner/compare/v4.15.0..v4.15.1
 [4.15.0]: https://github.com/CodSpeedHQ/runner/compare/v4.14.0..v4.15.0
 [4.14.0]: https://github.com/CodSpeedHQ/runner/compare/v4.13.0..v4.14.0
