@@ -5,6 +5,18 @@
 
 
 
+## [4.16.1] - 2026-05-13
+
+### <!-- 1 -->🐛 Bug Fixes
+- Use brew-installed bash for samply on macOS by @not-matthias in [#347](https://github.com/CodSpeedHQ/runner/pull/347)
+- Keep old name aliases to for deserialization purposes by @GuillaumeLagrange in [#345](https://github.com/CodSpeedHQ/runner/pull/345)
+- Handle malformed token from backend better by @GuillaumeLagrange
+
+### <!-- 7 -->⚙️ Internals
+- Move samply fork from AvalancheHQ to CodSpeedHQ by @not-matthias
+- Remove the cursor hiding by @GuillaumeLagrange
+
+
 ## [4.16.0] - 2026-05-12
 
 ### <!-- 0 -->🚀 Features
@@ -1166,6 +1178,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[4.16.1]: https://github.com/CodSpeedHQ/runner/compare/v4.16.0..v4.16.1
 [4.16.0]: https://github.com/CodSpeedHQ/runner/compare/v4.15.1..v4.16.0
 [4.15.1]: https://github.com/CodSpeedHQ/runner/compare/v4.15.0..v4.15.1
 [4.15.0]: https://github.com/CodSpeedHQ/runner/compare/v4.14.0..v4.15.0
