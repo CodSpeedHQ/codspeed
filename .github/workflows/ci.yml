@@ -118,7 +118,7 @@ jobs:
 
       - uses: ./.github/actions/install-rust
       - name: Install cargo codspeed
-        uses: taiki-e/install-action@0c7a94999971db56e9df89df226240aab222e776 # v2
+        uses: taiki-e/install-action@3235f8901fd37ffed0052b276cec25a362fb82e9 # v2
         with:
           tool: cargo-codspeed
 
