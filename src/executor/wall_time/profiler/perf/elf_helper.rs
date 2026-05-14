@@ -191,8 +191,6 @@ pub fn compute_base_avma(base_svma: u64, load_bias: u64) -> u64 {
     base_svma.wrapping_add(load_bias)
 }
 
-const DEFAULT_DEBUG_DIR: &str = "/usr/lib/debug";
-
 /// Search for a separate debug info file.
 ///
 /// Tries two mechanisms in order:
@@ -205,11 +203,16 @@ const DEFAULT_DEBUG_DIR: &str = "/usr/lib/debug";
 /// filename and relies on a CRC32 check. On Debian/Ubuntu, `*-dbg` and
 /// `*-dbgsym` packages install their files under `/usr/lib/debug/.build-id/`,
 /// so this path is what actually resolves stripped system libraries in
-/// practice.
+/// practice. On NixOS, `environment.enableDebugInfo = true` populates the
+/// same layout under `/run/current-system/sw/lib/debug`.
 ///
 /// [Separate Debug Files]: https://sourceware.org/gdb/current/onlinedocs/gdb.html/Separate-Debug-Files.html
 pub fn find_debug_file(object: &object::File, binary_path: &Path) -> Option<PathBuf> {
-    find_debug_file_in(object, binary_path, Path::new(DEFAULT_DEBUG_DIR))
+    ["/usr/lib/debug", "/run/current-system/sw/lib/debug"]
+        .iter()
+        .map(Path::new)
+        .filter(|dir| dir.exists())
+        .find_map(|dir| find_debug_file_in(object, binary_path, dir))
 }
 
 fn find_debug_file_in(
