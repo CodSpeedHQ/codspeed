@@ -1,4 +1,4 @@
-use super::loaded_module::LoadedModule;
+use super::loaded_module::{LoadedModule, ProcessLoadedModule};
 use super::module_symbols::ModuleSymbols;
 use super::unwind_data::unwind_data_from_elf;
 use crate::prelude::*;
@@ -57,12 +57,23 @@ pub fn parse_for_memmap2<P: AsRef<Path>>(
                     continue;
                 };
 
+                // Thread creation also emits FORK, which share parent's address space, so nothing to do
+                if fork_record.ppid == fork_record.pid {
+                    continue;
+                }
+
                 if pid_filter.add_child_if_parent_tracked(fork_record.ppid, fork_record.pid) {
                     trace!(
                         "Fork: Tracking child PID {} from parent PID {}",
                         fork_record.pid, fork_record.ppid
                     );
                 }
+
+                inherit_parent_mappings(
+                    &mut loaded_modules_by_path,
+                    fork_record.ppid,
+                    fork_record.pid,
+                );
             }
             RecordType::MMAP2 => {
                 let Ok(parsed_record) = record.parse() else {
@@ -130,6 +141,37 @@ impl PidFilter {
                     false
                 }
             }
+        }
+    }
+}
+
+/// Copy every module the parent pid has mounted onto the child pid.
+///
+/// Forked processes inherit their parent's memory mappings, but there will not be any MMAP2 record
+/// in the perf data since the mapping has already happened.
+fn inherit_parent_mappings(
+    loaded_modules_by_path: &mut HashMap<PathBuf, LoadedModule>,
+    ppid: pid_t,
+    pid: pid_t,
+) {
+    use std::collections::hash_map::Entry;
+
+    for loaded_module in loaded_modules_by_path.values_mut() {
+        let inherited =
+            loaded_module
+                .process_loaded_modules
+                .get(&ppid)
+                .map(|p| ProcessLoadedModule {
+                    symbols_load_bias: p.symbols_load_bias,
+                    process_unwind_data: p.process_unwind_data.clone(),
+                });
+        let Some(inherited) = inherited else {
+            continue;
+        };
+        // Only insert if the child has no entry yet; an existing entry came from
+        // the child's own MMAP2 and is authoritative.
+        if let Entry::Vacant(slot) = loaded_module.process_loaded_modules.entry(pid) {
+            slot.insert(inherited);
         }
     }
 }
@@ -222,4 +264,59 @@ fn process_mmap2_record(
             debug!("Failed to load unwind data for module {record_path_string}: {error}");
         }
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_module_with_parent(ppid: pid_t, load_bias: u64) -> LoadedModule {
+        let mut m = LoadedModule::default();
+        m.process_loaded_modules.insert(
+            ppid,
+            ProcessLoadedModule {
+                symbols_load_bias: Some(load_bias),
+                process_unwind_data: None,
+            },
+        );
+        m
+    }
+
+    #[test]
+    fn inherit_parent_mappings_copies_parent_entry_to_child() {
+        let mut modules: HashMap<PathBuf, LoadedModule> = HashMap::new();
+        modules.insert(
+            PathBuf::from("/lib/libpython.so"),
+            make_module_with_parent(100, 0xdead),
+        );
+
+        inherit_parent_mappings(&mut modules, 100, 200);
+
+        let m = &modules[&PathBuf::from("/lib/libpython.so")];
+        let child = m.process_loaded_modules.get(&200).unwrap();
+        assert_eq!(child.symbols_load_bias, Some(0xdead));
+    }
+
+    #[test]
+    fn inherit_parent_mappings_does_not_overwrite_existing_child_entry() {
+        let mut modules: HashMap<PathBuf, LoadedModule> = HashMap::new();
+        let mut m = make_module_with_parent(100, 0xdead);
+        // Child already has its own (post-exec) mapping at a different bias.
+        m.process_loaded_modules.insert(
+            200,
+            ProcessLoadedModule {
+                symbols_load_bias: Some(0xcafe),
+                process_unwind_data: None,
+            },
+        );
+        modules.insert(PathBuf::from("/lib/libpython.so"), m);
+
+        inherit_parent_mappings(&mut modules, 100, 200);
+
+        let child = modules[&PathBuf::from("/lib/libpython.so")]
+            .process_loaded_modules
+            .get(&200)
+            .unwrap();
+        assert_eq!(child.symbols_load_bias, Some(0xcafe));
+    }
 }
