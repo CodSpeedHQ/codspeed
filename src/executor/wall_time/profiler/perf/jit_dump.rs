@@ -106,50 +106,162 @@ impl JitDump {
     }
 }
 
-/// Converts all the `jit-<pid>.dump` into a perf-<pid>.map with symbols, and collects the unwind data
+/// Walk the fork chain rooted at `pid` and return ancestor pids from oldest
+/// to youngest. Stops on self-loops or cycles.
+fn ancestor_chain(
+    pid: libc::pid_t,
+    parent_by_pid: &HashMap<libc::pid_t, libc::pid_t>,
+) -> Vec<libc::pid_t> {
+    let mut ancestors = Vec::new();
+    let mut cursor = pid;
+    while let Some(&ppid) = parent_by_pid.get(&cursor) {
+        if ppid == cursor || ppid == pid || ancestors.contains(&ppid) {
+            break;
+        }
+        ancestors.push(ppid);
+        cursor = ppid;
+    }
+    ancestors.reverse();
+    ancestors
+}
+
+/// Converts all the `jit-<pid>.dump` into a perf-<pid>.map with symbols, and collects the unwind data.
 ///
 /// # Symbols
 /// Since a jit dump is by definition specific to a single pid, we append the harvested symbols
-/// into a perf-<pid>.map instead of writing a specific jit.symbols.map
+/// into a perf-<pid>.map instead of writing a specific jit.symbols.map.
 ///
 /// # Unwind data
-/// Unwind data is generated as a list
+/// Unwind data is generated as a list.
+///
+/// # Fork inheritance
+/// CPython's perf-trampoline writes a fresh jitdump per process. After
+/// `fork()`, the child only registers code objects it newly enters, so
+/// pre-fork trampolines — whose memory the child still holds (COW) and
+/// returns through — are absent from the child's jitdump. To close that gap,
+/// each child's perf-map and JIT unwind data are augmented with every
+/// ancestor's jitdump entries (oldest first; child entries last so they
+/// win on any address collision).
+///
+/// Known limitation: we currently inherit each ancestor's *entire final*
+/// jitdump, not just records emitted before the descendant forked off.
+/// Records the ancestor emitted after the fork describe trampolines in
+/// pages that diverged (CoW-separated) from the descendant's address
+/// space, so attributing the descendant's samples to those symbols can be
+/// wrong. We have the timestamps in hand (jitdump CodeLoad records and the
+/// FORK event both carry them) and could filter, but this hasn't been
+/// observed to cause issues on real workloads yet. Revisit if we start
+/// seeing implausible attributions in pool-worker callgraphs.
 pub async fn save_symbols_and_harvest_unwind_data_for_pids(
     profile_folder: &Path,
     pids: &HashSet<libc::pid_t>,
+    parent_by_pid: &HashMap<libc::pid_t, libc::pid_t>,
 ) -> Result<HashMap<i32, Vec<(UnwindData, ProcessUnwindData)>>> {
-    let mut jit_unwind_data_by_path = HashMap::new();
+    // Convert every jitdump once and stash the results so children can pull
+    // from their ancestors without re-parsing the dump files.
+    let mut symbols_by_pid: HashMap<libc::pid_t, ModuleSymbols> = HashMap::new();
+    let mut unwind_data_by_pid: HashMap<libc::pid_t, Vec<(UnwindData, ProcessUnwindData)>> =
+        HashMap::new();
 
     for pid in pids {
-        let name = format!("jit-{pid}.dump");
-        let path = PathBuf::from("/tmp").join(&name);
-
+        let path = PathBuf::from("/tmp").join(format!("jit-{pid}.dump"));
         if !path.exists() {
             continue;
         }
         debug!("Found JIT dump file: {path:?}");
 
-        let symbols = match JitDump::new(path.clone()).into_perf_map() {
-            Ok(symbols) => symbols,
+        match JitDump::new(path.clone()).into_perf_map() {
+            Ok(symbols) => {
+                symbols_by_pid.insert(*pid, symbols);
+            }
             Err(error) => {
                 warn!("Failed to convert jit dump into perf map: {error:?}");
                 continue;
             }
-        };
+        }
 
-        // Also write to perf-<pid>.map for harvested Python perf maps compatibility
-        symbols.append_to_file(profile_folder.join(format!("perf-{pid}.map")))?;
-
-        let jit_unwind_data = match JitDump::new(path).into_unwind_data() {
-            Ok(data) => data,
+        match JitDump::new(path).into_unwind_data() {
+            Ok(data) => {
+                unwind_data_by_pid.insert(*pid, data);
+            }
             Err(error) => {
                 warn!("Failed to convert jit dump into unwind data: {error:?}");
-                continue;
             }
+        }
+    }
+
+    // Write perf-<pid>.map for each pid, prepending ancestor entries so the
+    // child can resolve frames in pre-fork trampolines it still executes.
+    let mut jit_unwind_data_by_path: HashMap<libc::pid_t, Vec<(UnwindData, ProcessUnwindData)>> =
+        HashMap::new();
+    for pid in pids {
+        let Some(own_symbols) = symbols_by_pid.get(pid) else {
+            continue;
         };
 
-        jit_unwind_data_by_path.insert(*pid, jit_unwind_data);
+        let ancestors = ancestor_chain(*pid, parent_by_pid);
+        let inheriting_ancestors: Vec<_> = ancestors
+            .iter()
+            .filter(|a| symbols_by_pid.contains_key(a))
+            .collect();
+        if !inheriting_ancestors.is_empty() {
+            debug!(
+                "perf-{pid}.map: inheriting JIT entries from {} ancestor pid(s): {:?}",
+                inheriting_ancestors.len(),
+                inheriting_ancestors,
+            );
+        }
+
+        let map_path = profile_folder.join(format!("perf-{pid}.map"));
+        for ancestor_pid in &ancestors {
+            if let Some(ancestor_symbols) = symbols_by_pid.get(ancestor_pid) {
+                ancestor_symbols.append_to_file(&map_path)?;
+            }
+        }
+        own_symbols.append_to_file(&map_path)?;
+
+        let mut merged_unwind = Vec::new();
+        for ancestor_pid in &ancestors {
+            if let Some(ancestor_unwind) = unwind_data_by_pid.get(ancestor_pid) {
+                merged_unwind.extend(ancestor_unwind.iter().cloned());
+            }
+        }
+        if let Some(own_unwind) = unwind_data_by_pid.get(pid) {
+            merged_unwind.extend(own_unwind.iter().cloned());
+        }
+        if !merged_unwind.is_empty() {
+            jit_unwind_data_by_path.insert(*pid, merged_unwind);
+        }
     }
 
     Ok(jit_unwind_data_by_path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ancestor_chain_single_parent() {
+        let parent_by_pid = HashMap::from([(200, 100)]);
+        assert_eq!(ancestor_chain(200, &parent_by_pid), vec![100]);
+    }
+
+    #[test]
+    fn ancestor_chain_multi_level_returns_oldest_first() {
+        let parent_by_pid = HashMap::from([(300, 200), (200, 100)]);
+        assert_eq!(ancestor_chain(300, &parent_by_pid), vec![100, 200]);
+    }
+
+    #[test]
+    fn ancestor_chain_no_parent() {
+        assert!(ancestor_chain(100, &HashMap::new()).is_empty());
+    }
+
+    #[test]
+    fn ancestor_chain_breaks_self_referential_cycle() {
+        let parent_by_pid = HashMap::from([(200, 100), (100, 200)]);
+        let chain = ancestor_chain(200, &parent_by_pid);
+        assert_eq!(chain, vec![100]);
+    }
 }

@@ -16,6 +16,11 @@ pub struct MemmapRecordsOutput {
     /// Module symbols and the computed load bias for each pid that maps the ELF path.
     pub loaded_modules_by_path: HashMap<PathBuf, LoadedModule>,
     pub tracked_pids: HashSet<pid_t>,
+    /// Maps each child pid to the parent it was forked from. Built from
+    /// FORK records and used to inherit per-process artifacts (e.g. CPython's
+    /// `/tmp/perf-{pid}.map`) that the child can still legitimately execute
+    /// because the trampoline memory was COW-inherited at fork.
+    pub parent_by_pid: HashMap<pid_t, pid_t>,
 }
 
 /// Parse the perf file at `perf_file_path` and look for MMAP2 records for the given `pids`.
@@ -27,6 +32,7 @@ pub fn parse_for_memmap2<P: AsRef<Path>>(
     mut pid_filter: PidFilter,
 ) -> Result<MemmapRecordsOutput> {
     let mut loaded_modules_by_path = HashMap::<PathBuf, LoadedModule>::new();
+    let mut parent_by_pid = HashMap::<pid_t, pid_t>::new();
 
     // 1MiB buffer
     let reader = std::io::BufReader::with_capacity(
@@ -74,6 +80,12 @@ pub fn parse_for_memmap2<P: AsRef<Path>>(
                     fork_record.ppid,
                     fork_record.pid,
                 );
+                // Record the fork relationship so downstream steps (e.g. perf-map
+                // harvesting) can inherit per-process artifacts the child still
+                // legitimately executes from COW-shared memory.
+                parent_by_pid
+                    .entry(fork_record.pid)
+                    .or_insert(fork_record.ppid);
             }
             RecordType::MMAP2 => {
                 let Ok(parsed_record) = record.parse() else {
@@ -108,6 +120,7 @@ pub fn parse_for_memmap2<P: AsRef<Path>>(
     Ok(MemmapRecordsOutput {
         loaded_modules_by_path,
         tracked_pids,
+        parent_by_pid,
     })
 }
 
