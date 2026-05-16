@@ -20,7 +20,7 @@ impl JitDump {
         let mut symbols = Vec::new();
 
         let file = std::fs::File::open(self.path)?;
-        let mut reader = JitDumpReader::new(file)?;
+        let mut reader = JitDumpReader::new(file)?.recover_from_corruption(true);
         while let Some(raw_record) = reader.next_record()? {
             let JitDumpRecord::CodeLoad(record) = raw_record.parse()? else {
                 continue;
@@ -52,7 +52,7 @@ impl JitDump {
         let mut harvested_unwind_data = Vec::new();
         let mut current_unwind_info: Option<(Vec<u8>, Vec<u8>)> = None;
 
-        let mut reader = JitDumpReader::new(file)?;
+        let mut reader = JitDumpReader::new(file)?.recover_from_corruption(true);
         while let Some(raw_record) = reader.next_record()? {
             // The first recording is always the unwind info, followed by the code load event
             // (see `perf_map_jit_write_entry` in https://github.com/python/cpython/blob/9743d069bd53e9d3a8f09df899ec1c906a79da24/Python/perf_jit_trampoline.c#L1163C13-L1163C37)
@@ -73,7 +73,7 @@ impl JitDump {
                     let avma_end = avma_start + code_size;
 
                     let Some((eh_frame, eh_frame_hdr)) = current_unwind_info.take() else {
-                        warn!("No unwind info available for JIT code load: {name}");
+                        debug!("No unwind info available for JIT code load: {name}");
                         continue;
                     };
 
