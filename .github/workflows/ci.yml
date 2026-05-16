@@ -87,6 +87,13 @@ jobs:
 
   bpf-tests:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each memtrack integration test binary runs its cases serially
+        # (eBPF tracker can't overlap with itself in one process), so we
+        # shard at the test-binary level to parallelize across jobs.
+        test: [c_tests, cpp_tests, rust_tests, spawn_tests]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -102,7 +109,7 @@ jobs:
       - name: Run tests
         env:
           RUST_LOG: debug
-        run: sudo -E $(which cargo) test -- --test-threads 1 --nocapture
+        run: sudo -E $(which cargo) test --lib --test ${{ matrix.test }} -- --test-threads 1 --nocapture
         working-directory: crates/memtrack
 
       # Since we ran the tests with sudo, the build artifacts will have root ownership
