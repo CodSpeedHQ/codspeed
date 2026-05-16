@@ -10,9 +10,14 @@ runs:
   steps:
     - name: Install rust-toolchain.toml
       shell: bash
-      run: rustup show
+      run: rustup toolchain install
     - name: Install additional rustup components
       if: inputs.components != ''
       shell: bash
       run: echo "${{ inputs.components }}" | tr ',' '\n' | xargs rustup component add
     - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
+      with:
+        # Avoid caching ~/.cargo/bin on macOS — restoring it on a runner with a
+        # different rustup version overwrites the cargo proxy with a stale
+        # rustup-init, breaking `cargo fmt`/`clippy`/etc.
+        cache-bin: ${{ runner.os != 'macOS' }}
