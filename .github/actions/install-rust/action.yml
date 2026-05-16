@@ -14,7 +14,7 @@ runs:
   steps:
     - name: Install rust-toolchain.toml
       shell: bash
-      run: rustup show
+      run: rustup toolchain install
     - name: Install additional rustup components
       if: inputs.components != ''
       shell: bash
@@ -22,3 +22,5 @@ runs:
     - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
       with:
         key: ${{ inputs.cache-key }}
+        # https://github.com/Swatinem/rust-cache/issues/341
+        cache-bin: ${{ runner.os != 'macOS' }}
