@@ -100,6 +100,8 @@ jobs:
           lfs: true
           submodules: true
       - uses: ./.github/actions/install-rust
+        with:
+          cache-key: ${{ matrix.test }}
       - name: Install dependencies required for libbpf-sys (vendored feature)
         run: sudo apt-get update && sudo apt-get install -y autopoint bison flex
 

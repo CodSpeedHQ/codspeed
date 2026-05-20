@@ -5,6 +5,10 @@ inputs:
     description: Comma-separated list of additional rustup components to install (e.g. "rustfmt, clippy").
     required: false
     default: ""
+  cache-key:
+    description: Extra value appended to the rust-cache key, used to give matrix shards distinct caches and avoid concurrent save races.
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
@@ -16,3 +20,5 @@ runs:
       shell: bash
       run: echo "${{ inputs.components }}" | tr ',' '\n' | xargs rustup component add
     - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
+      with:
+        key: ${{ inputs.cache-key }}
