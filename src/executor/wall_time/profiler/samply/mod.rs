@@ -105,6 +105,18 @@ impl Profiler for SamplyProfiler {
 
         cmd_builder.wrap_with(samply_builder);
 
+        cmd_builder.envs([
+            // Disable JIT classification as it produces duplicates symbols in
+            // Node.js for the Interpreter frames.
+            ("SAMPLY_DISABLE_JIT_CLASSIFICATION", "1"),
+            ("SAMPLY_USE_DEBUGINFOD", "1"),
+            // TODO(COD-2701): Implement this properly
+            (
+                "SAMPLY_BREAKPAD_SYMBOL_SERVER",
+                "https://symbols.mozilla.org/,https://symbols.electronjs.org/",
+            ),
+        ]);
+
         // If `setup` decided the bash on PATH is Apple-signed, prepend brew's
         // bin so samply's spawned shell resolves to the ad-hoc-signed brew bash
         // instead. Only the samply child's PATH is touched.
