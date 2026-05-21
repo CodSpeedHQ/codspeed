@@ -88,17 +88,33 @@ pub struct WallTimeExecutor {
     benchmark_state: OnceCell<(FifoBenchmarkData, ExecutionTimestamps)>,
 }
 
+fn select_profiler() -> Option<Box<dyn Profiler>> {
+    const PROFILER_OVERRIDE_ENV: &str = "CODSPEED_WALLTIME_PROFILER";
+
+    match std::env::var(PROFILER_OVERRIDE_ENV).ok().as_deref() {
+        Some("perf") => return Some(Box::new(PerfProfiler::new())),
+        Some("samply") => return Some(Box::new(SamplyProfiler::new())),
+        Some(other) => {
+            warn!(
+                "Ignoring unknown {PROFILER_OVERRIDE_ENV}={other:?}; expected `perf` or `samply`."
+            );
+        }
+        None => {}
+    }
+
+    if cfg!(target_os = "linux") {
+        Some(Box::new(PerfProfiler::new()))
+    } else if cfg!(target_os = "macos") {
+        Some(Box::new(SamplyProfiler::new()))
+    } else {
+        None
+    }
+}
+
 impl WallTimeExecutor {
     pub fn new() -> Self {
-        let profiler: Option<Box<dyn Profiler>> = if cfg!(target_os = "linux") {
-            Some(Box::new(PerfProfiler::new()))
-        } else if cfg!(target_os = "macos") {
-            Some(Box::new(SamplyProfiler::new()))
-        } else {
-            None
-        };
         Self {
-            profiler,
+            profiler: select_profiler(),
             benchmark_state: OnceCell::new(),
         }
     }
