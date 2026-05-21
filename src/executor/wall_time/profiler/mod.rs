@@ -33,6 +33,12 @@ pub trait Profiler {
         None
     }
 
+    /// Whether the benchmark command should be wrapped with the Linux
+    /// systemd-run isolation scope.
+    fn requires_isolation(&self) -> bool {
+        true
+    }
+
     /// One-time system setup (install tool, tweak sysctls, ...).
     async fn setup(
         &self,
