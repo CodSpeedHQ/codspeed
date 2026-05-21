@@ -48,7 +48,6 @@ impl CommandBuilder {
         self
     }
 
-    #[cfg(target_os = "macos")]
     pub fn env<K, V>(&mut self, key: K, value: V) -> &mut Self
     where
         K: AsRef<OsStr>,
@@ -56,6 +55,18 @@ impl CommandBuilder {
     {
         self.envs
             .insert(key.as_ref().to_owned(), value.as_ref().to_owned());
+        self
+    }
+
+    pub fn envs<I, K, V>(&mut self, vars: I) -> &mut Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: AsRef<OsStr>,
+        V: AsRef<OsStr>,
+    {
+        for (k, v) in vars {
+            self.env(k, v);
+        }
         self
     }
 
