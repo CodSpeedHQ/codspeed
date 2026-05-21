@@ -106,6 +106,7 @@ impl WallTimeExecutor {
     fn walltime_bench_cmd(
         config: &ExecutorConfig,
         execution_context: &ExecutionContext,
+        isolate: bool,
     ) -> Result<(NamedTempFile, NamedTempFile, CommandBuilder)> {
         let path_value = build_path_env(config.enable_introspection)?;
 
@@ -130,7 +131,11 @@ impl WallTimeExecutor {
             bench_cmd.current_dir(abs_cwd);
         }
 
-        let bench_cmd = wrap_with_isolation(bench_cmd)?;
+        let bench_cmd = if isolate {
+            wrap_with_isolation(bench_cmd)?
+        } else {
+            bench_cmd
+        };
 
         Ok((env_file, script_file, bench_cmd))
     }
@@ -168,8 +173,15 @@ impl Executor for WallTimeExecutor {
     ) -> Result<()> {
         let _guard = HookScriptsGuard::setup();
 
-        let (_env_file, _script_file, cmd_builder) =
-            WallTimeExecutor::walltime_bench_cmd(&execution_context.config, execution_context)?;
+        let isolate = self
+            .profiler
+            .as_ref()
+            .is_none_or(|p| p.requires_isolation());
+        let (_env_file, _script_file, cmd_builder) = WallTimeExecutor::walltime_bench_cmd(
+            &execution_context.config,
+            execution_context,
+            isolate,
+        )?;
 
         // Split-borrow `self` so the closure inside `run_with_profiler` can
         // capture `benchmark_state` while we hold `&mut profiler`.
