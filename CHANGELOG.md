@@ -5,6 +5,23 @@
 
 
 
+## [4.16.2] - 2026-05-22
+
+### <!-- 0 -->🚀 Features
+- Search NixOS debug info path by @not-matthias in [#354](https://github.com/CodSpeedHQ/runner/pull/354)
+- Inherit process mapping on forks by @GuillaumeLagrange
+
+### <!-- 1 -->🐛 Bug Fixes
+- Flush rolling buffer when executor errors by @not-matthias in [#352](https://github.com/CodSpeedHQ/runner/pull/352)
+
+### <!-- 7 -->⚙️ Internals
+- Bump valgrind-codspeed to 3.26.0-0codspeed2
+- Fix macOS rustup cache corruption in install-rust action by @GuillaumeLagrange in [#357](https://github.com/CodSpeedHQ/runner/pull/357)
+- Give each bpf-tests shard its own cache key by @not-matthias in [#358](https://github.com/CodSpeedHQ/runner/pull/358)
+- Shard bpf-tests by integration test binary by @not-matthias
+- Use rustup show instead of toolchain install by @GuillaumeLagrange in [#349](https://github.com/CodSpeedHQ/runner/pull/349)
+
+
 ## [4.16.1] - 2026-05-13
 
 ### <!-- 1 -->🐛 Bug Fixes
@@ -1178,6 +1195,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[4.16.2]: https://github.com/CodSpeedHQ/runner/compare/v4.16.1..v4.16.2
 [4.16.1]: https://github.com/CodSpeedHQ/runner/compare/v4.16.0..v4.16.1
 [4.16.0]: https://github.com/CodSpeedHQ/runner/compare/v4.15.1..v4.16.0
 [4.15.1]: https://github.com/CodSpeedHQ/runner/compare/v4.15.0..v4.15.1
