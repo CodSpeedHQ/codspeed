@@ -201,7 +201,7 @@ mod tests {
         };
         assert_snapshot!(
             get_codspeed_valgrind_filename(&system_info).unwrap(),
-            @"valgrind_3.26.0-0codspeed0_ubuntu-22.04_amd64.deb"
+            @"valgrind_3.26.0-0codspeed1_ubuntu-22.04_amd64.deb"
         );
     }
 
@@ -216,7 +216,7 @@ mod tests {
         };
         assert_snapshot!(
             get_codspeed_valgrind_filename(&system_info).unwrap(),
-            @"valgrind_3.26.0-0codspeed0_ubuntu-24.04_amd64.deb"
+            @"valgrind_3.26.0-0codspeed1_ubuntu-24.04_amd64.deb"
         );
     }
 
@@ -231,7 +231,7 @@ mod tests {
         };
         assert_snapshot!(
             get_codspeed_valgrind_filename(&system_info).unwrap(),
-            @"valgrind_3.26.0-0codspeed0_ubuntu-22.04_amd64.deb"
+            @"valgrind_3.26.0-0codspeed1_ubuntu-22.04_amd64.deb"
         );
     }
 
@@ -246,7 +246,7 @@ mod tests {
         };
         assert_snapshot!(
             get_codspeed_valgrind_filename(&system_info).unwrap(),
-            @"valgrind_3.26.0-0codspeed0_ubuntu-22.04_arm64.deb"
+            @"valgrind_3.26.0-0codspeed1_ubuntu-22.04_arm64.deb"
         );
     }
 
