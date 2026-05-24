@@ -2,11 +2,11 @@ mod auth;
 pub(crate) mod exec;
 pub(crate) mod experimental;
 pub(crate) mod run;
-pub(crate) mod samply;
 mod setup;
 mod shared;
 mod show;
 mod status;
+pub(crate) mod tool;
 mod update;
 mod use_mode;
 
@@ -17,7 +17,6 @@ use std::path::PathBuf;
 use crate::{
     api_client::CodSpeedAPIClient,
     config::CodSpeedConfig,
-    executor::helpers::command::CommandBuilder,
     local_logger::{CODSPEED_U8_COLOR_CODE, init_local_logger},
     prelude::*,
     project_config::DiscoveredProjectConfig,
@@ -99,37 +98,24 @@ enum Commands {
     /// Update the CodSpeed CLI to the latest version
     Update,
 
-    #[command(flatten)]
-    Internal(InternalCommands),
-}
-
-/// Subcommands the CLI uses to re-invoke itself; not user-facing entry points.
-#[derive(Subcommand, Debug)]
-pub(crate) enum InternalCommands {
-    /// Run the bundled samply profiler. Args are forwarded to samply.
-    #[command(disable_help_flag = true, disable_help_subcommand = true)]
-    Samply(samply::SamplyArgs),
-}
-
-impl InternalCommands {
-    /// Build a [`CommandBuilder`] that re-execs the current binary into this
-    /// internal subcommand. Each variant owns its own arg layout.
-    pub fn get_command_builder(&self) -> Result<CommandBuilder> {
-        let current_exe = std::env::current_exe()
-            .context("failed to resolve current executable for internal subcommand")?;
-        let mut builder = CommandBuilder::new(current_exe);
-        match self {
-            InternalCommands::Samply(args) => {
-                builder.arg("samply");
-                builder.args(args.args.iter().cloned());
-            }
-        }
-        Ok(builder)
-    }
+    /// Hidden tool group used by the runner to re-exec itself into bundled
+    /// helpers (samply, exec-harness, memtrack). Help generation is disabled
+    /// so the wrapped binaries can handle `--help` themselves (and so the
+    /// root CLI's global flags don't leak into their help output).
+    #[command(hide = true, disable_help_flag = true, disable_help_subcommand = true)]
+    Tool(tool::ToolArgs),
 }
 
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
+
+    // `tool` subcommands are re-exec targets for bundled helper binaries — they
+    // don't talk to the API and don't read project/CLI config, so short-circuit
+    // before any of that init runs (a broken config file shouldn't block them).
+    if let Commands::Tool(args) = cli.command {
+        return tool::run(args);
+    }
+
     let mut api_client = build_api_client(&cli)?;
 
     // Discover project configuration file
@@ -146,7 +132,8 @@ pub async fn run() -> Result<()> {
     let setup_cache_dir = setup_cache_dir.as_deref();
 
     match cli.command {
-        Commands::Run(_) | Commands::Exec(_) | Commands::Internal(InternalCommands::Samply(_)) => {} // these are responsible for their own logger initialization
+        // These are responsible for their own logger initialization
+        Commands::Run(_) | Commands::Exec(_) => {}
         _ => {
             init_local_logger()?;
         }
@@ -179,7 +166,7 @@ pub async fn run() -> Result<()> {
         Commands::Use(args) => use_mode::run(args)?,
         Commands::Show => show::run()?,
         Commands::Update => update::run().await?,
-        Commands::Internal(InternalCommands::Samply(args)) => samply::run(args)?,
+        Commands::Tool(_) => unreachable!("handled at the top of `run` before init"),
     }
     Ok(())
 }

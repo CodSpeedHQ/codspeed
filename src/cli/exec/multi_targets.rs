@@ -1,5 +1,4 @@
 use crate::executor::config::BenchmarkTarget;
-use crate::executor::orchestrator::EXEC_HARNESS_COMMAND;
 use crate::prelude::*;
 use crate::project_config::{Target, TargetCommand, WalltimeOptions};
 use exec_harness::BenchmarkCommand;
@@ -92,9 +91,12 @@ pub fn build_exec_targets_pipe_command(
         .collect::<Result<Vec<_>>>()?;
 
     let json = serde_json::to_string(&inputs).context("Failed to serialize targets to JSON")?;
-    Ok(build_pipe_command_from_json(&json))
+    let current_exe = std::env::current_exe()
+        .context("failed to resolve current executable for exec-harness invocation")?;
+    let quoted_exe = shell_words::quote(&current_exe.to_string_lossy()).into_owned();
+    Ok(build_pipe_command_from_json(&quoted_exe, &json))
 }
 
-fn build_pipe_command_from_json(json: &str) -> String {
-    format!("{EXEC_HARNESS_COMMAND} - <<'CODSPEED_EOF'\n{json}\nCODSPEED_EOF")
+fn build_pipe_command_from_json(quoted_exe: &str, json: &str) -> String {
+    format!("{quoted_exe} tool exec-harness - <<'CODSPEED_EOF'\n{json}\nCODSPEED_EOF")
 }

@@ -1,6 +1,7 @@
-use clap::ValueEnum;
+use clap::{Parser, ValueEnum};
 use prelude::*;
 use serde::{Deserialize, Serialize};
+use std::ffi::OsString;
 use std::io::{self, BufRead};
 
 pub mod analysis;
@@ -81,6 +82,70 @@ pub fn execute_benchmarks(
             analysis::perform_with_valgrind(commands)?;
         }
     }
+
+    Ok(())
+}
+
+/// Top-level CLI parser for the exec-harness entry point. The same parser is
+/// used both by the standalone `exec-harness` binary (via [`run_cli`]) and by
+/// `codspeed tool exec-harness` in the main CLI.
+#[derive(Parser, Debug)]
+#[command(name = "exec-harness")]
+#[command(
+    version,
+    about = "CodSpeed exec harness - wraps commands with performance instrumentation"
+)]
+pub struct CliArgs {
+    /// Optional benchmark name, else the command will be used as the name
+    #[arg(long)]
+    name: Option<String>,
+
+    /// Set by the runner, should be coherent with the executor being used
+    #[arg(short, long, global = true, env = "CODSPEED_RUNNER_MODE", hide = true)]
+    measurement_mode: Option<MeasurementMode>,
+
+    #[command(flatten)]
+    walltime_args: walltime::WalltimeExecutionArgs,
+
+    /// The command and arguments to execute.
+    /// Use "-" as the only argument to read a JSON payload from stdin.
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    command: Vec<String>,
+}
+
+/// Parse `argv` as exec-harness CLI args (first element is the program name)
+/// and run the harness. Initializes `env_logger` on the way in so logs from
+/// the harness reach the runner's captured output.
+pub fn run_cli<I, T>(argv: I) -> Result<()>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<OsString> + Clone,
+{
+    env_logger::builder()
+        .parse_env(env_logger::Env::new().filter_or("CODSPEED_LOG", "info"))
+        .format(|buf, record| {
+            use std::io::Write;
+            writeln!(buf, "{}", record.args())
+        })
+        .try_init()
+        .ok();
+
+    debug!("Starting exec-harness with pid {}", std::process::id());
+
+    let args = CliArgs::parse_from(argv);
+    let measurement_mode = args.measurement_mode;
+
+    let commands = match args.command.as_slice() {
+        [single] if single == "-" => read_commands_from_stdin()?,
+        [] => bail!("No command provided"),
+        _ => vec![BenchmarkCommand {
+            command: args.command,
+            name: args.name,
+            walltime_args: args.walltime_args,
+        }],
+    };
+
+    execute_benchmarks(commands, measurement_mode)?;
 
     Ok(())
 }

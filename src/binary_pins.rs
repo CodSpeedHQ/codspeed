@@ -103,20 +103,6 @@ impl ValgrindTarget {
     }
 }
 
-const MEMTRACK_INSTALLER: BinaryPin = BinaryPin {
-    version: "1.2.3",
-    url_template: "https://github.com/CodSpeedHQ/codspeed/releases/download/memtrack-v{version}/memtrack-installer.sh",
-    sha256: "67f30ebe17d5da4246b51d8663394026385d95203ff09e81289772159e969603",
-};
-pub const MEMTRACK_VERSION: &str = MEMTRACK_INSTALLER.version;
-
-const EXEC_HARNESS_INSTALLER: BinaryPin = BinaryPin {
-    version: "1.3.0",
-    url_template: "https://github.com/CodSpeedHQ/codspeed/releases/download/exec-harness-v{version}/exec-harness-installer.sh",
-    sha256: "75cbff4fdaefe98927d24fff43fd600c621eb1263b0c40b0fd32c68fa6d88ebd",
-};
-pub const EXEC_HARNESS_VERSION: &str = EXEC_HARNESS_INSTALLER.version;
-
 const MONGO_TRACER_INSTALLER: BinaryPin = BinaryPin {
     version: "cs-mongo-tracer-v0.2.0",
     url_template: "https://codspeed-public-assets.s3.eu-west-1.amazonaws.com/mongo-tracer/{version}/cs-mongo-tracer-installer.sh",
@@ -129,8 +115,6 @@ const MONGO_TRACER_INSTALLER: BinaryPin = BinaryPin {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PinnedBinary {
     ValgrindDeb(ValgrindTarget),
-    MemtrackInstaller,
-    ExecHarnessInstaller,
     MongoTracerInstaller,
 }
 
@@ -138,8 +122,6 @@ impl PinnedBinary {
     pub fn url(&self) -> String {
         match self {
             PinnedBinary::ValgrindDeb(target) => target.url(),
-            PinnedBinary::MemtrackInstaller => MEMTRACK_INSTALLER.url(),
-            PinnedBinary::ExecHarnessInstaller => EXEC_HARNESS_INSTALLER.url(),
             PinnedBinary::MongoTracerInstaller => MONGO_TRACER_INSTALLER.url(),
         }
     }
@@ -147,8 +129,6 @@ impl PinnedBinary {
     pub fn sha256(&self) -> &'static str {
         match self {
             PinnedBinary::ValgrindDeb(target) => target.sha256(),
-            PinnedBinary::MemtrackInstaller => MEMTRACK_INSTALLER.sha256,
-            PinnedBinary::ExecHarnessInstaller => EXEC_HARNESS_INSTALLER.sha256,
             PinnedBinary::MongoTracerInstaller => MONGO_TRACER_INSTALLER.sha256,
         }
     }
@@ -160,11 +140,7 @@ mod tests {
     use crate::cli::run::helpers::download_pinned_file;
     use tempfile::NamedTempFile;
 
-    const INSTALLER_BINARIES: &[PinnedBinary] = &[
-        PinnedBinary::MemtrackInstaller,
-        PinnedBinary::ExecHarnessInstaller,
-        PinnedBinary::MongoTracerInstaller,
-    ];
+    const INSTALLER_BINARIES: &[PinnedBinary] = &[PinnedBinary::MongoTracerInstaller];
 
     const ALL_VALGRIND_TARGETS: &[ValgrindTarget] = &[
         ValgrindTarget {
@@ -188,9 +164,7 @@ mod tests {
     fn assert_installer_variant_is_listed(binary: PinnedBinary) {
         match binary {
             PinnedBinary::ValgrindDeb(_) => {}
-            PinnedBinary::MemtrackInstaller
-            | PinnedBinary::ExecHarnessInstaller
-            | PinnedBinary::MongoTracerInstaller => {
+            PinnedBinary::MongoTracerInstaller => {
                 assert!(INSTALLER_BINARIES.contains(&binary));
             }
         }
@@ -206,8 +180,6 @@ mod tests {
 
     #[test]
     fn installer_variant_list_is_exhaustive() {
-        assert_installer_variant_is_listed(PinnedBinary::MemtrackInstaller);
-        assert_installer_variant_is_listed(PinnedBinary::ExecHarnessInstaller);
         assert_installer_variant_is_listed(PinnedBinary::MongoTracerInstaller);
     }
 

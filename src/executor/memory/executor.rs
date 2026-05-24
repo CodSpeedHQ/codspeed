@@ -27,8 +27,6 @@ use std::rc::Rc;
 use tempfile::NamedTempFile;
 use tokio::time::{Duration, timeout};
 
-use super::setup::{MEMTRACK_COMMAND, get_memtrack_status, install_memtrack};
-
 pub struct MemoryExecutor;
 
 impl MemoryExecutor {
@@ -40,8 +38,13 @@ impl MemoryExecutor {
         // Setup memtrack IPC server
         let (ipc_server, server_name) = ipc::IpcOneShotServer::new()?;
 
-        // Build the memtrack command
-        let mut cmd_builder = CommandBuilder::new(MEMTRACK_COMMAND);
+        // Build the memtrack command via `codspeed tool memtrack track …`
+        // (re-exec into the bundled subcommand instead of a standalone binary).
+        let current_exe = std::env::current_exe()
+            .context("failed to resolve current executable for memtrack invocation")?;
+        let mut cmd_builder = CommandBuilder::new(current_exe);
+        cmd_builder.arg("tool");
+        cmd_builder.arg("memtrack");
         cmd_builder.arg("track");
         cmd_builder.arg("--output");
         cmd_builder.arg(execution_context.profile_folder.join("results"));
@@ -74,7 +77,10 @@ impl Executor for MemoryExecutor {
     }
 
     fn tool_status(&self) -> Option<ToolStatus> {
-        Some(get_memtrack_status())
+        // memtrack is bundled into the main `codspeed` binary as the
+        // `tool memtrack` subcommand, so there is no external tool to
+        // check the status of.
+        None
     }
 
     fn support_level(&self, system_info: &SystemInfo) -> ExecutorSupport {
@@ -89,7 +95,8 @@ impl Executor for MemoryExecutor {
         _system_info: &SystemInfo,
         _setup_cache_dir: Option<&Path>,
     ) -> Result<()> {
-        install_memtrack().await
+        // memtrack is bundled into the main `codspeed` binary; nothing to install.
+        Ok(())
     }
 
     async fn run(
