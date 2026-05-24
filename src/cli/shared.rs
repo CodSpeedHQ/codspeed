@@ -96,7 +96,7 @@ pub struct ExecAndRunSharedArgs {
     pub allow_empty: bool,
 
     /// The version of the go-runner to use (e.g., 1.2.3, 1.0.0-beta.1)
-    /// If not specified, the latest version will be installed
+    /// If not specified, the runner installs the pinned default version
     #[arg(long, env = "CODSPEED_GO_RUNNER_VERSION", value_parser = parse_version)]
     pub go_runner_version: Option<semver::Version>,
 
