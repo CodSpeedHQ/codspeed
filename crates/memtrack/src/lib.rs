@@ -1,5 +1,7 @@
 mod allocators;
 #[cfg(feature = "ebpf")]
+mod cli;
+#[cfg(feature = "ebpf")]
 mod ebpf;
 mod ipc;
 pub mod prelude;
@@ -15,3 +17,6 @@ pub use ebpf::*;
 
 #[cfg(feature = "ebpf")]
 pub use ipc::handle_ipc_message;
+
+#[cfg(feature = "ebpf")]
+pub use cli::run_cli;

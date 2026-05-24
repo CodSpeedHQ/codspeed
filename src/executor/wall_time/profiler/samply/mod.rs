@@ -1,7 +1,7 @@
 //! Samply profiler integration.
 
-use crate::cli::InternalCommands;
-use crate::cli::samply::SamplyArgs;
+use crate::cli::tool::ToolCommand;
+use crate::cli::tool::samply::SamplyArgs;
 use crate::executor::ExecutorConfig;
 use crate::executor::helpers::command::CommandBuilder;
 use crate::executor::shared::fifo::FifoBenchmarkData;
@@ -82,9 +82,9 @@ impl Profiler for SamplyProfiler {
     ) -> anyhow::Result<CommandBuilder> {
         let output_path = profile_folder.join(SAMPLY_OUTPUT_FILE_NAME);
 
-        // samply is bundled into this binary as the `samply` subcommand;
+        // samply is bundled into this binary as the `tool samply` subcommand;
         // re-exec ourselves so we don't depend on a system install.
-        let samply_builder = InternalCommands::Samply(SamplyArgs {
+        let samply_builder = ToolCommand::Samply(SamplyArgs {
             args: vec![
                 "record".into(),
                 "--presymbolicate".into(),

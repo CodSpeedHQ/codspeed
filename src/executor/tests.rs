@@ -338,12 +338,37 @@ fi
         EXEC_HARNESS_COMMANDS.to_vec()
     }
 
+    /// Locate the `codspeed` binary built alongside the test runner so we can
+    /// invoke `codspeed tool exec-harness …` directly. The test binary lives
+    /// in `target/<profile>/deps/<name>-<hash>`; the workspace binaries are
+    /// one directory up at `target/<profile>/<name>`.
+    fn workspace_binary(name: &str) -> std::path::PathBuf {
+        let test_exe = std::env::current_exe().expect("failed to resolve test executable");
+        let bin_dir = test_exe
+            .parent()
+            .and_then(|p| p.parent())
+            .expect("unexpected test binary layout");
+        let bin = bin_dir.join(name);
+        assert!(
+            bin.exists(),
+            "expected {} to exist at {} \u{2014} run `cargo build --bin {name}` first",
+            name,
+            bin.display(),
+        );
+        bin
+    }
+
     fn wrap_with_exec_harness(
         walltime_args: &exec_harness::walltime::WalltimeExecutionArgs,
         command: &[String],
     ) -> String {
+        // Invoke the in-tree exec-harness via `codspeed tool exec-harness …`
+        // so tests use the same path as the runner does in production.
+        let codspeed_bin = workspace_binary("codspeed");
+        let codspeed_bin = codspeed_bin.to_string_lossy().into_owned();
         shell_words::join(
-            std::iter::once(crate::executor::orchestrator::EXEC_HARNESS_COMMAND)
+            [codspeed_bin.as_str(), "tool", "exec-harness"]
+                .into_iter()
                 .chain(walltime_args.to_cli_args().iter().map(|s| s.as_str()))
                 .chain(command.iter().map(|s| s.as_str())),
         )

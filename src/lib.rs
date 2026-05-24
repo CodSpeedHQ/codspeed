@@ -1,7 +1,6 @@
 //! CodSpeed Runner library
 
 mod api_client;
-mod binary_installer;
 mod binary_pins;
 pub mod cli;
 mod config;

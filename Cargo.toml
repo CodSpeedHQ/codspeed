@@ -79,6 +79,10 @@ samply = { git = "https://github.com/CodSpeedHQ/samply-codspeed", branch = "cods
 
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = "0.17.0"
+# Enable the memtrack `ebpf` feature only on Linux so `codspeed tool memtrack`
+# actually runs there. macOS builds keep memtrack as the IPC-client shell with
+# no eBPF code; `codspeed tool memtrack` on macOS bails with a clear error.
+memtrack = { path = "crates/memtrack", features = ["ebpf"] }
 
 [dev-dependencies]
 temp-env = { version = "0.3.6", features = ["async_closure"] }
