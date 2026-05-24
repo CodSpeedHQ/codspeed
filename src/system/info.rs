@@ -109,9 +109,8 @@ impl SystemInfo {
                 .with_cpu(CpuRefreshKind::everything())
                 .with_memory(MemoryRefreshKind::everything()),
         );
-        let cpu_cores = s
-            .physical_core_count()
-            .ok_or(anyhow!("Failed to get CPU core count"))?;
+        let cpu_cores =
+            System::physical_core_count().ok_or(anyhow!("Failed to get CPU core count"))?;
         let total_memory_gb = s.total_memory().div_ceil(1024_u64.pow(3));
 
         // take the first CPU to get the brand, name and vendor id

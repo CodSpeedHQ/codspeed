@@ -134,7 +134,7 @@ fn detect_repository() -> Option<ParsedRepository> {
     let root_path = find_repository_root(&current_dir)?;
     let git_repository = Repository::open(&root_path).ok()?;
     let remote = git_repository.find_remote("origin").ok()?;
-    let url = remote.url()?;
+    let url = remote.url().ok()?;
     parse_repository_from_remote(url).ok()
 }
 

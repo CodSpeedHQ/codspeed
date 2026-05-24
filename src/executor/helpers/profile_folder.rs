@@ -1,7 +1,7 @@
 use crate::prelude::*;
 
-use rand::distributions::Alphanumeric;
-use rand::distributions::DistString;
+use rand::distr::Alphanumeric;
+use rand::distr::SampleString;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
@@ -9,7 +9,7 @@ use std::path::PathBuf;
 pub fn create_profile_folder() -> Result<PathBuf> {
     let folder_name = format!(
         "profile.{}.out",
-        Alphanumeric.sample_string(&mut rand::thread_rng(), 10)
+        Alphanumeric.sample_string(&mut rand::rng(), 10)
     );
     let mut folder_path = env::temp_dir();
     folder_path.push(folder_name);
