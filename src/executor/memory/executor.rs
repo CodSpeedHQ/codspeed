@@ -1,3 +1,5 @@
+use crate::cli::tool::ToolCommand;
+use crate::cli::tool::memtrack::MemtrackArgs;
 use crate::executor::ExecutorName;
 use crate::executor::ExecutorSupport;
 use crate::executor::ToolStatus;
@@ -40,17 +42,17 @@ impl MemoryExecutor {
 
         // Build the memtrack command via `codspeed tool memtrack track …`
         // (re-exec into the bundled subcommand instead of a standalone binary).
-        let current_exe = std::env::current_exe()
-            .context("failed to resolve current executable for memtrack invocation")?;
-        let mut cmd_builder = CommandBuilder::new(current_exe);
-        cmd_builder.arg("tool");
-        cmd_builder.arg("memtrack");
-        cmd_builder.arg("track");
-        cmd_builder.arg("--output");
-        cmd_builder.arg(execution_context.profile_folder.join("results"));
-        cmd_builder.arg("--ipc-server");
-        cmd_builder.arg(server_name);
-        cmd_builder.arg(get_bench_command(&execution_context.config)?);
+        let mut cmd_builder = ToolCommand::Memtrack(MemtrackArgs {
+            args: vec![
+                "track".into(),
+                "--output".into(),
+                execution_context.profile_folder.join("results").into(),
+                "--ipc-server".into(),
+                server_name.into(),
+                get_bench_command(&execution_context.config)?.into(),
+            ],
+        })
+        .get_command_builder()?;
 
         // Set working directory if specified
         if let Some(cwd) = &execution_context.config.working_directory {

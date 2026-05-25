@@ -1,3 +1,5 @@
+use crate::cli::tool::ToolCommand;
+use crate::cli::tool::exec_harness::ExecHarnessArgs;
 use crate::executor::config::BenchmarkTarget;
 use crate::prelude::*;
 use crate::project_config::{Target, TargetCommand, WalltimeOptions};
@@ -91,12 +93,17 @@ pub fn build_exec_targets_pipe_command(
         .collect::<Result<Vec<_>>>()?;
 
     let json = serde_json::to_string(&inputs).context("Failed to serialize targets to JSON")?;
-    let current_exe = std::env::current_exe()
-        .context("failed to resolve current executable for exec-harness invocation")?;
-    let quoted_exe = shell_words::quote(&current_exe.to_string_lossy()).into_owned();
-    Ok(build_pipe_command_from_json(&quoted_exe, &json))
+    // Render `<current_exe> tool exec-harness -` as a shell-quoted string via
+    // the same `ToolCommand` abstraction the rest of the runner uses for
+    // re-exec, then splice it into the heredoc.
+    let prefix = ToolCommand::ExecHarness(ExecHarnessArgs {
+        args: vec!["-".into()],
+    })
+    .get_command_builder()?
+    .to_shell_command()?;
+    Ok(build_pipe_command_from_json(&prefix, &json))
 }
 
-fn build_pipe_command_from_json(quoted_exe: &str, json: &str) -> String {
-    format!("{quoted_exe} tool exec-harness - <<'CODSPEED_EOF'\n{json}\nCODSPEED_EOF")
+fn build_pipe_command_from_json(prefix: &str, json: &str) -> String {
+    format!("{prefix} <<'CODSPEED_EOF'\n{json}\nCODSPEED_EOF")
 }

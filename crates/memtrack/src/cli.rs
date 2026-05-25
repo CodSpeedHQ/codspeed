@@ -144,12 +144,15 @@ fn track_command(
     let (write_tx, write_rx) = channel::<MemtrackEvent>();
 
     // Stage A: Fast drain thread - This is required so that we immediately clear the ring buffer
-    // because it only has a limited size.
-    static DRAIN_EVENTS: AtomicBool = AtomicBool::new(true);
+    // because it only has a limited size. The signal is per-call (was a function-scoped
+    // `static` when this lived in `main.rs`; in library form a second call would otherwise
+    // see the previous run's `false` and skip the regular draining loop entirely).
+    let drain_events = Arc::new(AtomicBool::new(true));
+    let drain_events_for_thread = drain_events.clone();
     let write_tx_clone = write_tx.clone();
     let drain_thread = thread::spawn(move || {
         // Regular draining loop
-        while DRAIN_EVENTS.load(Ordering::Relaxed) {
+        while drain_events_for_thread.load(Ordering::Relaxed) {
             let Ok(event) = event_rx.recv_timeout(Duration::from_millis(100)) else {
                 continue;
             };
@@ -203,7 +206,7 @@ fn track_command(
 
     // Wait for drain thread to finish
     debug!("Waiting for the drain thread to finish");
-    DRAIN_EVENTS.store(false, Ordering::Relaxed);
+    drain_events.store(false, Ordering::Relaxed);
     drain_thread
         .join()
         .map_err(|_| anyhow::anyhow!("Failed to join drain thread"))?;

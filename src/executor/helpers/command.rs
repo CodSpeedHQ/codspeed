@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use std::{
     collections::BTreeMap,
     ffi::{OsStr, OsString},
@@ -117,7 +118,10 @@ impl CommandBuilder {
         self
     }
 
-    /// Returns the command line as a string for debugging/testing purposes
+    /// Returns the command line as a string for debugging/testing purposes.
+    /// Lossy: non-UTF-8 bytes in the program path or args are replaced with
+    /// `\u{FFFD}`. Do not use to build commands that will actually be run via
+    /// a shell — use [`Self::to_shell_command`] for that.
     pub fn as_command_line(&self) -> String {
         let mut parts: Vec<String> = vec![self.program.to_string_lossy().into_owned()];
         parts.extend(
@@ -126,6 +130,25 @@ impl CommandBuilder {
                 .map(|arg| arg.to_string_lossy().into_owned()),
         );
         shell_words::join(parts)
+    }
+
+    /// Render the command as a shell-quoted string suitable for embedding in
+    /// `bash -c …`. Fails if the program path or any argument is not valid
+    /// UTF-8 — silently mangling a non-UTF-8 path would produce a shell
+    /// command that exec's the wrong binary.
+    pub fn to_shell_command(&self) -> Result<String> {
+        let program = self
+            .program
+            .to_str()
+            .context("program path is not valid UTF-8 and cannot be shell-embedded")?;
+        let mut parts: Vec<&str> = vec![program];
+        for arg in &self.argv {
+            parts.push(
+                arg.to_str()
+                    .context("argument is not valid UTF-8 and cannot be shell-embedded")?,
+            );
+        }
+        Ok(shell_words::join(parts))
     }
 }
 
