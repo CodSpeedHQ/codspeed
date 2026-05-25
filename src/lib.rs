@@ -14,6 +14,7 @@ mod project_config;
 mod request_client;
 mod run_environment;
 mod runner_mode;
+mod shell_session_store;
 mod system;
 mod upload;
 

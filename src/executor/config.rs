@@ -139,8 +139,6 @@ impl RepositoryOverride {
     }
 }
 
-pub const DEFAULT_UPLOAD_URL: &str = "https://api.codspeed.io/upload";
-
 impl OrchestratorConfig {
     /// Compute the total number of executor runs that will be performed.
     ///
@@ -193,7 +191,7 @@ impl OrchestratorConfig {
     /// Constructs a new `OrchestratorConfig` with default values for testing purposes
     pub fn test() -> Self {
         Self {
-            upload_url: Url::parse(DEFAULT_UPLOAD_URL).unwrap(),
+            upload_url: Url::parse(crate::config::DEFAULT_UPLOAD_URL).unwrap(),
             repository_override: None,
             working_directory: None,
             targets: vec![BenchmarkTarget::Entrypoint {
