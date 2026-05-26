@@ -1,5 +1,22 @@
 # Contributing to CodSpeed Runner
 
+## Getting Started
+
+### Prerequisites
+
+- [Rust](https://rustup.rs/)
+- [Git LFS](https://github.com/git-lfs/git-lfs/blob/main/INSTALLING.md) (required for test fixtures)
+
+### Setup
+
+After cloning the repository, initialize the submodules and fetch the test fixtures:
+
+```bash
+git submodule update --init --recursive
+git lfs install
+git lfs pull
+```
+
 ## Release Process
 
 This repository is a Cargo workspace containing multiple crates. The release process differs depending on which crate you're releasing.
