@@ -1,6 +1,7 @@
 mod auth;
 pub(crate) mod exec;
 pub(crate) mod experimental;
+mod profile;
 pub(crate) mod run;
 pub(crate) mod samply;
 mod setup;
@@ -16,7 +17,7 @@ use std::path::PathBuf;
 
 use crate::{
     api_client::CodSpeedAPIClient,
-    config::CodSpeedConfig,
+    config::{CodSpeedConfig, ConfigOverrides},
     executor::helpers::command::CommandBuilder,
     local_logger::{CODSPEED_U8_COLOR_CODE, init_local_logger},
     prelude::*,
@@ -41,24 +42,22 @@ fn create_styles() -> Styles {
 #[command(version, about = "The CodSpeed CLI tool", styles = create_styles())]
 pub struct Cli {
     /// The URL of the CodSpeed GraphQL API
-    #[arg(
-        long,
-        env = "CODSPEED_API_URL",
-        global = true,
-        hide = true,
-        default_value = "https://gql.codspeed.io/"
-    )]
-    pub api_url: String,
+    #[arg(long, env = "CODSPEED_API_URL", global = true, hide = true)]
+    pub api_url: Option<String>,
 
     /// The OAuth token to use for all requests
     #[arg(long, env = "CODSPEED_OAUTH_TOKEN", global = true, hide = true)]
     pub oauth_token: Option<String>,
 
-    /// The configuration name to use
-    /// If provided, the configuration will be loaded from ~/.config/codspeed/{config-name}.yaml
-    /// Otherwise, loads from ~/.config/codspeed/config.yaml
-    #[arg(long, env = "CODSPEED_CONFIG_NAME", global = true)]
+    /// [deprecated] Load configuration from `~/.config/codspeed/{config-name}.yaml`
+    /// instead of the default `config.yaml`. Prefer `--profile` instead.
+    #[arg(long, env = "CODSPEED_CONFIG_NAME", global = true, hide = true)]
+    #[deprecated(note = "use `--profile` / `CODSPEED_PROFILE` instead")]
     pub config_name: Option<String>,
+
+    /// The CodSpeed profile to use
+    #[arg(long, env = "CODSPEED_PROFILE", global = true)]
+    pub profile: Option<String>,
 
     /// Path to project configuration file (codspeed.yaml)
     /// If provided, loads config from this path. Otherwise, searches for config files
@@ -88,6 +87,8 @@ enum Commands {
     Exec(Box<exec::ExecArgs>),
     /// Manage the CLI authentication state
     Auth(auth::AuthArgs),
+    /// Manage CodSpeed profiles
+    Profile(profile::ProfileArgs),
     /// Pre-install the codspeed executors
     Setup(setup::SetupArgs),
     /// Show the overall status of CodSpeed (authentication, tools, system)
@@ -130,7 +131,8 @@ impl InternalCommands {
 
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
-    let mut api_client = build_api_client(&cli)?;
+    let codspeed_config = load_config(&cli)?;
+    let mut api_client = build_api_client(&cli, &codspeed_config);
 
     // Discover project configuration file
     let discovered_config = DiscoveredProjectConfig::discover_and_load(
@@ -154,9 +156,13 @@ pub async fn run() -> Result<()> {
 
     match cli.command {
         Commands::Run(args) => {
+            let mut args = *args;
+            args.shared
+                .upload_url
+                .get_or_insert_with(|| codspeed_config.upload_url.clone());
             args.shared.experimental.warn_if_active();
             run::run(
-                *args,
+                args,
                 &mut api_client,
                 discovered_config.as_ref(),
                 setup_cache_dir,
@@ -164,24 +170,65 @@ pub async fn run() -> Result<()> {
             .await?
         }
         Commands::Exec(args) => {
+            let mut args = *args;
+            args.shared
+                .upload_url
+                .get_or_insert_with(|| codspeed_config.upload_url.clone());
             args.shared.experimental.warn_if_active();
             exec::run(
-                *args,
+                args,
                 &mut api_client,
                 discovered_config.as_ref().map(|d| &d.config),
                 setup_cache_dir,
             )
             .await?
         }
-        Commands::Auth(args) => auth::run(args, &api_client, cli.config_name.as_deref()).await?,
+        Commands::Auth(args) => {
+            #[allow(deprecated)]
+            let config_name = cli.config_name.as_deref();
+            auth::run(args, &api_client, config_name, codspeed_config).await?
+        }
+        Commands::Profile(args) => {
+            #[allow(deprecated)]
+            let config_name = cli.config_name.as_deref();
+            profile::run(args, config_name, cli.profile.as_deref())?
+        }
         Commands::Setup(args) => setup::run(args, setup_cache_dir).await?,
-        Commands::Status => status::run(&api_client).await?,
+        Commands::Status => status::run(&api_client, &codspeed_config).await?,
         Commands::Use(args) => use_mode::run(args)?,
         Commands::Show => show::run()?,
         Commands::Update => update::run().await?,
         Commands::Internal(InternalCommands::Samply(args)) => samply::run(args)?,
     }
     Ok(())
+}
+
+/// Load the CodSpeed config for this invocation, resolving the active
+/// profile (CLI `--profile` / `CODSPEED_PROFILE` / shell-session / built-in
+/// `default`) and applying CLI overrides for the OAuth token and api URL.
+///
+/// `auth` and `profile` subcommands are allowed to run against a config
+/// where the selected profile does not yet exist (e.g. first-time setup).
+fn load_config(cli: &Cli) -> Result<CodSpeedConfig> {
+    // The field carries a `#[deprecated]` marker but we still need to
+    // honour it during the deprecation window.
+    #[allow(deprecated)]
+    let config_name = cli.config_name.as_deref();
+    if config_name.is_some() {
+        warn!(
+            "`--config-name` / `CODSPEED_CONFIG_NAME` is deprecated; use `--profile` / `CODSPEED_PROFILE` instead."
+        );
+    }
+    CodSpeedConfig::load_with_profile(
+        config_name,
+        cli.profile.as_deref(),
+        ConfigOverrides {
+            oauth_token: cli.oauth_token.as_deref(),
+            api_url: cli.api_url.as_deref(),
+            upload_url: None,
+        },
+        matches!(&cli.command, Commands::Auth(_) | Commands::Profile(_)),
+    )
 }
 
 /// Build the api client for this invocation, resolving the auth token
@@ -193,13 +240,8 @@ pub async fn run() -> Result<()> {
 /// Priority (most specific first):
 ///   1. `--token` / `CODSPEED_TOKEN`           — run/exec-level override
 ///   2. `--oauth-token` / `CODSPEED_OAUTH_TOKEN` and the persisted CLI
-///      token — both live on disk and are loaded together by
-///      [`CodSpeedConfig::load_with_override`].
-///
-/// The CLI config file is only read when no explicit token was passed,
-/// so an invocation like `codspeed run --token <X>` never touches the
-/// user's `~/.config/codspeed/`.
-fn build_api_client(cli: &Cli) -> Result<CodSpeedAPIClient> {
+///      token from the selected profile.
+fn build_api_client(cli: &Cli, config: &CodSpeedConfig) -> CodSpeedAPIClient {
     let explicit = match &cli.command {
         Commands::Run(args) => args.shared.token.clone(),
         Commands::Exec(args) => args.shared.token.clone(),
@@ -207,14 +249,7 @@ fn build_api_client(cli: &Cli) -> Result<CodSpeedAPIClient> {
     };
     let token = match explicit {
         Some(token) => Some(token),
-        None => {
-            CodSpeedConfig::load_with_override(
-                cli.config_name.as_deref(),
-                cli.oauth_token.as_deref(),
-            )?
-            .auth
-            .token
-        }
+        None => config.auth.token.clone(),
     };
-    Ok(CodSpeedAPIClient::new(token, cli.api_url.clone()))
+    CodSpeedAPIClient::new(token, config.api_url.clone())
 }

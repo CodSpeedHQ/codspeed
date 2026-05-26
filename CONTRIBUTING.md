@@ -1,5 +1,13 @@
 # Contributing to CodSpeed Runner
 
+## Initial Setup
+
+After cloning, install the pre-commit hooks:
+
+```bash
+prek install
+```
+
 ## Release Process
 
 This repository is a Cargo workspace containing multiple crates. The release process differs depending on which crate you're releasing.

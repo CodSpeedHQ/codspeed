@@ -1,7 +1,7 @@
 use super::ExecAndRunSharedArgs;
 use crate::api_client::CodSpeedAPIClient;
 use crate::executor;
-use crate::executor::config::{self, OrchestratorConfig, RepositoryOverride};
+use crate::executor::config::{OrchestratorConfig, RepositoryOverride};
 use crate::instruments::Instruments;
 use crate::prelude::*;
 use crate::project_config::DiscoveredProjectConfig;
@@ -97,7 +97,7 @@ fn build_orchestrator_config(
     let raw_upload_url = args
         .shared
         .upload_url
-        .unwrap_or_else(|| config::DEFAULT_UPLOAD_URL.into());
+        .unwrap_or_else(|| crate::config::DEFAULT_UPLOAD_URL.into());
     let upload_url = Url::parse(&raw_upload_url)
         .map_err(|e| anyhow!("Invalid upload URL: {raw_upload_url}, {e}"))?;
 

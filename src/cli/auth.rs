@@ -39,10 +39,13 @@ pub async fn run(
     args: AuthArgs,
     api_client: &CodSpeedAPIClient,
     config_name: Option<&str>,
+    config: CodSpeedConfig,
 ) -> Result<()> {
     match args.command {
-        AuthCommands::Login { with_token } => login(api_client, config_name, with_token).await?,
-        AuthCommands::Status => status(api_client).await?,
+        AuthCommands::Login { with_token } => {
+            login(api_client, config_name, config, with_token).await?
+        }
+        AuthCommands::Status => status(api_client, &config).await?,
     }
     Ok(())
 }
@@ -52,6 +55,7 @@ const LOGIN_SESSION_MAX_DURATION: Duration = Duration::from_secs(60 * 5); // 5 m
 async fn login(
     api_client: &CodSpeedAPIClient,
     config_name: Option<&str>,
+    mut config: CodSpeedConfig,
     with_token: bool,
 ) -> Result<()> {
     debug!("Login to CodSpeed");
@@ -118,12 +122,15 @@ async fn login(
             SessionError::Other(err) => err,
         })?;
 
-    let mut config = CodSpeedConfig::load_with_override(config_name, None)?;
-    config.auth.token = Some(token);
+    let selected = config.selected_profile_name().to_owned();
+    config.profile_mut(&selected).auth.token = Some(token);
     config.persist(config_name)?;
     debug!("Token saved to configuration file");
 
-    info!("Login successful, your are now authenticated on CodSpeed");
+    info!(
+        "Login successful, you are now authenticated on CodSpeed (profile: {})",
+        config.selected_profile_name()
+    );
 
     Ok(())
 }
@@ -147,8 +154,7 @@ struct AuthStatus {
     detected_repository: Option<(ParsedRepository, Option<RepositoryOverviewPayload>)>,
 }
 
-pub async fn status(api_client: &CodSpeedAPIClient) -> Result<()> {
-    let config = CodSpeedConfig::load_with_override(None, None)?;
+pub async fn status(api_client: &CodSpeedAPIClient, config: &CodSpeedConfig) -> Result<()> {
     let has_token = config.auth.token.is_some();
     let parsed = detect_repository();
 
@@ -161,7 +167,11 @@ pub async fn status(api_client: &CodSpeedAPIClient) -> Result<()> {
         }
     };
 
-    info!("{}", style("Authentication").bold());
+    info!(
+        "{} (profile: {})",
+        style("Authentication").bold(),
+        config.selected_profile_name()
+    );
     print_authentication_section(has_token, auth_status.session.as_ref());
     info!("");
 
