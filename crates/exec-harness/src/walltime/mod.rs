@@ -28,8 +28,12 @@ pub fn perform(commands: Vec<BenchmarkCommand>) -> Result<()> {
             ..
         } = name_and_uri;
 
-        let times_per_round_ns =
-            benchmark_loop::run_rounds(bench_uri.clone(), cmd.command, &execution_options)?;
+        let times_per_round_ns = benchmark_loop::run_rounds(
+            bench_uri.clone(),
+            cmd.command,
+            &execution_options,
+            cmd.ignore_failure,
+        )?;
 
         // Collect walltime results
         let max_time_ns = times_per_round_ns.iter().copied().max();
