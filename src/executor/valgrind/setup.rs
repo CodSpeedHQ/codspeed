@@ -53,26 +53,38 @@ pub(super) fn is_codspeed_valgrind_installation_supported(system_info: &SystemIn
     get_codspeed_valgrind_target(system_info).is_ok()
 }
 
-/// Parse a valgrind version string and extract the semantic version.
-/// Expected format: "valgrind-3.25.1.codspeed" or "3.25.1.codspeed"
-/// Returns Some(Version) if parsing succeeds, None otherwise.
-fn parse_valgrind_codspeed_version(version_str: &str) -> Option<Version> {
-    let version_str = version_str.trim();
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ValgrindVersion {
+    semver: Version,
+    codspeed_iteration: Option<u32>,
+}
 
-    // Extract the version numbers before .codspeed
-    let version_part = if let Some(codspeed_idx) = version_str.find(".codspeed") {
-        &version_str[..codspeed_idx]
+/// Parse a valgrind version string and extract the upstream semver plus the
+/// optional CodSpeed iteration number.
+///
+/// Accepted formats:
+/// - `valgrind-3.25.1.codspeed`  (legacy, no iteration)
+/// - `valgrind-3.25.1.codspeed2` (with iteration)
+/// - same forms without the `valgrind-` prefix
+fn parse_valgrind_codspeed_version(version_str: &str) -> Option<ValgrindVersion> {
+    let stripped = version_str
+        .trim()
+        .strip_prefix("valgrind-")
+        .unwrap_or(version_str.trim());
+
+    let (semver_part, iteration_part) = stripped.split_once(".codspeed")?;
+    let semver = Version::parse(semver_part).ok()?;
+
+    let codspeed_iteration = if iteration_part.is_empty() {
+        None
     } else {
-        return None;
+        Some(iteration_part.parse::<u32>().ok()?)
     };
 
-    // Remove "valgrind-" prefix if present
-    let version_part = version_part
-        .strip_prefix("valgrind-")
-        .unwrap_or(version_part);
-
-    // Parse using semver
-    Version::parse(version_part).ok()
+    Some(ValgrindVersion {
+        semver,
+        codspeed_iteration,
+    })
 }
 
 const TOOL_NAME: &str = "valgrind";
@@ -136,7 +148,7 @@ pub fn get_valgrind_status() -> ToolStatus {
         };
     };
 
-    if installed_version < VALGRIND_CODSPEED_VERSION {
+    if installed_version.semver < VALGRIND_CODSPEED_VERSION {
         return ToolStatus {
             tool_name,
             status: ToolInstallStatus::IncorrectVersion {
@@ -275,30 +287,47 @@ mod tests {
     #[test]
     fn test_parse_valgrind_codspeed_version_with_prefix() {
         let version = parse_valgrind_codspeed_version("valgrind-3.25.1.codspeed").unwrap();
-        assert_eq!(version, Version::new(3, 25, 1));
+        assert_eq!(version.semver, Version::new(3, 25, 1));
+        assert_eq!(version.codspeed_iteration, None);
     }
 
     #[test]
     fn test_parse_valgrind_codspeed_version_without_prefix() {
         let version = parse_valgrind_codspeed_version("3.25.1.codspeed").unwrap();
-        assert_eq!(version, Version::new(3, 25, 1));
+        assert_eq!(version.semver, Version::new(3, 25, 1));
+        assert_eq!(version.codspeed_iteration, None);
     }
 
     #[test]
     fn test_parse_valgrind_codspeed_version_higher_patch() {
         let version = parse_valgrind_codspeed_version("valgrind-3.25.2.codspeed").unwrap();
-        assert_eq!(version, Version::new(3, 25, 2));
+        assert_eq!(version.semver, Version::new(3, 25, 2));
     }
 
     #[test]
     fn test_parse_valgrind_codspeed_version_with_newline() {
         let version = parse_valgrind_codspeed_version("valgrind-3.25.1.codspeed\n").unwrap();
-        assert_eq!(version, Version::new(3, 25, 1));
+        assert_eq!(version.semver, Version::new(3, 25, 1));
     }
 
     #[test]
     fn test_parse_valgrind_codspeed_version_without_codspeed_suffix() {
         assert_eq!(parse_valgrind_codspeed_version("valgrind-3.25.1"), None);
+    }
+
+    #[test]
+    fn test_parse_valgrind_codspeed_version_iterations_are_differentiated() {
+        let legacy = parse_valgrind_codspeed_version("valgrind-3.26.0.codspeed").unwrap();
+        let v1 = parse_valgrind_codspeed_version("valgrind-3.26.0.codspeed1").unwrap();
+        let v2 = parse_valgrind_codspeed_version("valgrind-3.26.0.codspeed2").unwrap();
+
+        assert_eq!(legacy.semver, v1.semver);
+        assert_eq!(legacy.codspeed_iteration, None);
+        assert_eq!(v1.codspeed_iteration, Some(1));
+        assert_eq!(v2.codspeed_iteration, Some(2));
+
+        assert_ne!(legacy, v1);
+        assert_ne!(v1, v2);
     }
 
     #[test]
