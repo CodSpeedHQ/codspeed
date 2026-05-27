@@ -59,6 +59,8 @@ fn normalize_object_paths(objects_path_to_ignore: &mut [String]) {
 }
 
 pub fn get_objects_path_to_ignore() -> Vec<String> {
+    return vec![];
+
     let mut objects_path_to_ignore = vec![];
     objects_path_to_ignore.extend(get_python_objects());
     objects_path_to_ignore.extend(get_node_objects());
