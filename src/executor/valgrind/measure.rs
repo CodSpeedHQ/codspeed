@@ -19,7 +19,10 @@ use tempfile::TempPath;
 /// Builds the Valgrind argument list for the given simulation tool.
 fn get_valgrind_args(tool: &SimulationTool, config: &ExecutorConfig) -> Vec<String> {
     let mut args: Vec<String> = [
-        "-q",
+        "-v",
+        "-v",
+        "-v",
+        "-v",
         "--trace-children=yes",
         "--cache-sim=yes",
         "--I1=32768,8,64",
