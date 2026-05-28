@@ -1279,8 +1279,7 @@ dependencies = [
 [[package]]
 name = "framehop"
 version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f54fe4785e899d4d6f43793b151c63c5647240fc630b005509d2614a939f693"
+source = "git+https://github.com/CodSpeedHQ/framehop?rev=3a47fc0965df8221ee180547b70c3aa04d93b795#3a47fc0965df8221ee180547b70c3aa04d93b795"
 dependencies = [
  "arrayvec",
  "cfg-if",
@@ -1403,7 +1402,7 @@ dependencies = [
 [[package]]
 name = "fxprof-processed-profile"
 version = "0.8.1"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?branch=codspeed#7fbe8e5e2412b0cbbab7668f4321d4fbac84529c"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=9fbce607f687e1eac06ad6011d2006e2d77a5025#9fbce607f687e1eac06ad6011d2006e2d77a5025"
 dependencies = [
  "bitflags 2.11.1",
  "debugid",
@@ -4078,7 +4077,7 @@ dependencies = [
 [[package]]
 name = "samply"
 version = "0.13.1"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?branch=codspeed#7fbe8e5e2412b0cbbab7668f4321d4fbac84529c"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=9fbce607f687e1eac06ad6011d2006e2d77a5025#9fbce607f687e1eac06ad6011d2006e2d77a5025"
 dependencies = [
  "bitflags 2.11.1",
  "byteorder",
@@ -4147,7 +4146,7 @@ dependencies = [
 [[package]]
 name = "samply-api"
 version = "0.24.0"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?branch=codspeed#7fbe8e5e2412b0cbbab7668f4321d4fbac84529c"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=9fbce607f687e1eac06ad6011d2006e2d77a5025#9fbce607f687e1eac06ad6011d2006e2d77a5025"
 dependencies = [
  "samply-debugid",
  "samply-symbols",
@@ -4163,7 +4162,7 @@ dependencies = [
 [[package]]
 name = "samply-debugid"
 version = "0.1.0"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?branch=codspeed#7fbe8e5e2412b0cbbab7668f4321d4fbac84529c"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=9fbce607f687e1eac06ad6011d2006e2d77a5025#9fbce607f687e1eac06ad6011d2006e2d77a5025"
 dependencies = [
  "debugid",
  "uuid",
@@ -4172,7 +4171,7 @@ dependencies = [
 [[package]]
 name = "samply-object"
 version = "0.1.0"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?branch=codspeed#7fbe8e5e2412b0cbbab7668f4321d4fbac84529c"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=9fbce607f687e1eac06ad6011d2006e2d77a5025#9fbce607f687e1eac06ad6011d2006e2d77a5025"
 dependencies = [
  "debugid",
  "object",
@@ -4183,7 +4182,7 @@ dependencies = [
 [[package]]
 name = "samply-quota-manager"
 version = "0.1.0"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?branch=codspeed#7fbe8e5e2412b0cbbab7668f4321d4fbac84529c"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=9fbce607f687e1eac06ad6011d2006e2d77a5025#9fbce607f687e1eac06ad6011d2006e2d77a5025"
 dependencies = [
  "bytesize",
  "futures",
@@ -4197,7 +4196,7 @@ dependencies = [
 [[package]]
 name = "samply-symbols"
 version = "0.24.1"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?branch=codspeed#7fbe8e5e2412b0cbbab7668f4321d4fbac84529c"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=9fbce607f687e1eac06ad6011d2006e2d77a5025#9fbce607f687e1eac06ad6011d2006e2d77a5025"
 dependencies = [
  "addr2line",
  "bitflags 2.11.1",
@@ -5628,7 +5627,7 @@ dependencies = [
 [[package]]
 name = "wholesym"
 version = "0.8.1"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?branch=codspeed#7fbe8e5e2412b0cbbab7668f4321d4fbac84529c"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=9fbce607f687e1eac06ad6011d2006e2d77a5025#9fbce607f687e1eac06ad6011d2006e2d77a5025"
 dependencies = [
  "bytes",
  "core-foundation 0.10.1",
