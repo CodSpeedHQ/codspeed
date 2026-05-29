@@ -90,10 +90,6 @@
             "null"
           ]
         },
-        "stdin": {
-          "description": "Path to a file to use as stdin for each benchmark iteration",
-          "type": ["string", "null"]
-        },
         "id": {
           "description": "Optional id to run a subset of targets (e.g. `codspeed run --bench my_id`)",
           "type": [
