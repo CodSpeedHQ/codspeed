@@ -175,6 +175,19 @@ pub async fn measure(
 
     // Check the valgrind exit code
     if !status.success() {
+        // Each process writes to its own `valgrind.<pid>.log`, so surface all of
+        // them to help debug the failure.
+        for entry in std::fs::read_dir(profile_folder).into_iter().flatten() {
+            let Ok(path) = entry.map(|e| e.path()) else {
+                continue;
+            };
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+            if name.starts_with("valgrind.") && name.ends_with(".log") {
+                let contents = std::fs::read_to_string(&path).unwrap_or_default();
+                debug!("{}: {contents}", path.display());
+            }
+        }
+
         bail!("failed to execute valgrind");
     }
 
