@@ -120,7 +120,9 @@ pub async fn measure(
     }
     // Configure valgrind
     let valgrind_args = get_valgrind_args(&config.simulation_tool, config);
-    let log_path = profile_folder.join("valgrind.log");
+    // Use the %p placeholder so each (potentially forked) process writes to its
+    // own log file instead of clobbering a shared `valgrind.log` (last writer wins).
+    let log_path = profile_folder.join("valgrind.%p.log");
     cmd.arg("valgrind").args(valgrind_args.iter());
     if config.simulation_tool == SimulationTool::Callgrind {
         cmd.args(
@@ -173,10 +175,6 @@ pub async fn measure(
 
     // Check the valgrind exit code
     if !status.success() {
-        let valgrind_log = profile_folder.join("valgrind.log");
-        let valgrind_log = std::fs::read_to_string(&valgrind_log).unwrap_or_default();
-        debug!("valgrind.log: {valgrind_log}");
-
         bail!("failed to execute valgrind");
     }
 
