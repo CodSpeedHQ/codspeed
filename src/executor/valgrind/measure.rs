@@ -8,6 +8,7 @@ use crate::executor::valgrind::helpers::ignored_objects_path::get_objects_path_t
 use crate::executor::valgrind::helpers::python::is_free_threaded_python;
 use crate::instruments::mongo_tracer::MongoTracer;
 use crate::prelude::*;
+use log::log_enabled;
 use std::fs::canonicalize;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
@@ -85,6 +86,27 @@ echo -n "$status" > "$2"
     Ok(script_file.into_temp_path())
 }
 
+/// Dumps every per-process `valgrind.<pid>.log` in the folder to help debug a failure.
+fn dump_valgrind_logs(profile_folder: &Path) {
+    if !log_enabled!(log::Level::Debug) {
+        return;
+    }
+
+    for entry in std::fs::read_dir(profile_folder).into_iter().flatten() {
+        let Ok(path) = entry.map(|e| e.path()) else {
+            continue;
+        };
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default();
+        if name.starts_with("valgrind.") && name.ends_with(".log") {
+            let contents = std::fs::read_to_string(&path).unwrap_or_default();
+            debug!("{}: {contents}", path.display());
+        }
+    }
+}
+
 pub async fn measure(
     config: &ExecutorConfig,
     profile_folder: &Path,
@@ -120,7 +142,8 @@ pub async fn measure(
     }
     // Configure valgrind
     let valgrind_args = get_valgrind_args(&config.simulation_tool, config);
-    let log_path = profile_folder.join("valgrind.log");
+    // Use the %p placeholder for per-process logs to avoid conflicts.
+    let log_path = profile_folder.join("valgrind.%p.log");
     cmd.arg("valgrind").args(valgrind_args.iter());
     if config.simulation_tool == SimulationTool::Callgrind {
         cmd.args(
@@ -173,10 +196,7 @@ pub async fn measure(
 
     // Check the valgrind exit code
     if !status.success() {
-        let valgrind_log = profile_folder.join("valgrind.log");
-        let valgrind_log = std::fs::read_to_string(&valgrind_log).unwrap_or_default();
-        debug!("valgrind.log: {valgrind_log}");
-
+        dump_valgrind_logs(profile_folder);
         bail!("failed to execute valgrind");
     }
 
