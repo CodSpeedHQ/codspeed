@@ -5,6 +5,35 @@
 
 
 
+## [4.17.0] - 2026-05-29
+
+### <!-- 0 -->🚀 Features
+- Configure samply symbol resolution env vars by @not-matthias
+- Add CODSPEED_WALLTIME_PROFILER override by @not-matthias
+- Make benchmark isolation profiler-driven by @not-matthias
+- Add profile-based auth configuration (#366) by @art049 in [#366](https://github.com/CodSpeedHQ/runner/pull/366)
+- Bump instrument-hooks to not use stubs on macos (#373) by @GuillaumeLagrange in [#373](https://github.com/CodSpeedHQ/runner/pull/373)
+- Pin codspeed-go-runner installer downloads with sha256 verification by @art049 in [#362](https://github.com/CodSpeedHQ/runner/pull/362)
+- Pin downloaded binaries with sha256 verification by @art049
+
+### <!-- 1 -->🐛 Bug Fixes
+- Use introspected env for memory executor by @GuillaumeLagrange
+- Misleading DCE advice in setup-harness (#350) by @SuperMuel in [#350](https://github.com/CodSpeedHQ/runner/pull/350)
+
+### <!-- 10 -->💼 Other
+- Select profiler via typed CLI arg by @GuillaumeLagrange in [#379](https://github.com/CodSpeedHQ/runner/pull/379)
+- Bump workspace dependencies (#370) by @art049 in [#370](https://github.com/CodSpeedHQ/runner/pull/370)
+
+### <!-- 6 -->🧪 Testing
+- Update valgrind snapshot tests by @adriencaccia
+
+### <!-- 7 -->⚙️ Internals
+- Add taplo config file by @GuillaumeLagrange in [#363](https://github.com/CodSpeedHQ/runner/pull/363)
+- Bump samply fork to use framehop-codspeed by @not-matthias
+- Add retry to sha256 tests to prevent transient failures by @GuillaumeLagrange in [#375](https://github.com/CodSpeedHQ/runner/pull/375)
+- Update setarch command arguments to use long options (#304) by @xtqqczze in [#304](https://github.com/CodSpeedHQ/runner/pull/304)
+
+
 ## [4.16.2] - 2026-05-22
 
 ### <!-- 0 -->🚀 Features
@@ -15,7 +44,7 @@
 - Flush rolling buffer when executor errors by @not-matthias in [#352](https://github.com/CodSpeedHQ/runner/pull/352)
 
 ### <!-- 7 -->⚙️ Internals
-- Bump valgrind-codspeed to 3.26.0-0codspeed2
+- Bump valgrind-codspeed to 3.26.0-0codspeed2 by @adriencaccia
 - Fix macOS rustup cache corruption in install-rust action by @GuillaumeLagrange in [#357](https://github.com/CodSpeedHQ/runner/pull/357)
 - Give each bpf-tests shard its own cache key by @not-matthias in [#358](https://github.com/CodSpeedHQ/runner/pull/358)
 - Shard bpf-tests by integration test binary by @not-matthias
@@ -1195,6 +1224,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[4.17.0]: https://github.com/CodSpeedHQ/runner/compare/v4.16.2..v4.17.0
 [4.16.2]: https://github.com/CodSpeedHQ/runner/compare/v4.16.1..v4.16.2
 [4.16.1]: https://github.com/CodSpeedHQ/runner/compare/v4.16.0..v4.16.1
 [4.16.0]: https://github.com/CodSpeedHQ/runner/compare/v4.15.1..v4.16.0
