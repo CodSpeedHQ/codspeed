@@ -181,7 +181,10 @@ pub async fn measure(
             let Ok(path) = entry.map(|e| e.path()) else {
                 continue;
             };
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default();
             if name.starts_with("valgrind.") && name.ends_with(".log") {
                 let contents = std::fs::read_to_string(&path).unwrap_or_default();
                 debug!("{}: {contents}", path.display());
