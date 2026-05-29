@@ -2,6 +2,7 @@ use clap::ValueEnum;
 use prelude::*;
 use serde::{Deserialize, Serialize};
 use std::io::{self, BufRead};
+use std::path::PathBuf;
 
 pub mod analysis;
 pub mod constants;
@@ -36,6 +37,10 @@ pub struct BenchmarkCommand {
     /// Walltime execution options (flattened into the JSON object)
     #[serde(default)]
     pub walltime_args: walltime::WalltimeExecutionArgs,
+
+    /// Optional stdin file path
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stdin: Option<PathBuf>,
 }
 
 /// Read and parse benchmark commands from stdin as JSON

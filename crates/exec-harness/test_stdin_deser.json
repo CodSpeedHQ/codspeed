@@ -1,0 +1,7 @@
+[
+  {
+    "command": ["cat"],
+    "name": "test",
+    "stdin": "/tmp/input.txt"
+  }
+]

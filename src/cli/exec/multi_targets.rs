@@ -59,6 +59,7 @@ pub fn build_benchmark_targets(
                     command,
                     name: target.name.clone(),
                     walltime_args,
+                    stdin: None,
                 })
             }
             TargetCommand::Entrypoint { entrypoint } => Ok(BenchmarkTarget::Entrypoint {
@@ -80,10 +81,12 @@ pub fn build_exec_targets_pipe_command(
                 command,
                 name,
                 walltime_args,
+                stdin,
             } => Ok(BenchmarkCommand {
                 command: command.clone(),
                 name: name.clone(),
                 walltime_args: walltime_args.clone(),
+                stdin: stdin.clone(),
             }),
             crate::executor::config::BenchmarkTarget::Entrypoint { .. } => {
                 bail!("Entrypoint targets cannot be used with exec-harness pipe command")
