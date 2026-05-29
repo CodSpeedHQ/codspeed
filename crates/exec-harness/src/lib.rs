@@ -54,7 +54,7 @@ pub fn read_commands_from_stdin() -> Result<Vec<BenchmarkCommand>> {
         input.push('\n');
     }
 
-    let commands: Vec<BenchmarkCommand> =
+    let mut commands: Vec<BenchmarkCommand> =
         serde_json::from_str(&input).context("Failed to parse JSON from stdin")?;
 
     if commands.is_empty() {
@@ -64,6 +64,17 @@ pub fn read_commands_from_stdin() -> Result<Vec<BenchmarkCommand>> {
     for cmd in &commands {
         if cmd.command.is_empty() {
             bail!("Empty command in stdin input");
+        }
+    }
+
+    for cmd in &mut commands {
+        if let Some(stdin_path) = &cmd.stdin {
+            if !stdin_path.is_absolute() {
+                cmd.stdin = Some(
+                    std::fs::canonicalize(stdin_path)
+                        .unwrap_or_else(|_| std::env::current_dir().unwrap().join(stdin_path)),
+                );
+            }
         }
     }
 
