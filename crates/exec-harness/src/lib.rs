@@ -72,7 +72,10 @@ pub fn read_commands_from_stdin() -> Result<Vec<BenchmarkCommand>> {
             if !stdin_path.is_absolute() {
                 cmd.stdin = Some(
                     std::fs::canonicalize(stdin_path)
-                        .unwrap_or_else(|_| std::env::current_dir().unwrap().join(stdin_path)),
+                        .or_else(|_| std::env::current_dir().map(|d| d.join(stdin_path)))
+                        .with_context(|| {
+                            format!("Failed to resolve stdin path: {}", stdin_path.display())
+                        })?,
                 );
             }
         }
