@@ -22,6 +22,7 @@ pub enum BenchmarkTarget {
         command: Vec<String>,
         name: Option<String>,
         walltime_args: exec_harness::walltime::WalltimeExecutionArgs,
+        stdin: Option<PathBuf>,
     },
     /// A command with built-in harness (e.g. `pytest --codspeed src`)
     Entrypoint {
@@ -282,11 +283,13 @@ mod tests {
                     command: vec!["exec1".into()],
                     name: None,
                     walltime_args: Default::default(),
+                    stdin: None,
                 },
                 BenchmarkTarget::Exec {
                     command: vec!["exec2".into()],
                     name: None,
                     walltime_args: Default::default(),
+                    stdin: None,
                 },
             ],
             modes: vec![RunnerMode::Simulation],
@@ -301,6 +304,7 @@ mod tests {
                     command: vec!["exec1".into()],
                     name: None,
                     walltime_args: Default::default(),
+                    stdin: None,
                 },
                 BenchmarkTarget::Entrypoint {
                     command: "cmd".into(),
@@ -332,6 +336,7 @@ mod tests {
                     command: vec!["exec1".into()],
                     name: None,
                     walltime_args: Default::default(),
+                    stdin: None,
                 },
                 BenchmarkTarget::Entrypoint {
                     command: "cmd".into(),

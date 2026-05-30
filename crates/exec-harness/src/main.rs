@@ -51,6 +51,7 @@ fn main() -> Result<()> {
             command: args.command,
             name: args.name,
             walltime_args: args.walltime_args,
+            stdin: None,
         }],
     };
 

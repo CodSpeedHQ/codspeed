@@ -9,7 +9,7 @@ use crate::project_config::merger::ConfigMerger;
 use crate::upload::poll_results::PollResultsOptions;
 use clap::Args;
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use url::Url;
 
 pub mod multi_targets;
@@ -31,6 +31,10 @@ pub struct ExecArgs {
 
     /// The command to execute with the exec harness
     pub command: Vec<String>,
+
+    /// Path to a file to use as stdin for each benchmark iteration
+    #[arg(long, value_name = "FILE")]
+    pub stdin: Option<PathBuf>,
 }
 
 impl ExecArgs {
@@ -104,6 +108,7 @@ pub async fn run(
         command: merged_args.command.clone(),
         name: merged_args.name.clone(),
         walltime_args: merged_args.walltime_args.clone(),
+        stdin: merged_args.stdin.clone(),
     };
     let config = build_orchestrator_config(
         merged_args,
