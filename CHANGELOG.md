@@ -5,6 +5,12 @@
 
 
 
+## [4.17.1] - 2026-05-29
+
+### <!-- 7 -->⚙️ Internals
+- Bump samply-codspeed to disable jit classification and add fp-anchoring to unwinding (#382) by @GuillaumeLagrange in [#382](https://github.com/CodSpeedHQ/runner/pull/382)
+
+
 ## [4.17.0] - 2026-05-29
 
 ### <!-- 0 -->🚀 Features
@@ -1224,6 +1230,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[4.17.1]: https://github.com/CodSpeedHQ/runner/compare/v4.17.0..v4.17.1
 [4.17.0]: https://github.com/CodSpeedHQ/runner/compare/v4.16.2..v4.17.0
 [4.16.2]: https://github.com/CodSpeedHQ/runner/compare/v4.16.1..v4.16.2
 [4.16.1]: https://github.com/CodSpeedHQ/runner/compare/v4.16.0..v4.16.1
