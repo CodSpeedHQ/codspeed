@@ -1402,7 +1402,7 @@ dependencies = [
 [[package]]
 name = "fxprof-processed-profile"
 version = "0.8.1"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=e8b8dacc042978953a6db9616c72846f7b8d5062#e8b8dacc042978953a6db9616c72846f7b8d5062"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=c11964c5122646cb5c21b9e06ca9f42ded5b6f13#c11964c5122646cb5c21b9e06ca9f42ded5b6f13"
 dependencies = [
  "bitflags 2.11.1",
  "debugid",
@@ -4077,7 +4077,7 @@ dependencies = [
 [[package]]
 name = "samply"
 version = "0.13.1"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=e8b8dacc042978953a6db9616c72846f7b8d5062#e8b8dacc042978953a6db9616c72846f7b8d5062"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=c11964c5122646cb5c21b9e06ca9f42ded5b6f13#c11964c5122646cb5c21b9e06ca9f42ded5b6f13"
 dependencies = [
  "bitflags 2.11.1",
  "byteorder",
@@ -4146,7 +4146,7 @@ dependencies = [
 [[package]]
 name = "samply-api"
 version = "0.24.0"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=e8b8dacc042978953a6db9616c72846f7b8d5062#e8b8dacc042978953a6db9616c72846f7b8d5062"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=c11964c5122646cb5c21b9e06ca9f42ded5b6f13#c11964c5122646cb5c21b9e06ca9f42ded5b6f13"
 dependencies = [
  "samply-debugid",
  "samply-symbols",
@@ -4162,7 +4162,7 @@ dependencies = [
 [[package]]
 name = "samply-debugid"
 version = "0.1.0"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=e8b8dacc042978953a6db9616c72846f7b8d5062#e8b8dacc042978953a6db9616c72846f7b8d5062"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=c11964c5122646cb5c21b9e06ca9f42ded5b6f13#c11964c5122646cb5c21b9e06ca9f42ded5b6f13"
 dependencies = [
  "debugid",
  "uuid",
@@ -4171,7 +4171,7 @@ dependencies = [
 [[package]]
 name = "samply-object"
 version = "0.1.0"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=e8b8dacc042978953a6db9616c72846f7b8d5062#e8b8dacc042978953a6db9616c72846f7b8d5062"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=c11964c5122646cb5c21b9e06ca9f42ded5b6f13#c11964c5122646cb5c21b9e06ca9f42ded5b6f13"
 dependencies = [
  "debugid",
  "object",
@@ -4182,7 +4182,7 @@ dependencies = [
 [[package]]
 name = "samply-quota-manager"
 version = "0.1.0"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=e8b8dacc042978953a6db9616c72846f7b8d5062#e8b8dacc042978953a6db9616c72846f7b8d5062"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=c11964c5122646cb5c21b9e06ca9f42ded5b6f13#c11964c5122646cb5c21b9e06ca9f42ded5b6f13"
 dependencies = [
  "bytesize",
  "futures",
@@ -4196,7 +4196,7 @@ dependencies = [
 [[package]]
 name = "samply-symbols"
 version = "0.24.1"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=e8b8dacc042978953a6db9616c72846f7b8d5062#e8b8dacc042978953a6db9616c72846f7b8d5062"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=c11964c5122646cb5c21b9e06ca9f42ded5b6f13#c11964c5122646cb5c21b9e06ca9f42ded5b6f13"
 dependencies = [
  "addr2line",
  "bitflags 2.11.1",
@@ -5627,7 +5627,7 @@ dependencies = [
 [[package]]
 name = "wholesym"
 version = "0.8.1"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=e8b8dacc042978953a6db9616c72846f7b8d5062#e8b8dacc042978953a6db9616c72846f7b8d5062"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=c11964c5122646cb5c21b9e06ca9f42ded5b6f13#c11964c5122646cb5c21b9e06ca9f42ded5b6f13"
 dependencies = [
  "bytes",
  "core-foundation 0.10.1",
