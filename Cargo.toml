@@ -69,7 +69,7 @@ rmp-serde = "1.3.1"
 uuid = { version = "1.23.1", features = ["v4"] }
 which = "8.0.2"
 crc32fast = "1.5.0"
-samply = { git = "https://github.com/CodSpeedHQ/samply-codspeed", rev = "e8b8dacc042978953a6db9616c72846f7b8d5062" }
+samply = { git = "https://github.com/CodSpeedHQ/samply-codspeed", rev = "75ae209d" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = "0.18"

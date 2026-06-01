@@ -1402,7 +1402,7 @@ dependencies = [
 [[package]]
 name = "fxprof-processed-profile"
 version = "0.8.1"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=e8b8dacc042978953a6db9616c72846f7b8d5062#e8b8dacc042978953a6db9616c72846f7b8d5062"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=75ae209d#75ae209d1f22272e046be816f785509ba3e0a163"
 dependencies = [
  "bitflags 2.11.1",
  "debugid",
@@ -2323,7 +2323,6 @@ dependencies = [
  "prost",
  "prost-derive",
  "thiserror 2.0.18",
- "zstd-safe",
 ]
 
 [[package]]
@@ -4077,7 +4076,7 @@ dependencies = [
 [[package]]
 name = "samply"
 version = "0.13.1"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=e8b8dacc042978953a6db9616c72846f7b8d5062#e8b8dacc042978953a6db9616c72846f7b8d5062"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=75ae209d#75ae209d1f22272e046be816f785509ba3e0a163"
 dependencies = [
  "bitflags 2.11.1",
  "byteorder",
@@ -4099,7 +4098,7 @@ dependencies = [
  "indexmap",
  "lazy_static",
  "libc",
- "linux-perf-data 0.13.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "linux-perf-data 0.13.0 (git+https://github.com/AvalancheHQ/linux-perf-data.git?rev=effe486)",
  "log",
  "mach2",
  "memchr",
@@ -4146,7 +4145,7 @@ dependencies = [
 [[package]]
 name = "samply-api"
 version = "0.24.0"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=e8b8dacc042978953a6db9616c72846f7b8d5062#e8b8dacc042978953a6db9616c72846f7b8d5062"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=75ae209d#75ae209d1f22272e046be816f785509ba3e0a163"
 dependencies = [
  "samply-debugid",
  "samply-symbols",
@@ -4162,7 +4161,7 @@ dependencies = [
 [[package]]
 name = "samply-debugid"
 version = "0.1.0"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=e8b8dacc042978953a6db9616c72846f7b8d5062#e8b8dacc042978953a6db9616c72846f7b8d5062"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=75ae209d#75ae209d1f22272e046be816f785509ba3e0a163"
 dependencies = [
  "debugid",
  "uuid",
@@ -4171,7 +4170,7 @@ dependencies = [
 [[package]]
 name = "samply-object"
 version = "0.1.0"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=e8b8dacc042978953a6db9616c72846f7b8d5062#e8b8dacc042978953a6db9616c72846f7b8d5062"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=75ae209d#75ae209d1f22272e046be816f785509ba3e0a163"
 dependencies = [
  "debugid",
  "object",
@@ -4182,7 +4181,7 @@ dependencies = [
 [[package]]
 name = "samply-quota-manager"
 version = "0.1.0"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=e8b8dacc042978953a6db9616c72846f7b8d5062#e8b8dacc042978953a6db9616c72846f7b8d5062"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=75ae209d#75ae209d1f22272e046be816f785509ba3e0a163"
 dependencies = [
  "bytesize",
  "futures",
@@ -4196,7 +4195,7 @@ dependencies = [
 [[package]]
 name = "samply-symbols"
 version = "0.24.1"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=e8b8dacc042978953a6db9616c72846f7b8d5062#e8b8dacc042978953a6db9616c72846f7b8d5062"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=75ae209d#75ae209d1f22272e046be816f785509ba3e0a163"
 dependencies = [
  "addr2line",
  "bitflags 2.11.1",
@@ -5627,7 +5626,7 @@ dependencies = [
 [[package]]
 name = "wholesym"
 version = "0.8.1"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=e8b8dacc042978953a6db9616c72846f7b8d5062#e8b8dacc042978953a6db9616c72846f7b8d5062"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=75ae209d#75ae209d1f22272e046be816f785509ba3e0a163"
 dependencies = [
  "bytes",
  "core-foundation 0.10.1",
