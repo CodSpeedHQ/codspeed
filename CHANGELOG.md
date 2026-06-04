@@ -5,6 +5,12 @@
 
 
 
+## [4.17.2] - 2026-06-04
+
+### <!-- 0 -->🚀 Features
+- Bump valgrind-codspeed to 3.26.0-0codspeed3 by @adriencaccia
+
+
 ## [4.17.1] - 2026-05-29
 
 ### <!-- 7 -->⚙️ Internals
@@ -1230,6 +1236,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[4.17.2]: https://github.com/CodSpeedHQ/runner/compare/v4.17.1..v4.17.2
 [4.17.1]: https://github.com/CodSpeedHQ/runner/compare/v4.17.0..v4.17.1
 [4.17.0]: https://github.com/CodSpeedHQ/runner/compare/v4.16.2..v4.17.0
 [4.16.2]: https://github.com/CodSpeedHQ/runner/compare/v4.16.1..v4.16.2
