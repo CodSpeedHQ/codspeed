@@ -85,6 +85,14 @@ if [ "${CODSPEED_RUNNER_MODE:-}" != "walltime" ]; then
     exit 1
 fi
 
+# macOS SIP strips DYLD_* across system-binary execs (/usr/bin/env, /bin/sh, …),
+# which removes samply's injection library from this subtree. samply also exposes
+# the value under a SAMPLY_-prefixed name that SIP does NOT strip; restore it
+# here so the profiler's preload re-arms in the real go process.
+if [ -n "${SAMPLY_DYLD_INSERT_LIBRARIES:-}" ]; then
+    export DYLD_INSERT_LIBRARIES="$SAMPLY_DYLD_INSERT_LIBRARIES"
+fi
+
 # Find the real go binary by removing our directory from PATH (same approach as node.sh)
 ORIGINAL_PATH=$(echo "$PATH" | tr ":" "\n" | grep -v "codspeed_introspected_go" | tr "\n" ":")
 REAL_GO=$(env PATH="$ORIGINAL_PATH" which go 2>/dev/null || true)
