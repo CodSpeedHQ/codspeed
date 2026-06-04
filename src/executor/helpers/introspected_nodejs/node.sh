@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -eo pipefail
+set -euo pipefail
 
 # Custom script to replace node and run with V8 flags that make the execution of the
 # benchmarks more predictable.
@@ -7,7 +7,7 @@ set -eo pipefail
 
 # a custom bash function to echo debug messages only if CODSPEED_DEBUG is set to true
 function echo_debug {
-    if [ "$CODSPEED_DEBUG" = "true" ]; then
+    if [ "${CODSPEED_DEBUG:-}" = "true" ]; then
         echo "::debug::" "$@"
     fi
 }
