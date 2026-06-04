@@ -62,14 +62,15 @@ pub fn unwind_data_from_elf(
         section.address()..section.address() + section.size()
     }
 
-    let v3 = UnwindData {
+    // `.eh_frame_hdr` is only an optional lookup index into `.eh_frame` — some
+    // binaries (e.g. Valgrind's statically-linked tools) are linked without
+    // `ld --eh-frame-hdr` and don't carry it. The parser rebuilds the index
+    // from `.eh_frame` in that case.
+    let unwind_data = UnwindData {
         path: path.clone(),
         base_svma,
-        eh_frame_hdr: eh_frame_hdr_data.context("Failed to find eh_frame hdr data")?,
-        eh_frame_hdr_svma: eh_frame_hdr
-            .as_ref()
-            .map(svma_range)
-            .context("Failed to find eh_frame hdr section")?,
+        eh_frame_hdr: eh_frame_hdr_data,
+        eh_frame_hdr_svma: eh_frame_hdr.as_ref().map(svma_range),
         eh_frame: eh_frame_data.context("Failed to find eh_frame data")?,
         eh_frame_svma: eh_frame
             .as_ref()
@@ -84,7 +85,7 @@ pub fn unwind_data_from_elf(
         base_avma,
     };
 
-    Ok((v3, mapping))
+    Ok((unwind_data, mapping))
 }
 
 #[cfg(all(test, target_os = "linux"))]
@@ -228,6 +229,20 @@ mod tests {
             None,
             expected_load_bias,
         ));
+    }
+
+    #[test]
+    fn test_valgrind_unwind_data_without_eh_frame_hdr() {
+        // Valgrind's statically-linked tools (here: callgrind-amd64-linux) are
+        // linked with a custom linker script without `ld --eh-frame-hdr`, so
+        // they carry `.eh_frame` but no `.eh_frame_hdr`. Unwind data extraction
+        // must still succeed since the hdr is only an optional lookup index.
+        let module_path = "testdata/perf_map/valgrind";
+        let (unwind_data, _) =
+            unwind_data_from_elf(module_path.as_bytes(), 0x58000000, 0x58292000, None, 0)
+                .expect("unwind data extraction should succeed without .eh_frame_hdr");
+        assert!(unwind_data.eh_frame_hdr.is_none());
+        assert!(!unwind_data.eh_frame.is_empty());
     }
 
     #[test]

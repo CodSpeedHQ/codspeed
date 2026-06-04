@@ -82,8 +82,8 @@ impl JitDump {
                     let unwind_data = UnwindData {
                         path,
                         base_svma: 0,
-                        eh_frame_hdr,
-                        eh_frame_hdr_svma: 0..0,
+                        eh_frame_hdr: Some(eh_frame_hdr),
+                        eh_frame_hdr_svma: Some(0..0),
                         eh_frame,
                         eh_frame_svma: 0..0,
                     };
