@@ -1402,7 +1402,7 @@ dependencies = [
 [[package]]
 name = "fxprof-processed-profile"
 version = "0.8.1"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=c11964c5122646cb5c21b9e06ca9f42ded5b6f13#c11964c5122646cb5c21b9e06ca9f42ded5b6f13"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=ec97a70c0667098f8607f30a607ddd031a15a8b8#ec97a70c0667098f8607f30a607ddd031a15a8b8"
 dependencies = [
  "bitflags 2.11.1",
  "debugid",
@@ -1802,7 +1802,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "system-configuration 0.7.0",
  "tokio",
  "tower-service",
@@ -3252,7 +3252,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27c6023962132f4b30eb4c172c91ce92d933da334c59c23cddee82358ddafb0b"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -3286,7 +3286,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -3324,7 +3324,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "tracing",
  "windows-sys 0.60.2",
 ]
@@ -4077,7 +4077,7 @@ dependencies = [
 [[package]]
 name = "samply"
 version = "0.13.1"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=c11964c5122646cb5c21b9e06ca9f42ded5b6f13#c11964c5122646cb5c21b9e06ca9f42ded5b6f13"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=ec97a70c0667098f8607f30a607ddd031a15a8b8#ec97a70c0667098f8607f30a607ddd031a15a8b8"
 dependencies = [
  "bitflags 2.11.1",
  "byteorder",
@@ -4146,7 +4146,7 @@ dependencies = [
 [[package]]
 name = "samply-api"
 version = "0.24.0"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=c11964c5122646cb5c21b9e06ca9f42ded5b6f13#c11964c5122646cb5c21b9e06ca9f42ded5b6f13"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=ec97a70c0667098f8607f30a607ddd031a15a8b8#ec97a70c0667098f8607f30a607ddd031a15a8b8"
 dependencies = [
  "samply-debugid",
  "samply-symbols",
@@ -4162,7 +4162,7 @@ dependencies = [
 [[package]]
 name = "samply-debugid"
 version = "0.1.0"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=c11964c5122646cb5c21b9e06ca9f42ded5b6f13#c11964c5122646cb5c21b9e06ca9f42ded5b6f13"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=ec97a70c0667098f8607f30a607ddd031a15a8b8#ec97a70c0667098f8607f30a607ddd031a15a8b8"
 dependencies = [
  "debugid",
  "uuid",
@@ -4171,7 +4171,7 @@ dependencies = [
 [[package]]
 name = "samply-object"
 version = "0.1.0"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=c11964c5122646cb5c21b9e06ca9f42ded5b6f13#c11964c5122646cb5c21b9e06ca9f42ded5b6f13"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=ec97a70c0667098f8607f30a607ddd031a15a8b8#ec97a70c0667098f8607f30a607ddd031a15a8b8"
 dependencies = [
  "debugid",
  "object",
@@ -4182,7 +4182,7 @@ dependencies = [
 [[package]]
 name = "samply-quota-manager"
 version = "0.1.0"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=c11964c5122646cb5c21b9e06ca9f42ded5b6f13#c11964c5122646cb5c21b9e06ca9f42ded5b6f13"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=ec97a70c0667098f8607f30a607ddd031a15a8b8#ec97a70c0667098f8607f30a607ddd031a15a8b8"
 dependencies = [
  "bytesize",
  "futures",
@@ -4196,7 +4196,7 @@ dependencies = [
 [[package]]
 name = "samply-symbols"
 version = "0.24.1"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=c11964c5122646cb5c21b9e06ca9f42ded5b6f13#c11964c5122646cb5c21b9e06ca9f42ded5b6f13"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=ec97a70c0667098f8607f30a607ddd031a15a8b8#ec97a70c0667098f8607f30a607ddd031a15a8b8"
 dependencies = [
  "addr2line",
  "bitflags 2.11.1",
@@ -5627,7 +5627,7 @@ dependencies = [
 [[package]]
 name = "wholesym"
 version = "0.8.1"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=c11964c5122646cb5c21b9e06ca9f42ded5b6f13#c11964c5122646cb5c21b9e06ca9f42ded5b6f13"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=ec97a70c0667098f8607f30a607ddd031a15a8b8#ec97a70c0667098f8607f30a607ddd031a15a8b8"
 dependencies = [
  "bytes",
  "core-foundation 0.10.1",
