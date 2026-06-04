@@ -6,6 +6,7 @@ use crate::executor::ToolStatus;
 use crate::executor::helpers::command::CommandBuilder;
 use crate::executor::helpers::detect_executable::command_has_executable;
 use crate::executor::helpers::env::is_codspeed_debug_enabled;
+use crate::executor::helpers::env::is_dev_rootless_enabled;
 use crate::executor::helpers::env::suppress_go_perf_unwinding_warning;
 use crate::executor::helpers::harvest_perf_maps_for_pids::harvest_perf_maps_for_pids;
 use crate::executor::helpers::run_with_sudo::wrap_with_sudo;
@@ -83,6 +84,10 @@ impl Profiler for PerfProfiler {
         setup_cache_dir: Option<&Path>,
     ) -> anyhow::Result<()> {
         setup::install_perf(system_info, setup_cache_dir).await?;
+        if is_dev_rootless_enabled() {
+            debug!("CODSPEED_DEV_ROOTLESS set: skipping profiling sysctl setup");
+            return Ok(());
+        }
         ensure_linux_profiling_sysctls()
     }
 
@@ -179,7 +184,12 @@ impl Profiler for PerfProfiler {
             wrapped_builder.current_dir(cwd);
         }
 
-        let wrapped_builder = wrap_with_sudo(wrapped_builder)?;
+        let wrapped_builder = if is_dev_rootless_enabled() {
+            debug!("CODSPEED_DEV_ROOTLESS set: running perf without sudo");
+            wrapped_builder
+        } else {
+            wrap_with_sudo(wrapped_builder)?
+        };
 
         self.perf_fifo = Some(perf_fifo);
         self.perf_file_path = Some(perf_file_path);

@@ -8,7 +8,9 @@ use crate::executor::ExecutorConfig;
 use crate::executor::ToolStatus;
 use crate::executor::config::WalltimeProfiler;
 use crate::executor::helpers::command::CommandBuilder;
-use crate::executor::helpers::env::{build_path_env, get_base_injected_env};
+use crate::executor::helpers::env::{
+    build_path_env, get_base_injected_env, is_dev_rootless_enabled,
+};
 use crate::executor::helpers::get_bench_command::get_bench_command;
 use crate::executor::helpers::run_command_with_log_pipe::run_command_with_log_pipe;
 use crate::executor::helpers::run_command_with_log_pipe::run_command_with_log_pipe_and_callback;
@@ -141,9 +143,12 @@ impl WallTimeExecutor {
             bench_cmd.current_dir(abs_cwd);
         }
 
-        let bench_cmd = if isolate {
+        let bench_cmd = if isolate && !is_dev_rootless_enabled() {
             wrap_with_isolation(bench_cmd)?
         } else {
+            if isolate {
+                debug!("CODSPEED_DEV_ROOTLESS set: skipping systemd-run isolation scope");
+            }
             bench_cmd
         };
 

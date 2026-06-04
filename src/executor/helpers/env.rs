@@ -111,3 +111,20 @@ pub fn is_codspeed_debug_enabled() -> bool {
         })
         .unwrap_or_default()
 }
+
+/// Dev-only escape hatch (`CODSPEED_DEV_ROOTLESS=1`) for generating profile
+/// archives locally without root. When set, the walltime/perf path skips the
+/// privileged operations that normally require sudo:
+/// - the `kernel.kptr_restrict`/`perf_event_paranoid` sysctl tweaks,
+/// - wrapping `perf record` with sudo,
+/// - the `systemd-run --slice=codspeed.slice` isolation scope.
+///
+/// These only affect kernel-symbol resolution and scheduling isolation, not the
+/// callgraph shape, so dropping them is fine for local parser/iteration work.
+/// It relies on `perf_event_paranoid` already being permissive enough to record
+/// the current user's own processes. Never set this in CI or production.
+pub fn is_dev_rootless_enabled() -> bool {
+    std::env::var("CODSPEED_DEV_ROOTLESS")
+        .map(|v| !v.is_empty() && v != "0")
+        .unwrap_or(false)
+}
