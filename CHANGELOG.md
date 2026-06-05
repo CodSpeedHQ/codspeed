@@ -5,6 +5,12 @@
 
 
 
+## [4.17.4] - 2026-06-05
+
+### <!-- 1 -->🐛 Bug Fixes
+- Purge inherited mappings on execve to fix unknown symbols (#392) by @GuillaumeLagrange in [#392](https://github.com/CodSpeedHQ/runner/pull/392)
+
+
 ## [4.17.3] - 2026-06-04
 
 ### <!-- 1 -->🐛 Bug Fixes
@@ -1248,6 +1254,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[4.17.4]: https://github.com/CodSpeedHQ/runner/compare/v4.17.3..v4.17.4
 [4.17.3]: https://github.com/CodSpeedHQ/runner/compare/v4.17.2..v4.17.3
 [4.17.2]: https://github.com/CodSpeedHQ/runner/compare/v4.17.1..v4.17.2
 [4.17.1]: https://github.com/CodSpeedHQ/runner/compare/v4.17.0..v4.17.1
