@@ -39,6 +39,7 @@ pub fn parse_for_memmap2<P: AsRef<Path>>(
         mut record_iter,
     } = PerfFileReader::parse_pipe(reader)?;
 
+    // This loop relies on the events being in chronological order, which is guaranteed by the perf file format.
     while let Some(record) = record_iter.next_record(&mut perf_file)? {
         let PerfFileRecord::EventRecord { record, .. } = record else {
             continue;
@@ -74,6 +75,30 @@ pub fn parse_for_memmap2<P: AsRef<Path>>(
                     fork_record.ppid,
                     fork_record.pid,
                 );
+            }
+            RecordType::COMM => {
+                // An execve() replaces the entire address space: the mappings inherited from the
+                // parent on fork (and any pre-exec mappings of this pid) are no longer valid.
+                // TODO(COD-1377):  Manage timing in module mapping to improve symbolication.
+                let Ok(parsed_record) = record.parse() else {
+                    continue;
+                };
+
+                let EventRecord::Comm(comm_record) = parsed_record else {
+                    continue;
+                };
+
+                if !comm_record.is_execve {
+                    continue;
+                }
+
+                if pid_filter.should_include(comm_record.pid) {
+                    trace!(
+                        "Exec: Purging inherited mappings for PID {}",
+                        comm_record.pid
+                    );
+                    purge_process_mappings(&mut loaded_modules_by_path, comm_record.pid);
+                }
             }
             RecordType::MMAP2 => {
                 let Ok(parsed_record) = record.parse() else {
@@ -173,6 +198,13 @@ fn inherit_parent_mappings(
         if let Entry::Vacant(slot) = loaded_module.process_loaded_modules.entry(pid) {
             slot.insert(inherited);
         }
+    }
+}
+
+/// Drop every mapping recorded for `pid` across all modules.
+fn purge_process_mappings(loaded_modules_by_path: &mut HashMap<PathBuf, LoadedModule>, pid: pid_t) {
+    for loaded_module in loaded_modules_by_path.values_mut() {
+        loaded_module.process_loaded_modules.remove(&pid);
     }
 }
 
@@ -318,5 +350,52 @@ mod tests {
             .get(&200)
             .unwrap();
         assert_eq!(child.symbols_load_bias, Some(0xcafe));
+    }
+
+    #[test]
+    fn purge_process_mappings_removes_only_the_target_pid() {
+        // Reproduces the fork+exec collision: child 200 forked from bash (100) and inherited
+        // bash's PIE mapping at 0xaaaaaaaa0000, then exec'd its own binary at the same base.
+        let mut modules: HashMap<PathBuf, LoadedModule> = HashMap::new();
+
+        // Inherited-from-bash module that must be dropped on exec.
+        let mut bash = make_module_with_parent(100, 0xaaaaaaaa0000);
+        bash.process_loaded_modules.insert(
+            200,
+            ProcessLoadedModule {
+                symbols_load_bias: Some(0xaaaaaaaa0000),
+                process_unwind_data: None,
+            },
+        );
+        modules.insert(PathBuf::from("/usr/bin/bash"), bash);
+
+        // The real post-exec binary, also based at 0xaaaaaaaa0000 for pid 200.
+        modules.insert(
+            PathBuf::from("/cpp/build/fractal_main"),
+            make_module_with_parent(200, 0xaaaaaaaa0000),
+        );
+
+        purge_process_mappings(&mut modules, 200);
+
+        // Pid 200 is gone from every module...
+        assert!(
+            !modules[&PathBuf::from("/usr/bin/bash")]
+                .process_loaded_modules
+                .contains_key(&200)
+        );
+        assert!(
+            !modules[&PathBuf::from("/cpp/build/fractal_main")]
+                .process_loaded_modules
+                .contains_key(&200)
+        );
+        // ...but bash's own pid 100 mapping is untouched.
+        assert_eq!(
+            modules[&PathBuf::from("/usr/bin/bash")]
+                .process_loaded_modules
+                .get(&100)
+                .unwrap()
+                .symbols_load_bias,
+            Some(0xaaaaaaaa0000)
+        );
     }
 }
