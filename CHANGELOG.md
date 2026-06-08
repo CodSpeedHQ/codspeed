@@ -5,6 +5,30 @@
 
 
 
+## [4.17.4] - 2026-06-05
+
+### <!-- 1 -->🐛 Bug Fixes
+- Purge inherited mappings on execve to fix unknown symbols (#392) by @GuillaumeLagrange in [#392](https://github.com/CodSpeedHQ/runner/pull/392)
+
+
+## [4.17.3] - 2026-06-04
+
+### <!-- 1 -->🐛 Bug Fixes
+- Compare codspeed iteration of installed valgrind by @not-matthias
+
+### <!-- 2 -->🏗️ Refactor
+- Parse codspeed iteration from version string by @not-matthias
+
+### <!-- 7 -->⚙️ Internals
+- Log detected valgrind version by @not-matthias in [#390](https://github.com/CodSpeedHQ/runner/pull/390)
+
+
+## [4.17.2] - 2026-06-04
+
+### <!-- 0 -->🚀 Features
+- Bump valgrind-codspeed to 3.26.0-0codspeed3 by @adriencaccia
+
+
 ## [4.17.1] - 2026-05-29
 
 ### <!-- 7 -->⚙️ Internals
@@ -1230,6 +1254,9 @@
 - Add linting components to the toolchain by @art049
 
 
+[4.17.4]: https://github.com/CodSpeedHQ/runner/compare/v4.17.3..v4.17.4
+[4.17.3]: https://github.com/CodSpeedHQ/runner/compare/v4.17.2..v4.17.3
+[4.17.2]: https://github.com/CodSpeedHQ/runner/compare/v4.17.1..v4.17.2
 [4.17.1]: https://github.com/CodSpeedHQ/runner/compare/v4.17.0..v4.17.1
 [4.17.0]: https://github.com/CodSpeedHQ/runner/compare/v4.16.2..v4.17.0
 [4.16.2]: https://github.com/CodSpeedHQ/runner/compare/v4.16.1..v4.16.2
