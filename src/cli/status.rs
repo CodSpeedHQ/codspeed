@@ -23,7 +23,7 @@ pub async fn run(api_client: &CodSpeedAPIClient, config: &CodSpeedConfig) -> Res
     info!("");
 
     // Setup/tools status
-    super::setup::status()?;
+    super::setup::status(&[])?;
     info!("");
 
     // System info
