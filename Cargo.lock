@@ -720,7 +720,7 @@ dependencies = [
  "ipc-channel",
  "itertools 0.14.0",
  "libc",
- "linux-perf-data 0.12.0",
+ "linux-perf-data 0.12.0 (git+https://github.com/mstange/linux-perf-data.git?rev=da5bce4b9fb724e84b1eea0cb6ab9c8a291bc676)",
  "log",
  "md5",
  "memmap2",
@@ -1402,7 +1402,7 @@ dependencies = [
 [[package]]
 name = "fxprof-processed-profile"
 version = "0.8.1"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=ec97a70c0667098f8607f30a607ddd031a15a8b8#ec97a70c0667098f8607f30a607ddd031a15a8b8"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=81ba2c346e71#81ba2c346e71d05aaef94448e2962961d29cb4c8"
 dependencies = [
  "bitflags 2.11.1",
  "debugid",
@@ -2313,11 +2313,25 @@ checksum = "bfae20f6b19ad527b550c223fddc3077a547fc70cda94b9b566575423fd303ee"
 [[package]]
 name = "linux-perf-data"
 version = "0.12.0"
+source = "git+https://github.com/CodSpeedHQ/linux-perf-data?rev=87308af9cad1#87308af9cad13fc93d7e7100652cc05e531c37a4"
+dependencies = [
+ "byteorder",
+ "linear-map",
+ "linux-perf-event-reader 0.10.2 (git+https://github.com/AvalancheHQ/linux-perf-event-reader?rev=908775c8b5bd)",
+ "memchr",
+ "prost",
+ "prost-derive",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "linux-perf-data"
+version = "0.12.0"
 source = "git+https://github.com/mstange/linux-perf-data.git?rev=da5bce4b9fb724e84b1eea0cb6ab9c8a291bc676#da5bce4b9fb724e84b1eea0cb6ab9c8a291bc676"
 dependencies = [
  "byteorder",
  "linear-map",
- "linux-perf-event-reader",
+ "linux-perf-event-reader 0.10.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "memchr",
  "prost",
  "prost-derive",
@@ -2333,12 +2347,11 @@ checksum = "79544deaf2626fe2d10e5f87af7b7fca93c0d0062fc6ec84fc24e463039c6750"
 dependencies = [
  "byteorder",
  "linear-map",
- "linux-perf-event-reader",
+ "linux-perf-event-reader 0.10.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "memchr",
  "prost",
  "prost-derive",
  "thiserror 2.0.18",
- "zstd-safe",
 ]
 
 [[package]]
@@ -2346,6 +2359,17 @@ name = "linux-perf-event-reader"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aa8fc7e83909ea3b9e2784591655637d3401f2f16014f9d8d6e23ccd138e665f"
+dependencies = [
+ "bitflags 2.11.1",
+ "byteorder",
+ "memchr",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "linux-perf-event-reader"
+version = "0.10.2"
+source = "git+https://github.com/AvalancheHQ/linux-perf-event-reader?rev=908775c8b5bd#908775c8b5bd620ea4ec767d7e56afb3b2f232ac"
 dependencies = [
  "bitflags 2.11.1",
  "byteorder",
@@ -4077,7 +4101,7 @@ dependencies = [
 [[package]]
 name = "samply"
 version = "0.13.1"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=ec97a70c0667098f8607f30a607ddd031a15a8b8#ec97a70c0667098f8607f30a607ddd031a15a8b8"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=81ba2c346e71#81ba2c346e71d05aaef94448e2962961d29cb4c8"
 dependencies = [
  "bitflags 2.11.1",
  "byteorder",
@@ -4099,7 +4123,7 @@ dependencies = [
  "indexmap",
  "lazy_static",
  "libc",
- "linux-perf-data 0.13.0",
+ "linux-perf-data 0.12.0 (git+https://github.com/CodSpeedHQ/linux-perf-data?rev=87308af9cad1)",
  "log",
  "mach2",
  "memchr",
@@ -4146,7 +4170,7 @@ dependencies = [
 [[package]]
 name = "samply-api"
 version = "0.24.0"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=ec97a70c0667098f8607f30a607ddd031a15a8b8#ec97a70c0667098f8607f30a607ddd031a15a8b8"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=81ba2c346e71#81ba2c346e71d05aaef94448e2962961d29cb4c8"
 dependencies = [
  "samply-debugid",
  "samply-symbols",
@@ -4162,7 +4186,7 @@ dependencies = [
 [[package]]
 name = "samply-debugid"
 version = "0.1.0"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=ec97a70c0667098f8607f30a607ddd031a15a8b8#ec97a70c0667098f8607f30a607ddd031a15a8b8"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=81ba2c346e71#81ba2c346e71d05aaef94448e2962961d29cb4c8"
 dependencies = [
  "debugid",
  "uuid",
@@ -4171,7 +4195,7 @@ dependencies = [
 [[package]]
 name = "samply-object"
 version = "0.1.0"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=ec97a70c0667098f8607f30a607ddd031a15a8b8#ec97a70c0667098f8607f30a607ddd031a15a8b8"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=81ba2c346e71#81ba2c346e71d05aaef94448e2962961d29cb4c8"
 dependencies = [
  "debugid",
  "object",
@@ -4182,7 +4206,7 @@ dependencies = [
 [[package]]
 name = "samply-quota-manager"
 version = "0.1.0"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=ec97a70c0667098f8607f30a607ddd031a15a8b8#ec97a70c0667098f8607f30a607ddd031a15a8b8"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=81ba2c346e71#81ba2c346e71d05aaef94448e2962961d29cb4c8"
 dependencies = [
  "bytesize",
  "futures",
@@ -4196,7 +4220,7 @@ dependencies = [
 [[package]]
 name = "samply-symbols"
 version = "0.24.1"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=ec97a70c0667098f8607f30a607ddd031a15a8b8#ec97a70c0667098f8607f30a607ddd031a15a8b8"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=81ba2c346e71#81ba2c346e71d05aaef94448e2962961d29cb4c8"
 dependencies = [
  "addr2line",
  "bitflags 2.11.1",
@@ -5627,7 +5651,7 @@ dependencies = [
 [[package]]
 name = "wholesym"
 version = "0.8.1"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=ec97a70c0667098f8607f30a607ddd031a15a8b8#ec97a70c0667098f8607f30a607ddd031a15a8b8"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=81ba2c346e71#81ba2c346e71d05aaef94448e2962961d29cb4c8"
 dependencies = [
  "bytes",
  "core-foundation 0.10.1",
