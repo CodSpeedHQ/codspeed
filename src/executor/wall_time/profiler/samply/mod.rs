@@ -117,6 +117,21 @@ impl Profiler for SamplyProfiler {
             ),
         ]);
 
+        // Extra hardware events to capture alongside the sampling event,
+        // stored by samply as per-sample delta columns in the profile, as
+        // `<name>:<type>:<config>` specs resolved for the CPU we run on.
+        // samply degrades gracefully to cycles-only sampling when the PMU
+        // can't deliver them, so this is safe to request unconditionally.
+        // Linux only: the events go through perf_event_open.
+        #[cfg(target_os = "linux")]
+        cmd_builder.env(
+            "SAMPLY_PERF_EVENTS",
+            runner_shared::perf_event::PerfEvent::all_events()
+                .iter()
+                .filter_map(|event| event.to_samply_spec())
+                .join(","),
+        );
+
         // If `setup` decided the bash on PATH is Apple-signed, prepend brew's
         // bin so samply's spawned shell resolves to the ad-hoc-signed brew bash
         // instead. Only the samply child's PATH is touched.
