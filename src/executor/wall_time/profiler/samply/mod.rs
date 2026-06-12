@@ -46,10 +46,6 @@ impl SamplyProfiler {
 
 #[async_trait(?Send)]
 impl Profiler for SamplyProfiler {
-    fn requires_isolation(&self) -> bool {
-        false
-    }
-
     async fn setup(
         &self,
         _system_info: &SystemInfo,
