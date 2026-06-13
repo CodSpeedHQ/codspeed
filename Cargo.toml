@@ -19,9 +19,9 @@ rand = "0.10"
 rayon = "1.12"
 regex = "1.12.3"
 semver = "1.0"
-reqwest = { version = "0.12", features = ["json", "stream", "native-tls-vendored"] }
-reqwest-middleware = { version = "0.4", features = ["json"] }
-reqwest-retry = "0.7"
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "rustls", "charset", "http2", "system-proxy"] }
+reqwest-middleware = { version = "0.5", features = ["json"] }
+reqwest-retry = "0.9"
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["preserve_order"] }
 url = "2.5.8"
@@ -37,7 +37,7 @@ simplelog = { version = "0.12.2", default-features = false, features = ["termcol
 tempfile = { workspace = true }
 git2 = "0.21"
 nestify = "0.3.3"
-gql_client = { git = "https://github.com/CodSpeedHQ/gql-client-rs", rev = "617a889e1d9089b5aa36679f1a5aa13ad01993ae" }
+gql_client = { git = "https://github.com/CodSpeedHQ/gql-client-rs", rev = "c269153c495b9e4eded1b17c351d499ce43ee516" }
 serde_yaml = "0.9.34"
 sysinfo = { version = "0.37", features = ["serde"] }
 indicatif = "0.18"
