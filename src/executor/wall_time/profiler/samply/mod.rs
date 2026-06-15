@@ -4,6 +4,7 @@ use crate::cli::InternalCommands;
 use crate::cli::samply::SamplyArgs;
 use crate::executor::ExecutorConfig;
 use crate::executor::helpers::command::CommandBuilder;
+use crate::executor::helpers::run_with_sudo::wrap_with_sudo;
 use crate::executor::shared::fifo::FifoBenchmarkData;
 use crate::executor::wall_time::profiler::Profiler;
 use crate::executor::wall_time::profiler::linux_sysctl::ensure_linux_profiling_sysctls;
@@ -79,6 +80,7 @@ impl Profiler for SamplyProfiler {
         mut cmd_builder: CommandBuilder,
         _config: &ExecutorConfig,
         profile_folder: &Path,
+        isolate: bool,
     ) -> anyhow::Result<CommandBuilder> {
         let output_path = profile_folder.join(SAMPLY_OUTPUT_FILE_NAME);
 
@@ -145,6 +147,15 @@ impl Profiler for SamplyProfiler {
         }
 
         self.output_path = Some(output_path);
+        self.v8_log_dir = Some(v8_log_dir);
+        // Isolated runs reparent the benchmark out of samply's subtree, so samply
+        // must record system-wide under sudo. Unisolated runs record samply's own
+        // descendant tree unprivileged.
+        let cmd_builder = if isolate {
+            wrap_with_sudo(cmd_builder)?
+        } else {
+            cmd_builder
+        };
         Ok(cmd_builder)
     }
 

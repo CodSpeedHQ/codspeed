@@ -33,12 +33,6 @@ pub trait Profiler {
         None
     }
 
-    /// Whether the benchmark command should be wrapped with the Linux
-    /// systemd-run isolation scope.
-    fn requires_isolation(&self) -> bool {
-        true
-    }
-
     /// One-time system setup (install tool, tweak sysctls, ...).
     async fn setup(
         &self,
@@ -49,14 +43,20 @@ pub trait Profiler {
     }
 
     /// Wrap the user command with the profiler invocation. The returned
-    /// `CommandBuilder` is what gets spawned. Profilers stash any live state
-    /// they need for the duration of the run (control fifos, output paths)
-    /// on `self`.
+    /// `CommandBuilder` is what gets spawned.
+    ///
+    /// Profilers stash any live state they need for the duration of the run
+    /// (control fifos, output paths) on `self`.
+    ///
+    /// `isolate` mirrors the decision the executor used to wrap the benchmark in
+    /// the systemd scope: when set, the profiler records system-wide under sudo;
+    /// otherwise it records its own descendant tree unprivileged.
     async fn wrap_command(
         &mut self,
         cmd: CommandBuilder,
         config: &ExecutorConfig,
         profile_folder: &Path,
+        isolate: bool,
     ) -> anyhow::Result<CommandBuilder>;
 
     /// The benchmarked process signaled the start of a measured region.

@@ -1,5 +1,5 @@
 use super::helpers::validate_walltime_results;
-use super::isolation::wrap_with_isolation;
+use super::isolation::{requires_isolation, wrap_isolation_scope};
 use super::profiler::Profiler;
 use super::profiler::perf::PerfProfiler;
 use super::profiler::samply::SamplyProfiler;
@@ -113,10 +113,11 @@ impl WallTimeExecutor {
         }
     }
 
+    /// Prepare the benchmark command wrapped with the necessary environment variables for
+    /// introspection and environment forwarding ahead of privilege escalation and isolation.
     fn walltime_bench_cmd(
         config: &ExecutorConfig,
         execution_context: &ExecutionContext,
-        isolate: bool,
     ) -> Result<(NamedTempFile, NamedTempFile, CommandBuilder)> {
         let path_value = build_path_env(config.enable_introspection)?;
 
@@ -140,12 +141,6 @@ impl WallTimeExecutor {
             let abs_cwd = canonicalize(cwd)?;
             bench_cmd.current_dir(abs_cwd);
         }
-
-        let bench_cmd = if isolate {
-            wrap_with_isolation(bench_cmd)?
-        } else {
-            bench_cmd
-        };
 
         Ok((env_file, script_file, bench_cmd))
     }
@@ -183,15 +178,17 @@ impl Executor for WallTimeExecutor {
     ) -> Result<()> {
         let _guard = HookScriptsGuard::setup();
 
-        let isolate = self
-            .profiler
-            .as_ref()
-            .is_none_or(|p| p.requires_isolation());
-        let (_env_file, _script_file, cmd_builder) = WallTimeExecutor::walltime_bench_cmd(
-            &execution_context.config,
-            execution_context,
-            isolate,
-        )?;
+        let (_env_file, _script_file, cmd_builder) =
+            WallTimeExecutor::walltime_bench_cmd(&execution_context.config, execution_context)?;
+
+        // Resolve the isolation decision once and reuse it for both the scope
+        // wrapping here and the privilege wrapping below (or in the profiler).
+        let isolate = requires_isolation();
+        let cmd_builder = if isolate {
+            wrap_isolation_scope(cmd_builder)?
+        } else {
+            cmd_builder
+        };
 
         // Split-borrow `self` so the closure inside `run_with_profiler` can
         // capture `benchmark_state` while we hold `&mut profiler`.
@@ -207,12 +204,16 @@ impl Executor for WallTimeExecutor {
                     cmd_builder,
                     &execution_context.config,
                     &execution_context.profile_folder,
+                    isolate,
                     benchmark_state,
                 )
                 .await
             }
             _ => {
-                let cmd_builder = if cfg!(target_os = "linux") {
+                // No profiler: still honor the isolation decision, since the
+                // scope (and the sudo it requires) is a property of the run, not
+                // of the profiler.
+                let cmd_builder = if isolate {
                     wrap_with_sudo(cmd_builder)?
                 } else {
                     cmd_builder
@@ -261,10 +262,11 @@ async fn run_with_profiler(
     cmd_builder: CommandBuilder,
     config: &ExecutorConfig,
     profile_folder: &Path,
+    isolate: bool,
     benchmark_state: &OnceCell<(FifoBenchmarkData, ExecutionTimestamps)>,
 ) -> Result<std::process::ExitStatus> {
     let wrapped = profiler
-        .wrap_command(cmd_builder, config, profile_folder)
+        .wrap_command(cmd_builder, config, profile_folder, isolate)
         .await?;
     let cmd = wrapped.build();
     debug!("cmd: {cmd:?}");

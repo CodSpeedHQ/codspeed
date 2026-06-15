@@ -23,17 +23,30 @@ fn is_sudo_available() -> bool {
         .unwrap_or(false)
 }
 
+/// Whether `sudo` can run without prompting for a password (passwordless rule or
+/// a cached, still-valid credential). Used to decide whether a command can be
+/// elevated non-interactively before committing to a privileged code path.
+fn sudo_runs_without_password() -> bool {
+    Command::new("sudo")
+        .arg("--non-interactive") // Fail if a password is required
+        .arg("true")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+/// Whether we can elevate privileges without prompting the user: either we're
+/// already root, or `sudo` is installed and runs without asking for a password.
+pub fn can_elevate_without_prompt() -> bool {
+    is_root_user() || (is_sudo_available() && sudo_runs_without_password())
+}
+
 /// Validate sudo access, prompting the user for their password if necessary
 fn validate_sudo_access() -> Result<()> {
-    let needs_password = IsTerminal::is_terminal(&std::io::stdout())
-        && Command::new("sudo")
-            .arg("--non-interactive") // Fail if password is required
-            .arg("true")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map(|status| !status.success())
-            .unwrap_or(true);
+    let needs_password =
+        IsTerminal::is_terminal(&std::io::stdout()) && !sudo_runs_without_password();
 
     if needs_password {
         suspend_progress_bar(|| {
