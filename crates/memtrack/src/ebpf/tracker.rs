@@ -76,6 +76,8 @@ impl Tracker {
         Ok(rx)
     }
 
+    /// Bump RLIMIT_MEMLOCK for kernels older than 5.11. Newer kernels account BPF
+    /// memory against the cgroup, so a denied raise (no CAP_SYS_RESOURCE) is harmless.
     fn bump_memlock_rlimit() -> Result<()> {
         let rlimit = libc::rlimit {
             rlim_cur: libc::RLIM_INFINITY,
@@ -84,7 +86,10 @@ impl Tracker {
 
         let ret = unsafe { libc::setrlimit(libc::RLIMIT_MEMLOCK, &rlimit) };
         if ret != 0 {
-            anyhow::bail!("Failed to increase rlimit");
+            let err = std::io::Error::last_os_error();
+            debug!(
+                "Could not raise RLIMIT_MEMLOCK ({err}); continuing since kernels >= 5.11 don't require it"
+            );
         }
 
         Ok(())
