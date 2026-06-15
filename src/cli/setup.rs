@@ -96,6 +96,7 @@ async fn setup_executor(
                 executor.name()
             );
             executor.setup(system_info, setup_cache_dir).await?;
+            executor.grant_privileges()?;
         }
     }
     Ok(())

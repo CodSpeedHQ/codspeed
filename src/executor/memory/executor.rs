@@ -132,7 +132,10 @@ impl Executor for MemoryExecutor {
         _system_info: &SystemInfo,
         _setup_cache_dir: Option<&Path>,
     ) -> Result<()> {
-        install_memtrack().await?;
+        install_memtrack().await
+    }
+
+    fn grant_privileges(&self) -> Result<()> {
         ensure_memtrack_capabilities()
     }
 

@@ -123,6 +123,13 @@ pub trait Executor {
         Ok(())
     }
 
+    /// Grant any elevated privileges this executor needs (e.g. file capabilities).
+    /// Runs after [`setup`](Self::setup) and may prompt for sudo. Defaults to a
+    /// no-op for executors that need none.
+    fn grant_privileges(&self) -> Result<()> {
+        Ok(())
+    }
+
     /// Runs the executor
     async fn run(
         &mut self,
@@ -155,6 +162,7 @@ pub async fn run_executor(
                 executor
                     .setup(&orchestrator.system_info, setup_cache_dir)
                     .await?;
+                executor.grant_privileges()?;
             }
         }
     }

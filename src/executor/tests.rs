@@ -398,6 +398,7 @@ mod memory {
                 let executor = MemoryExecutor;
                 let system_info = SystemInfo::new().unwrap();
                 executor.setup(&system_info, None).await.unwrap();
+                executor.grant_privileges().unwrap();
             })
             .await;
 
