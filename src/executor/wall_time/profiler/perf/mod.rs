@@ -8,8 +8,8 @@ use crate::executor::helpers::detect_executable::command_has_executable;
 use crate::executor::helpers::env::is_codspeed_debug_enabled;
 use crate::executor::helpers::env::suppress_go_perf_unwinding_warning;
 use crate::executor::helpers::harvest_perf_maps_for_pids::harvest_perf_maps_for_pids;
-use crate::executor::helpers::run_with_sudo::wrap_with_sudo;
 use crate::executor::shared::fifo::FifoBenchmarkData;
+use crate::executor::wall_time::isolation::wrap_with_isolation_privilege;
 use crate::executor::wall_time::profiler::NO_BENCHMARKS_DETECTED_WARNING;
 use crate::executor::wall_time::profiler::Profiler;
 use crate::executor::wall_time::profiler::SAMPLING_RATE_HZ;
@@ -179,10 +179,10 @@ impl Profiler for PerfProfiler {
             wrapped_builder.current_dir(cwd);
         }
 
-        let wrapped_builder = wrap_with_sudo(wrapped_builder)?;
-
         self.perf_fifo = Some(perf_fifo);
         self.perf_file_path = Some(perf_file_path);
+
+        let wrapped_builder = wrap_with_isolation_privilege(wrapped_builder)?;
 
         Ok(wrapped_builder)
     }

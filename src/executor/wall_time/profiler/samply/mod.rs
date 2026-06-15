@@ -5,6 +5,7 @@ use crate::cli::samply::SamplyArgs;
 use crate::executor::ExecutorConfig;
 use crate::executor::helpers::command::CommandBuilder;
 use crate::executor::shared::fifo::FifoBenchmarkData;
+use crate::executor::wall_time::isolation::wrap_with_isolation_privilege;
 use crate::executor::wall_time::profiler::Profiler;
 use crate::executor::wall_time::profiler::linux_sysctl::ensure_linux_profiling_sysctls;
 use crate::prelude::*;
@@ -145,6 +146,7 @@ impl Profiler for SamplyProfiler {
         }
 
         self.output_path = Some(output_path);
+        let cmd_builder = wrap_with_isolation_privilege(cmd_builder)?;
         Ok(cmd_builder)
     }
 

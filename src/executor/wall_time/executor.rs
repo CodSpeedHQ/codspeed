@@ -1,5 +1,5 @@
 use super::helpers::validate_walltime_results;
-use super::isolation::wrap_with_isolation;
+use super::isolation::{wrap_with_isolation, wrap_with_isolation_privilege};
 use super::profiler::Profiler;
 use super::profiler::perf::PerfProfiler;
 use super::profiler::samply::SamplyProfiler;
@@ -13,7 +13,6 @@ use crate::executor::helpers::get_bench_command::get_bench_command;
 use crate::executor::helpers::run_command_with_log_pipe::run_command_with_log_pipe;
 use crate::executor::helpers::run_command_with_log_pipe::run_command_with_log_pipe_and_callback;
 use crate::executor::helpers::run_with_env::wrap_with_env;
-use crate::executor::helpers::run_with_sudo::wrap_with_sudo;
 use crate::executor::shared::fifo::FifoBenchmarkData;
 use crate::executor::shared::fifo::RunnerFifo;
 use crate::executor::{ExecutionContext, ExecutorName, ExecutorSupport};
@@ -113,10 +112,11 @@ impl WallTimeExecutor {
         }
     }
 
+    /// Prepare the benchmark command wrapped with the necessary environment variables for
+    /// introspection and environment forwarding ahead of privilege escalation and isolation.
     fn walltime_bench_cmd(
         config: &ExecutorConfig,
         execution_context: &ExecutionContext,
-        isolate: bool,
     ) -> Result<(NamedTempFile, NamedTempFile, CommandBuilder)> {
         let path_value = build_path_env(config.enable_introspection)?;
 
@@ -140,12 +140,6 @@ impl WallTimeExecutor {
             let abs_cwd = canonicalize(cwd)?;
             bench_cmd.current_dir(abs_cwd);
         }
-
-        let bench_cmd = if isolate {
-            wrap_with_isolation(bench_cmd)?
-        } else {
-            bench_cmd
-        };
 
         Ok((env_file, script_file, bench_cmd))
     }
@@ -183,15 +177,10 @@ impl Executor for WallTimeExecutor {
     ) -> Result<()> {
         let _guard = HookScriptsGuard::setup();
 
-        let isolate = self
-            .profiler
-            .as_ref()
-            .is_none_or(|p| p.requires_isolation());
-        let (_env_file, _script_file, cmd_builder) = WallTimeExecutor::walltime_bench_cmd(
-            &execution_context.config,
-            execution_context,
-            isolate,
-        )?;
+        let (_env_file, _script_file, cmd_builder) =
+            WallTimeExecutor::walltime_bench_cmd(&execution_context.config, execution_context)?;
+
+        let cmd_builder = wrap_with_isolation(cmd_builder)?;
 
         // Split-borrow `self` so the closure inside `run_with_profiler` can
         // capture `benchmark_state` while we hold `&mut profiler`.
@@ -212,11 +201,8 @@ impl Executor for WallTimeExecutor {
                 .await
             }
             _ => {
-                let cmd_builder = if cfg!(target_os = "linux") {
-                    wrap_with_sudo(cmd_builder)?
-                } else {
-                    cmd_builder
-                };
+                // No profiler, just run the command with isolation and environment forwarding.
+                let cmd_builder = wrap_with_isolation_privilege(cmd_builder)?;
                 let cmd = cmd_builder.build();
                 debug!("cmd: {cmd:?}");
                 run_command_with_log_pipe(cmd).await
