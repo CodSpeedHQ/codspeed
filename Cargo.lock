@@ -1263,7 +1263,7 @@ dependencies = [
 [[package]]
 name = "framehop"
 version = "0.16.0"
-source = "git+https://github.com/CodSpeedHQ/framehop?rev=bdf2813a2c5149fd66b9b4685035e70124bd672a#bdf2813a2c5149fd66b9b4685035e70124bd672a"
+source = "git+https://github.com/CodSpeedHQ/framehop?rev=5852f775c2ffa55a24da469b0b73457ac3bc3fa6#5852f775c2ffa55a24da469b0b73457ac3bc3fa6"
 dependencies = [
  "arrayvec",
  "cfg-if",
@@ -1386,7 +1386,7 @@ dependencies = [
 [[package]]
 name = "fxprof-processed-profile"
 version = "0.8.1"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=81ba2c346e71#81ba2c346e71d05aaef94448e2962961d29cb4c8"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=9c4a2088fa125d3ece48eb0d28fecfda1724e757#9c4a2088fa125d3ece48eb0d28fecfda1724e757"
 dependencies = [
  "bitflags",
  "debugid",
@@ -2191,11 +2191,11 @@ checksum = "bfae20f6b19ad527b550c223fddc3077a547fc70cda94b9b566575423fd303ee"
 [[package]]
 name = "linux-perf-data"
 version = "0.12.0"
-source = "git+https://github.com/CodSpeedHQ/linux-perf-data?rev=87308af9cad1#87308af9cad13fc93d7e7100652cc05e531c37a4"
+source = "git+https://github.com/CodSpeedHQ/linux-perf-data?rev=5762e6e967bf#5762e6e967bf5eb42cdc9b27f3837aa10032f6b0"
 dependencies = [
  "byteorder",
  "linear-map",
- "linux-perf-event-reader 0.10.2 (git+https://github.com/AvalancheHQ/linux-perf-event-reader?rev=908775c8b5bd)",
+ "linux-perf-event-reader 0.10.2 (git+https://github.com/AvalancheHQ/linux-perf-event-reader?rev=136070d88667)",
  "memchr",
  "prost",
  "prost-derive",
@@ -2247,7 +2247,7 @@ dependencies = [
 [[package]]
 name = "linux-perf-event-reader"
 version = "0.10.2"
-source = "git+https://github.com/AvalancheHQ/linux-perf-event-reader?rev=908775c8b5bd#908775c8b5bd620ea4ec767d7e56afb3b2f232ac"
+source = "git+https://github.com/AvalancheHQ/linux-perf-event-reader?rev=136070d88667#136070d88667f926993112dc496d4854f8b77ef9"
 dependencies = [
  "bitflags",
  "byteorder",
@@ -3785,7 +3785,7 @@ dependencies = [
 [[package]]
 name = "samply"
 version = "0.13.1"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=81ba2c346e71#81ba2c346e71d05aaef94448e2962961d29cb4c8"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=9c4a2088fa125d3ece48eb0d28fecfda1724e757#9c4a2088fa125d3ece48eb0d28fecfda1724e757"
 dependencies = [
  "bitflags",
  "byteorder",
@@ -3807,7 +3807,7 @@ dependencies = [
  "indexmap",
  "lazy_static",
  "libc",
- "linux-perf-data 0.12.0 (git+https://github.com/CodSpeedHQ/linux-perf-data?rev=87308af9cad1)",
+ "linux-perf-data 0.12.0 (git+https://github.com/CodSpeedHQ/linux-perf-data?rev=5762e6e967bf)",
  "log",
  "mach2",
  "memchr",
@@ -3854,7 +3854,7 @@ dependencies = [
 [[package]]
 name = "samply-api"
 version = "0.24.0"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=81ba2c346e71#81ba2c346e71d05aaef94448e2962961d29cb4c8"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=9c4a2088fa125d3ece48eb0d28fecfda1724e757#9c4a2088fa125d3ece48eb0d28fecfda1724e757"
 dependencies = [
  "samply-debugid",
  "samply-symbols",
@@ -3870,7 +3870,7 @@ dependencies = [
 [[package]]
 name = "samply-debugid"
 version = "0.1.0"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=81ba2c346e71#81ba2c346e71d05aaef94448e2962961d29cb4c8"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=9c4a2088fa125d3ece48eb0d28fecfda1724e757#9c4a2088fa125d3ece48eb0d28fecfda1724e757"
 dependencies = [
  "debugid",
  "uuid",
@@ -3879,7 +3879,7 @@ dependencies = [
 [[package]]
 name = "samply-object"
 version = "0.1.0"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=81ba2c346e71#81ba2c346e71d05aaef94448e2962961d29cb4c8"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=9c4a2088fa125d3ece48eb0d28fecfda1724e757#9c4a2088fa125d3ece48eb0d28fecfda1724e757"
 dependencies = [
  "debugid",
  "object",
@@ -3890,7 +3890,7 @@ dependencies = [
 [[package]]
 name = "samply-quota-manager"
 version = "0.1.0"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=81ba2c346e71#81ba2c346e71d05aaef94448e2962961d29cb4c8"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=9c4a2088fa125d3ece48eb0d28fecfda1724e757#9c4a2088fa125d3ece48eb0d28fecfda1724e757"
 dependencies = [
  "bytesize",
  "futures",
@@ -3904,7 +3904,7 @@ dependencies = [
 [[package]]
 name = "samply-symbols"
 version = "0.24.1"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=81ba2c346e71#81ba2c346e71d05aaef94448e2962961d29cb4c8"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=9c4a2088fa125d3ece48eb0d28fecfda1724e757#9c4a2088fa125d3ece48eb0d28fecfda1724e757"
 dependencies = [
  "addr2line",
  "bitflags",
@@ -5273,7 +5273,7 @@ dependencies = [
 [[package]]
 name = "wholesym"
 version = "0.8.1"
-source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=81ba2c346e71#81ba2c346e71d05aaef94448e2962961d29cb4c8"
+source = "git+https://github.com/CodSpeedHQ/samply-codspeed?rev=9c4a2088fa125d3ece48eb0d28fecfda1724e757#9c4a2088fa125d3ece48eb0d28fecfda1724e757"
 dependencies = [
  "bytes",
  "core-foundation 0.10.1",
