@@ -6,7 +6,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-fn is_root_user() -> bool {
+pub fn is_root_user() -> bool {
     #[cfg(unix)]
     return nix::unistd::Uid::current().is_root();
     #[cfg(not(unix))]

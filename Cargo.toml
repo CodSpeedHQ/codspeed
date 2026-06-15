@@ -44,6 +44,8 @@ indicatif = "0.18"
 console = "0.16"
 async-trait = "0.1.89"
 libc = { workspace = true }
+xattr = "1.6"
+caps = "0.5"
 bincode = "1.3.3" # Pinned to 1.x: 2.0 changes the wire format and serde integration
 object = "0.39"
 linux-perf-data = { git = "https://github.com/mstange/linux-perf-data.git", rev = "da5bce4b9fb724e84b1eea0cb6ab9c8a291bc676", features = [

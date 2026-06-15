@@ -6,7 +6,7 @@ use crate::executor::helpers::env::{build_path_env, get_base_injected_env};
 use crate::executor::helpers::get_bench_command::get_bench_command;
 use crate::executor::helpers::run_command_with_log_pipe::run_command_with_log_pipe_and_callback;
 use crate::executor::helpers::run_with_env::wrap_with_env;
-use crate::executor::helpers::run_with_sudo::wrap_with_sudo;
+use crate::executor::helpers::run_with_sudo::is_root_user;
 use crate::executor::shared::fifo::RunnerFifo;
 use crate::executor::{ExecutionContext, Executor};
 use crate::instruments::mongo_tracer::MongoTracer;
@@ -27,7 +27,10 @@ use std::rc::Rc;
 use tempfile::NamedTempFile;
 use tokio::time::{Duration, timeout};
 
-use super::setup::{MEMTRACK_COMMAND, get_memtrack_status, install_memtrack};
+use super::setup::{
+    MEMTRACK_COMMAND, ensure_memtrack_capabilities, get_memtrack_status, has_memtrack_capabilities,
+    install_memtrack,
+};
 
 pub struct MemoryExecutor;
 
@@ -68,6 +71,26 @@ impl MemoryExecutor {
 
         Ok((ipc_server, cmd_builder, env_file))
     }
+
+    /// Ensure memtrack can load its eBPF programs: either run as root or hold the
+    /// required file capabilities. Tries a one-time capability grant if neither
+    /// holds, and bails if that fails.
+    fn ensure_privileges() -> Result<()> {
+        if is_root_user() || has_memtrack_capabilities() {
+            return Ok(());
+        }
+
+        ensure_memtrack_capabilities()?;
+
+        if has_memtrack_capabilities() {
+            return Ok(());
+        }
+
+        bail!(
+            "{MEMTRACK_COMMAND} needs elevated privileges to load its eBPF programs, but the \
+             required capabilities could not be granted."
+        );
+    }
 }
 
 #[async_trait(?Send)]
@@ -92,7 +115,8 @@ impl Executor for MemoryExecutor {
         _system_info: &SystemInfo,
         _setup_cache_dir: Option<&Path>,
     ) -> Result<()> {
-        install_memtrack().await
+        install_memtrack().await?;
+        ensure_memtrack_capabilities()
     }
 
     async fn run(
@@ -103,8 +127,10 @@ impl Executor for MemoryExecutor {
         // Create the results/ directory inside the profile folder to avoid having memtrack create it with wrong permissions
         std::fs::create_dir_all(execution_context.profile_folder.join("results"))?;
 
+        Self::ensure_privileges()?;
+
         let (ipc, cmd_builder, _env_file) = Self::build_memtrack_command(execution_context)?;
-        let cmd = wrap_with_sudo(cmd_builder)?.build();
+        let cmd = cmd_builder.build();
         debug!("cmd: {cmd:?}");
 
         let runner_fifo = RunnerFifo::new()?;
