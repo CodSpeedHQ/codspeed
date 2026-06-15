@@ -45,7 +45,6 @@ console = "0.16"
 async-trait = "0.1.89"
 libc = { workspace = true }
 xattr = "1.6"
-caps = "0.5"
 bincode = "1.3.3" # Pinned to 1.x: 2.0 changes the wire format and serde integration
 object = "0.39"
 linux-perf-data = { git = "https://github.com/mstange/linux-perf-data.git", rev = "da5bce4b9fb724e84b1eea0cb6ab9c8a291bc676", features = [
@@ -56,10 +55,8 @@ memmap2 = "0.9.10"
 nix = { version = "0.31.3", features = ["fs", "time", "user"] }
 futures = "0.3.32"
 runner-shared = { path = "crates/runner-shared" }
-memtrack = { path = "crates/memtrack", default-features = false }
 exec-harness = { path = "crates/exec-harness" }
 instrument-hooks-bindings = { path = "crates/instrument-hooks-bindings" }
-ipc-channel = { workspace = true }
 shellexpand = { version = "3.1.2", features = ["tilde"] }
 addr2line = "0.26"
 gimli = "0.33"
@@ -73,8 +70,12 @@ which = "8.0.2"
 crc32fast = "1.5.0"
 samply = { git = "https://github.com/CodSpeedHQ/samply-codspeed", rev = "81ba2c346e71" }
 
+# Memory profiling (memtrack) and the capability handling around it are Linux-only.
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = "0.18"
+caps = "0.5"
+memtrack = { path = "crates/memtrack", default-features = false }
+ipc-channel = { workspace = true }
 
 [dev-dependencies]
 temp-env = { version = "0.3.6", features = ["async_closure"] }

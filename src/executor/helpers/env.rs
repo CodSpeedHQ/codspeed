@@ -18,6 +18,7 @@ pub fn get_base_injected_env(
         #[allow(deprecated)]
         RunnerMode::Instrumentation | RunnerMode::Simulation => "instrumentation",
         RunnerMode::Walltime => "walltime",
+        #[cfg(target_os = "linux")]
         RunnerMode::Memory => "memory",
     };
     let mut env = HashMap::from([

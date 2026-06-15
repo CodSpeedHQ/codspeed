@@ -113,6 +113,7 @@ const MEMTRACK_INSTALLER: BinaryPin = BinaryPin {
     url_template: "https://github.com/CodSpeedHQ/codspeed/releases/download/memtrack-v{version}/memtrack-installer.sh",
     sha256: "67f30ebe17d5da4246b51d8663394026385d95203ff09e81289772159e969603",
 };
+#[cfg(target_os = "linux")]
 pub const MEMTRACK_VERSION: &str = MEMTRACK_INSTALLER.version;
 
 const EXEC_HARNESS_INSTALLER: BinaryPin = BinaryPin {
@@ -134,6 +135,8 @@ const MONGO_TRACER_INSTALLER: BinaryPin = BinaryPin {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PinnedBinary {
     ValgrindDeb(ValgrindTarget),
+    // Only installed by the Linux-only memory executor.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     MemtrackInstaller,
     ExecHarnessInstaller,
     MongoTracerInstaller,

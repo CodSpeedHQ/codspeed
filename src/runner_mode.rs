@@ -11,6 +11,7 @@ pub enum RunnerMode {
     Instrumentation,
     Simulation,
     Walltime,
+    #[cfg(target_os = "linux")]
     Memory,
 }
 

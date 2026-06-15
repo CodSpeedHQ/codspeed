@@ -4,6 +4,7 @@ pub mod config;
 mod execution_context;
 pub(crate) mod helpers;
 mod interfaces;
+#[cfg(target_os = "linux")]
 mod memory;
 pub mod orchestrator;
 mod shared;
@@ -22,6 +23,7 @@ pub use execution_context::ExecutionContext;
 pub use interfaces::ExecutorName;
 pub use orchestrator::Orchestrator;
 
+#[cfg(target_os = "linux")]
 use memory::executor::MemoryExecutor;
 use std::path::Path;
 use valgrind::executor::ValgrindExecutor;
@@ -34,6 +36,7 @@ impl Display for RunnerMode {
             RunnerMode::Instrumentation => write!(f, "instrumentation"),
             RunnerMode::Simulation => write!(f, "simulation"),
             RunnerMode::Walltime => write!(f, "walltime"),
+            #[cfg(target_os = "linux")]
             RunnerMode::Memory => write!(f, "memory"),
         }
     }
@@ -49,16 +52,20 @@ pub fn get_executor_from_mode(
         #[allow(deprecated)]
         RunnerMode::Instrumentation | RunnerMode::Simulation => Box::new(ValgrindExecutor),
         RunnerMode::Walltime => Box::new(WallTimeExecutor::new(walltime_profiler)),
+        #[cfg(target_os = "linux")]
         RunnerMode::Memory => Box::new(MemoryExecutor),
     }
 }
 
 pub fn get_all_executors() -> Vec<Box<dyn Executor>> {
-    vec![
+    #[cfg_attr(not(target_os = "linux"), allow(unused_mut))]
+    let mut executors: Vec<Box<dyn Executor>> = vec![
         Box::new(ValgrindExecutor),
         Box::new(WallTimeExecutor::new(None)),
-        Box::new(MemoryExecutor),
-    ]
+    ];
+    #[cfg(target_os = "linux")]
+    executors.push(Box::new(MemoryExecutor));
+    executors
 }
 
 /// Installation status of a tool required by an executor.
@@ -78,6 +85,8 @@ pub enum ToolInstallStatus {
 
 /// Readiness of any elevated privileges an executor needs beyond a plain install
 /// (e.g. file capabilities). Reported alongside [`ToolStatus`] in `setup status`.
+/// Only the Linux-only memory executor produces these today.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub enum PrivilegeStatus {
     /// Privileges are in place; `detail` explains how (root, capabilities granted, …).
     Satisfied { detail: String },
