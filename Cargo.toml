@@ -103,6 +103,7 @@ serde_json = "1.0"
 serde = { version = "1.0.228", features = ["derive"] }
 ipc-channel = "0.20"
 itertools = "0.14.0"
+linux-perf-event-reader = "0.10.2" # matches the version linux-perf-data resolves to
 env_logger = "0.11.10"
 tempfile = "3.27.0"
 object = { version = "0.39", default-features = false, features = ["read_core", "elf"] }

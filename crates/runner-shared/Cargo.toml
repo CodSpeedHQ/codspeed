@@ -11,6 +11,7 @@ serde_json = { workspace = true }
 # Pinned to 1.x: 2.0 changes the wire format and serde integration
 bincode = "1.3"
 itertools = { workspace = true }
+linux-perf-event-reader = { workspace = true }
 log = { workspace = true }
 rmp = "0.8.15"
 rmp-serde = "1.3.1"

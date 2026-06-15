@@ -2238,7 +2238,7 @@ name = "linux-perf-event-reader"
 version = "0.10.2"
 source = "git+https://github.com/AvalancheHQ/linux-perf-event-reader?rev=908775c8b5bd#908775c8b5bd620ea4ec767d7e56afb3b2f232ac"
 dependencies = [
- "bitflags 2.11.1",
+ "bitflags",
  "byteorder",
  "memchr",
  "thiserror 2.0.18",
@@ -3584,6 +3584,7 @@ dependencies = [
  "codspeed-divan-compat",
  "itertools 0.14.0",
  "libc",
+ "linux-perf-event-reader 0.10.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "log",
  "rand 0.8.6",
  "rmp",
