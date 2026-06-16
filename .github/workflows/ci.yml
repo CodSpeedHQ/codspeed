@@ -46,6 +46,9 @@ jobs:
         run: |
           cargo install --path crates/exec-harness --locked
 
+      - name: Grant memtrack file capabilities
+        run: cargo r -- setup --mode memory
+
       - run: cargo test --all --exclude memtrack --exclude exec-harness
 
   exec-harness-tests:
