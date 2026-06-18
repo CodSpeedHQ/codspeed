@@ -17,7 +17,8 @@ repos:
     rev: v1.0
     hooks:
       - id: fmt
-        args: [--all, --]
+        args: [--]
+        pass_filenames: false
       - id: clippy
         args: [--all-targets, --, -D, warnings]
   - repo: https://github.com/cpp-linter/cpp-linter-hooks
