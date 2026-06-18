@@ -114,6 +114,12 @@ impl Profiler for SamplyProfiler {
             ),
         ]);
 
+        // Directory where the profiled runtime drops its V8 code log (one
+        // `codspeed-v8-<pid>.log` per process); samply reads them back per
+        // jitdump pid to expand inlined frames. Both the writer (the runtime)
+        // and the reader (samply) see this through the inherited environment.
+        cmd_builder.env("CODSPEED_V8_LOG", profile_folder);
+
         // Extra hardware events to capture alongside the sampling event,
         // stored by samply as per-sample delta columns in the profile, as
         // `<name>:<type>:<config>` specs resolved for the CPU we run on.
