@@ -5,6 +5,41 @@
 
 
 
+## [4.17.6] - 2026-06-18
+
+### <!-- 0 -->🚀 Features
+- Show memtrack capability status in setup status by @not-matthias
+- Run memtrack sudo-less via file capabilities by @not-matthias
+- Use extra events when using samply on linux by @GuillaumeLagrange in [#404](https://github.com/CodSpeedHQ/runner/pull/404)
+- Update `PerfEvent` to also support samply format by @GuillaumeLagrange
+- Use isolation for with samply by @GuillaumeLagrange
+- Make eh_frame_hdr optional in unwind data (V4) by @not-matthias
+
+### <!-- 1 -->🐛 Bug Fixes
+- Keep rolling buffer off during executor setup by @not-matthias in [#411](https://github.com/CodSpeedHQ/runner/pull/411)
+- Gate memory executor behind Linux target by @not-matthias
+- Enable tracking when running without IPC by @not-matthias
+- Tolerate RLIMIT_MEMLOCK EPERM on modern kernels by @not-matthias
+- Install libc6-dbg during valgrind setup by @not-matthias in [#394](https://github.com/CodSpeedHQ/runner/pull/394)
+- Skip rustup-wrapped proxy in trace-children by @not-matthias in [#405](https://github.com/CodSpeedHQ/runner/pull/405)
+- Retry streamed uploads on transient failures by @not-matthias in [#399](https://github.com/CodSpeedHQ/runner/pull/399)
+- Extract unwind data for binaries without eh_frame_hdr by @not-matthias
+
+### <!-- 10 -->💼 Other
+- Drop OpenSSL, move TLS stack to rustls (#406) by @art049 in [#406](https://github.com/CodSpeedHQ/runner/pull/406)
+
+### <!-- 2 -->🏗️ Refactor
+- Split executor privilege granting into grant_privileges by @not-matthias
+
+### <!-- 3 -->📚 Documentation
+- Add unwind data version changelog by @not-matthias in [#393](https://github.com/CodSpeedHQ/runner/pull/393)
+
+### <!-- 7 -->⚙️ Internals
+- Grant memtrack file capabilities before memory tests by @not-matthias in [#407](https://github.com/CodSpeedHQ/runner/pull/407)
+- Bump samply to support additional events by @GuillaumeLagrange
+- Add helper script to use local versions of samply and framehop easily by @GuillaumeLagrange
+
+
 ## [4.17.5] - 2026-06-10
 
 ### <!-- 0 -->🚀 Features
@@ -1272,6 +1307,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[4.17.6]: https://github.com/CodSpeedHQ/runner/compare/v4.17.5..v4.17.6
 [4.17.5]: https://github.com/CodSpeedHQ/runner/compare/v4.17.4..v4.17.5
 [4.17.4]: https://github.com/CodSpeedHQ/runner/compare/v4.17.3..v4.17.4
 [4.17.3]: https://github.com/CodSpeedHQ/runner/compare/v4.17.2..v4.17.3
