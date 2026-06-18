@@ -28,6 +28,11 @@ pub struct SamplyProfiler {
     /// returns — samply writes the file itself — but we hold onto it so future
     /// `finalize` work (e.g. validation, conversion) has the path on hand.
     output_path: Option<PathBuf>,
+    /// Scratch directory the profiled runtime drops its V8 code logs into, set
+    /// by [`Profiler::wrap_command`]. Owned here so it outlives the samply child
+    /// that reads the logs back and is removed once profiling is done; keeping
+    /// it out of the profile folder means it isn't bundled into the upload.
+    v8_log_dir: Option<tempfile::TempDir>,
     /// macOS only: set in [`Profiler::setup`] when the `bash` resolved on PATH
     /// is Apple-signed and samply can't profile it, so [`Profiler::wrap_command`]
     /// must prepend brew's bin dir to PATH.
@@ -39,6 +44,7 @@ impl SamplyProfiler {
     pub fn new() -> Self {
         Self {
             output_path: None,
+            v8_log_dir: None,
             #[cfg(target_os = "macos")]
             needs_brew_bash: std::cell::Cell::new(false),
         }
@@ -114,6 +120,9 @@ impl Profiler for SamplyProfiler {
                 "https://symbols.mozilla.org/,https://symbols.electronjs.org/",
             ),
         ]);
+
+        let v8_log_dir = tempfile::tempdir().context("failed to create V8 code log directory")?;
+        cmd_builder.env("CODSPEED_V8_LOG", v8_log_dir.path());
 
         // Extra hardware events to capture alongside the sampling event,
         // stored by samply as per-sample delta columns in the profile, as
