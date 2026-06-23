@@ -13,7 +13,7 @@ pub const VALGRIND_CODSPEED_VERSION: Version = Version::new(3, 26, 0);
 /// the .deb is repackaged without a new upstream valgrind release. Appears in
 /// the .deb package version (`3.26.0-0codspeed3`) and in `valgrind --version`
 /// output (`valgrind-3.26.0.codspeed3`).
-pub const VALGRIND_CODSPEED_ITERATION: u32 = 3;
+pub const VALGRIND_CODSPEED_ITERATION: u32 = 4;
 /// Suffix appended to `VALGRIND_CODSPEED_VERSION` to form the .deb package version.
 static VALGRIND_DEB_REV: LazyLock<String> =
     LazyLock::new(|| format!("0codspeed{VALGRIND_CODSPEED_ITERATION}"));
@@ -93,16 +93,16 @@ impl ValgrindTarget {
     fn sha256(self) -> &'static str {
         match (self.distro_version, self.arch) {
             (DistroVersion::Ubuntu2204, Arch::Amd64) => {
-                "2b8c0975e16a771585d5d1e5a61392c2fdc103c53307d04773c9376d7bd782f8"
+                "998439a0beac2e98224660137cd5e82b56e62d24d569f9ae1f957d10c5849216"
             }
             (DistroVersion::Ubuntu2404, Arch::Amd64) => {
-                "e6da56bd90d7a22ed451c2108002a3f172914c77c705d0c8c4fedf6196830dee"
+                "c32a574f2cd4acd754371e55979bd7f5e6cd0ce203ca095985e64b8ed090cee1"
             }
             (DistroVersion::Ubuntu2204, Arch::Arm64) => {
-                "001b6d2a491f6a25235098e4247e3e2983786645920ce0be701a31daa465839f"
+                "1d1c1e9ee566487cae2bf49b19b3ca189f6ce6b2ffabb33300c4eeeeb064fee0"
             }
             (DistroVersion::Ubuntu2404, Arch::Arm64) => {
-                "f40ef91593510c4f9bae3c889055a5442df101e1bcc5adfedf4898d3f50807fc"
+                "9353f52a53996aa3e0c4a102921882c369445c03e485c6e2a74064d6164aa460"
             }
         }
     }
