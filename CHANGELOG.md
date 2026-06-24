@@ -5,10 +5,19 @@
 
 
 
+## [4.18.1] - 2026-06-24
+
+### <!-- 0 -->🚀 Features
+- Bump go-runner to 1.2.1 by @adriencaccia
+
+### <!-- 3 -->📚 Documentation
+- Document go-runner hash table and test-driven hash workflow by @adriencaccia in [#421](https://github.com/CodSpeedHQ/runner/pull/421)
+
+
 ## [4.18.0] - 2026-06-23
 
 ### <!-- 0 -->🚀 Features
-- Bump valgrind-codspeed to 3.26.0-0codspeed4
+- Bump valgrind-codspeed to 3.26.0-0codspeed4 by @adriencaccia
 - Bump samply by @GuillaumeLagrange in [#415](https://github.com/CodSpeedHQ/runner/pull/415)
 - Set env var to have node dump inlining information by @GuillaumeLagrange
 - Change isolation logic to include samply and non root fallback by @GuillaumeLagrange
@@ -1321,6 +1330,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[4.18.1]: https://github.com/CodSpeedHQ/runner/compare/v4.18.0..v4.18.1
 [4.18.0]: https://github.com/CodSpeedHQ/runner/compare/v4.17.6..v4.18.0
 [4.17.6]: https://github.com/CodSpeedHQ/runner/compare/v4.17.5..v4.17.6
 [4.17.5]: https://github.com/CodSpeedHQ/runner/compare/v4.17.4..v4.17.5
