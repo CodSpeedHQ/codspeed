@@ -30,9 +30,10 @@ GO_RUNNER_INSTALLER_SHA256S="
 1.0.2 4e4ecfb1888ced253f0acbbc132db0b1d7e99351d40f3eff789a518a6130ee35
 1.1.0 d16e0e14bdfaea61a6da1d46d7b3b36f940b64335c8affbdc85b802d6e949a97
 1.2.0 072876ccd43b8c73c123df206eda4b1f82f9ff03b1330efe35e5eaa5c1b6cefe
+1.2.1 5c90675148a23fd550681033b5589b39b8e66a8ea372d27befd580be0cc535f4
 "
 
-DEFAULT_GO_RUNNER_VERSION="1.2.0"
+DEFAULT_GO_RUNNER_VERSION="1.2.1"
 
 get_go_runner_installer_sha256() {
     if ! awk -v v="$1" '$1==v{print $2; f=1} END{exit !f}' <<<"$GO_RUNNER_INSTALLER_SHA256S"; then
