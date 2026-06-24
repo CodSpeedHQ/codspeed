@@ -1,5 +1,8 @@
 use crate::{
-    logger::{GroupEvent, get_announcement_event, get_group_event, get_json_event},
+    logger::{
+        DEFAULT_ANNOUNCEMENT_TITLE, GroupEvent, get_announcement_event, get_group_event,
+        get_json_event,
+    },
     run_environment::logger::should_provider_logger_handle_record,
 };
 use log::*;
@@ -56,9 +59,13 @@ impl Log for GithubActionLogger {
         }
 
         if let Some(announcement) = get_announcement_event(record) {
-            let escaped_announcement = escape_multiline_message(&announcement);
-            // TODO: make the announcement title configurable
-            println!("::notice title=New CodSpeed Feature::{escaped_announcement}");
+            let title = announcement
+                .title
+                .as_deref()
+                .unwrap_or(DEFAULT_ANNOUNCEMENT_TITLE);
+            let escaped_title = escape_multiline_message(title);
+            let escaped_message = escape_multiline_message(&announcement.message);
+            println!("::notice title={escaped_title}::{escaped_message}");
             return;
         }
 

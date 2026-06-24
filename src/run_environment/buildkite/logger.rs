@@ -6,6 +6,10 @@ use log::*;
 use simplelog::SharedLogger;
 use std::{env, io::Write};
 
+/// Title used for announcements when no explicit title is provided. Preserves the legacy
+/// `[ANNOUNCEMENT]` prefix that this logger emitted before per-call titles were supported.
+const DEFAULT_BUILDKITE_ANNOUNCEMENT_TITLE: &str = "ANNOUNCEMENT";
+
 /// A logger that prints logs in the format expected by Buildkite
 ///
 /// See https://buildkite.com/docs/pipelines/managing-log-output
@@ -54,7 +58,11 @@ impl Log for BuildkiteLogger {
         }
 
         if let Some(announcement) = get_announcement_event(record) {
-            println!("[ANNOUNCEMENT] {announcement}");
+            let title = announcement
+                .title
+                .as_deref()
+                .unwrap_or(DEFAULT_BUILDKITE_ANNOUNCEMENT_TITLE);
+            println!("[{title}] {}", announcement.message);
             return;
         }
 
