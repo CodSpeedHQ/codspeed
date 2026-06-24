@@ -21,6 +21,11 @@ pub fn perform(commands: Vec<BenchmarkCommand>) -> Result<()> {
 
         let mut cmd = Command::new(&benchmark_cmd.command[0]);
         cmd.args(&benchmark_cmd.command[1..]);
+        if let Some(stdin_path) = &benchmark_cmd.stdin {
+            let stdin_file = std::fs::File::open(stdin_path)
+                .with_context(|| format!("Failed to open stdin file: {}", stdin_path.display()))?;
+            cmd.stdin(stdin_file);
+        }
         hooks.start_benchmark().unwrap();
         let status = cmd.status();
         hooks.stop_benchmark().unwrap();
@@ -53,6 +58,11 @@ pub fn perform_with_valgrind(commands: Vec<BenchmarkCommand>) -> Result<()> {
 
         let mut cmd = Command::new(&benchmark_cmd.command[0]);
         cmd.args(&benchmark_cmd.command[1..]);
+        if let Some(stdin_path) = &benchmark_cmd.stdin {
+            let stdin_file = std::fs::File::open(stdin_path)
+                .with_context(|| format!("Failed to open stdin file: {}", stdin_path.display()))?;
+            cmd.stdin(stdin_file);
+        }
         // Use LD_PRELOAD to inject instrumentation into the child process
         cmd.env("LD_PRELOAD", preload_lib_path);
         // Make sure python processes output perf maps. This is usually done by `pytest-codspeed`

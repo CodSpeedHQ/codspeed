@@ -10,6 +10,7 @@ pub fn run_rounds(
     bench_uri: String,
     command: Vec<String>,
     config: &ExecutionOptions,
+    stdin: Option<std::path::PathBuf>,
 ) -> Result<Vec<u128>> {
     let warmup_time_ns = config.warmup_time_ns;
     let hooks = InstrumentHooks::instance(INTEGRATION_NAME, INTEGRATION_VERSION);
@@ -18,6 +19,11 @@ pub fn run_rounds(
         let mut cmd = Command::new(&command[0]);
         cmd.args(&command[1..]);
         crate::node::set_node_options(&mut cmd);
+        if let Some(ref stdin_path) = stdin {
+            let stdin_file = std::fs::File::open(stdin_path)
+                .with_context(|| format!("Failed to open stdin file: {}", stdin_path.display()))?;
+            cmd.stdin(stdin_file);
+        }
         let mut child = cmd.spawn().context("Failed to execute command")?;
         let bench_round_start_ts_ns = InstrumentHooks::current_timestamp();
         let status = child

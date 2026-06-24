@@ -2,6 +2,7 @@ use clap::ValueEnum;
 use prelude::*;
 use serde::{Deserialize, Serialize};
 use std::io::{self, BufRead};
+use std::path::PathBuf;
 
 pub mod analysis;
 pub mod constants;
@@ -36,6 +37,10 @@ pub struct BenchmarkCommand {
     /// Walltime execution options (flattened into the JSON object)
     #[serde(default)]
     pub walltime_args: walltime::WalltimeExecutionArgs,
+
+    /// Optional stdin file path
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stdin: Option<PathBuf>,
 }
 
 /// Read and parse benchmark commands from stdin as JSON
@@ -49,7 +54,7 @@ pub fn read_commands_from_stdin() -> Result<Vec<BenchmarkCommand>> {
         input.push('\n');
     }
 
-    let commands: Vec<BenchmarkCommand> =
+    let mut commands: Vec<BenchmarkCommand> =
         serde_json::from_str(&input).context("Failed to parse JSON from stdin")?;
 
     if commands.is_empty() {
@@ -59,6 +64,20 @@ pub fn read_commands_from_stdin() -> Result<Vec<BenchmarkCommand>> {
     for cmd in &commands {
         if cmd.command.is_empty() {
             bail!("Empty command in stdin input");
+        }
+    }
+
+    for cmd in &mut commands {
+        if let Some(stdin_path) = &cmd.stdin {
+            if !stdin_path.is_absolute() {
+                cmd.stdin = Some(
+                    std::fs::canonicalize(stdin_path)
+                        .or_else(|_| std::env::current_dir().map(|d| d.join(stdin_path)))
+                        .with_context(|| {
+                            format!("Failed to resolve stdin path: {}", stdin_path.display())
+                        })?,
+                );
+            }
         }
     }
 

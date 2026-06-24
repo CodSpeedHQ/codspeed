@@ -52,7 +52,7 @@ pub async fn ensure_binary_installed(
         Version::parse(version).context("Invalid version format")?,
     ) {
         bail!(
-            "Could not veryfy installation of {binary_name} version {version} after running installer"
+            "Could not verify installation of {binary_name} version {version} after running installer"
         );
     }
 

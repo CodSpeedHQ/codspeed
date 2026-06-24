@@ -25,6 +25,7 @@ fn test_max_rounds_without_warmup() -> Result<()> {
         "test::max_rounds_no_warmup".to_string(),
         sleep_cmd(),
         &exec_opts,
+        None,
     )?;
 
     // Should run exactly 10 times
@@ -49,6 +50,7 @@ fn test_min_max_rounds_with_warmup() -> Result<()> {
         "test::min_max_rounds_warmup".to_string(),
         sleep_cmd(),
         &exec_opts,
+        None,
     )?;
 
     // Should run between 5 and 50 times
@@ -78,7 +80,7 @@ fn test_max_time_constraint() -> Result<()> {
         min_rounds: None,
     })?;
 
-    let times = run_rounds("test::max_time".to_string(), sleep_cmd(), &exec_opts)?;
+    let times = run_rounds("test::max_time".to_string(), sleep_cmd(), &exec_opts, None)?;
 
     // Should have run at least 1 time, but not an excessive amount
     assert!(!times.is_empty(), "Expected at least 1 iteration");
@@ -107,6 +109,7 @@ fn test_min_rounds_and_min_time() -> Result<()> {
         "test::min_rounds_priority".to_string(),
         sleep_cmd(),
         &exec_opts,
+        None,
     )?;
 
     // Should satisfy min_rounds requirement
@@ -135,6 +138,7 @@ fn test_warmup_is_performed() -> Result<()> {
         "test::with_warmup".to_string(),
         sleep_cmd(),
         &exec_opts_with_warmup,
+        None,
     )?;
 
     // With warmup disabled
@@ -150,6 +154,7 @@ fn test_warmup_is_performed() -> Result<()> {
         "test::no_warmup".to_string(),
         sleep_cmd(),
         &exec_opts_no_warmup,
+        None,
     )?;
 
     // Both should complete successfully
@@ -175,6 +180,7 @@ fn test_with_sleep_command() -> Result<()> {
         "test::sleep_command".to_string(),
         vec!["sleep".to_string(), "0.01".to_string()], // 10ms sleep
         &exec_opts,
+        None,
     )?;
 
     // Should run exactly 3 times
@@ -208,6 +214,7 @@ fn test_invalid_command_fails() {
         "test::invalid_command".to_string(),
         vec!["this_command_definitely_does_not_exist_12345".to_string()],
         &exec_opts,
+        None,
     );
 
     // Should fail
@@ -230,6 +237,7 @@ fn test_pure_numbers_as_seconds() -> Result<()> {
         "test::pure_numbers_seconds".to_string(),
         sleep_cmd(),
         &exec_opts,
+        None,
     )?;
 
     // Should have run at least once
@@ -248,6 +256,7 @@ fn test_pure_numbers_as_seconds() -> Result<()> {
         "test::fractional_seconds".to_string(),
         sleep_cmd(),
         &exec_opts_fractional,
+        None,
     )?;
 
     assert!(
@@ -282,6 +291,7 @@ fn test_single_long_execution() -> Result<()> {
         "test::single_long_execution".to_string(),
         vec!["sh".to_string(), "-c".to_string(), cmd.clone()],
         &exec_opts,
+        None,
     )?;
 
     // Should have run exactly once
@@ -294,6 +304,7 @@ fn test_single_long_execution() -> Result<()> {
             "test::single_long_execution".to_string(),
             vec!["sh".to_string(), "-c".to_string(), cmd],
             &exec_opts,
+            None,
         )
         .is_err(),
         "Expected failure on second execution due to existing directory"
@@ -324,6 +335,7 @@ fn test_command_with_shell_operators() -> Result<()> {
         "test::shell_operators".to_string(),
         vec!["bash".to_string(), "-c".to_string(), cmd],
         &exec_opts,
+        None,
     )?;
 
     assert_eq!(times.len(), 1, "Expected exactly 1 iteration");
@@ -368,6 +380,7 @@ fn test_command_with_pipes() -> Result<()> {
         "test::pipes".to_string(),
         vec!["bash".to_string(), "-c".to_string(), cmd],
         &exec_opts,
+        None,
     )?;
 
     assert_eq!(times.len(), 1, "Expected exactly 1 iteration");
@@ -404,6 +417,7 @@ fn test_command_with_embedded_quotes() -> Result<()> {
         "test::embedded_quotes".to_string(),
         vec!["bash".to_string(), "-c".to_string(), cmd],
         &exec_opts,
+        None,
     )?;
 
     assert_eq!(times.len(), 1, "Expected exactly 1 iteration");
