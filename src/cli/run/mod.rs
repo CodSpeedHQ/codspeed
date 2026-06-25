@@ -181,7 +181,7 @@ pub async fn run(
         RunTarget::SingleCommand(args) => {
             // SingleCommand: working_directory comes from --working-directory CLI flag only.
             // Config file's working-directory is NOT used.
-            let command = args.command.join(" ");
+            let command = shell_words::join(&args.command);
             let poll_opts = PollResultsOptions::new(output_json, base_run_id);
             let config = build_orchestrator_config(
                 args,
