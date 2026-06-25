@@ -86,7 +86,7 @@ impl Profiler for SamplyProfiler {
         mut cmd_builder: CommandBuilder,
         _config: &ExecutorConfig,
         profile_folder: &Path,
-        isolate: bool,
+        record_system_wide: bool,
     ) -> anyhow::Result<CommandBuilder> {
         let output_path = profile_folder.join(SAMPLY_OUTPUT_FILE_NAME);
 
@@ -157,10 +157,12 @@ impl Profiler for SamplyProfiler {
 
         self.output_path = Some(output_path);
         self.v8_log_dir = Some(v8_log_dir);
-        // Isolated runs reparent the benchmark out of samply's subtree, so samply
-        // must record system-wide under sudo. Unisolated runs record samply's own
-        // descendant tree unprivileged.
-        let cmd_builder = if isolate {
+        // A reparented benchmark (the systemd scope) is no longer in samply's
+        // subtree, so samply must record system-wide under sudo. Otherwise
+        // samply records its own descendant tree unprivileged via inherit —
+        // including the delegated-cgroup case, where the benchmark stays
+        // in-subtree.
+        let cmd_builder = if record_system_wide {
             wrap_with_sudo(cmd_builder)?
         } else {
             cmd_builder

@@ -1,5 +1,7 @@
 use super::helpers::validate_walltime_results;
-use super::isolation::{requires_isolation, wrap_isolation_scope};
+use super::isolation::{
+    IsolationMode, resolve_isolation_mode, wrap_cgroup_isolation, wrap_isolation_scope,
+};
 use super::profiler::Profiler;
 use super::profiler::perf::PerfProfiler;
 use super::profiler::samply::SamplyProfiler;
@@ -181,14 +183,18 @@ impl Executor for WallTimeExecutor {
         let (_env_file, _script_file, cmd_builder) =
             WallTimeExecutor::walltime_bench_cmd(&execution_context.config, execution_context)?;
 
-        // Resolve the isolation decision once and reuse it for both the scope
+        // Resolve the isolation decision once and reuse it for both the leaf
         // wrapping here and the privilege wrapping below (or in the profiler).
-        let isolate = requires_isolation();
-        let cmd_builder = if isolate {
-            wrap_isolation_scope(cmd_builder)?
-        } else {
-            cmd_builder
+        let isolation_mode = resolve_isolation_mode();
+        let cmd_builder = match &isolation_mode {
+            IsolationMode::None => cmd_builder,
+            IsolationMode::Systemd => wrap_isolation_scope(cmd_builder)?,
+            IsolationMode::Cgroup { cgroup_dir } => wrap_cgroup_isolation(cmd_builder, cgroup_dir)?,
         };
+        // Only the systemd scope reparents the benchmark out of the profiler's
+        // subtree; cgroup isolation keeps it in-subtree, so the profiler (and
+        // the no-profiler branch) stays unprivileged there.
+        let record_system_wide = isolation_mode.requires_system_wide_profiling();
 
         // Split-borrow `self` so the closure inside `run_with_profiler` can
         // capture `benchmark_state` while we hold `&mut profiler`.
@@ -204,16 +210,16 @@ impl Executor for WallTimeExecutor {
                     cmd_builder,
                     &execution_context.config,
                     &execution_context.profile_folder,
-                    isolate,
+                    record_system_wide,
                     benchmark_state,
                 )
                 .await
             }
             _ => {
-                // No profiler: still honor the isolation decision, since the
-                // scope (and the sudo it requires) is a property of the run, not
-                // of the profiler.
-                let cmd_builder = if isolate {
+                // No profiler: still honor the isolation decision. Only the
+                // systemd scope needs the run elevated; cgroup isolation places
+                // the leaf itself and needs no privilege here.
+                let cmd_builder = if record_system_wide {
                     wrap_with_sudo(cmd_builder)?
                 } else {
                     cmd_builder
@@ -262,11 +268,11 @@ async fn run_with_profiler(
     cmd_builder: CommandBuilder,
     config: &ExecutorConfig,
     profile_folder: &Path,
-    isolate: bool,
+    record_system_wide: bool,
     benchmark_state: &OnceCell<(FifoBenchmarkData, ExecutionTimestamps)>,
 ) -> Result<std::process::ExitStatus> {
     let wrapped = profiler
-        .wrap_command(cmd_builder, config, profile_folder, isolate)
+        .wrap_command(cmd_builder, config, profile_folder, record_system_wide)
         .await?;
     let cmd = wrapped.build();
     debug!("cmd: {cmd:?}");

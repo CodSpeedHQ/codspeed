@@ -48,15 +48,18 @@ pub trait Profiler {
     /// Profilers stash any live state they need for the duration of the run
     /// (control fifos, output paths) on `self`.
     ///
-    /// `isolate` mirrors the decision the executor used to wrap the benchmark in
-    /// the systemd scope: when set, the profiler records system-wide under sudo;
-    /// otherwise it records its own descendant tree unprivileged.
+    /// `record_system_wide` reflects whether the isolation mechanism reparented
+    /// the benchmark out of the profiler's process subtree (only the systemd
+    /// scope does). When set, the profiler records system-wide under sudo;
+    /// otherwise it records its own descendant tree unprivileged via inherit —
+    /// which is also what the delegated-cgroup isolation relies on, since that
+    /// leaves the benchmark inside the profiler's subtree.
     async fn wrap_command(
         &mut self,
         cmd: CommandBuilder,
         config: &ExecutorConfig,
         profile_folder: &Path,
-        isolate: bool,
+        record_system_wide: bool,
     ) -> anyhow::Result<CommandBuilder>;
 
     /// The benchmarked process signaled the start of a measured region.

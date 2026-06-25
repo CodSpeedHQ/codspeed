@@ -91,7 +91,7 @@ impl Profiler for PerfProfiler {
         mut cmd_builder: CommandBuilder,
         config: &ExecutorConfig,
         profile_folder: &Path,
-        isolate: bool,
+        record_system_wide: bool,
     ) -> anyhow::Result<CommandBuilder> {
         let perf_fifo = PerfFifo::new()?;
         let perf_file_path = profile_folder.join(PERF_PIPEDATA_FILE_NAME);
@@ -183,10 +183,11 @@ impl Profiler for PerfProfiler {
         self.perf_fifo = Some(perf_fifo);
         self.perf_file_path = Some(perf_file_path);
 
-        // Isolated runs reparent the benchmark out of perf's subtree, so perf
-        // must record system-wide under sudo. Unisolated runs record perf's own
-        // descendant tree unprivileged.
-        let wrapped_builder = if isolate {
+        // A reparented benchmark (the systemd scope) is no longer in perf's
+        // subtree, so perf must record system-wide under sudo. Otherwise perf
+        // records its own descendant tree unprivileged — including the
+        // delegated-cgroup case, where the benchmark stays in-subtree.
+        let wrapped_builder = if record_system_wide {
             wrap_with_sudo(wrapped_builder)?
         } else {
             wrapped_builder
