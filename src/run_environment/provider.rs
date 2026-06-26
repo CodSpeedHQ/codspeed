@@ -140,6 +140,7 @@ pub trait RunEnvironmentProvider {
                 version: crate::VERSION.into(),
                 instruments: config.instruments.get_active_instrument_names(),
                 executor: executor_name,
+                exclude_allocations: config.exclude_allocations,
                 system_info: system_info.clone(),
             },
             run_environment: self.get_run_environment(),
