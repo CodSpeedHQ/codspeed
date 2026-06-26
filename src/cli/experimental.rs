@@ -25,6 +25,19 @@ pub struct ExperimentalArgs {
         env = "CODSPEED_CYCLE_ESTIMATION"
     )]
     pub cycle_estimation: bool,
+
+    /// Exclude memory allocation time from simulation results.
+    ///
+    /// Signals the backend to parse and subtract allocator time when interpreting
+    /// the run. Runs with different values are not comparable, so the value is part
+    /// of the run's measurement configuration.
+    #[arg(
+        long,
+        default_value_t = false,
+        help_heading = "Experimental",
+        env = "CODSPEED_EXCLUDE_ALLOCATIONS"
+    )]
+    pub exclude_allocations: bool,
 }
 
 impl ExperimentalArgs {
@@ -36,6 +49,9 @@ impl ExperimentalArgs {
         }
         if self.cycle_estimation {
             flags.push("--cycle-estimation");
+        }
+        if self.exclude_allocations {
+            flags.push("--exclude-allocations");
         }
         flags
     }

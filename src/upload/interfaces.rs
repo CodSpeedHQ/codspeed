@@ -31,6 +31,13 @@ pub struct Runner {
     pub version: String,
     pub instruments: Vec<InstrumentName>,
     pub executor: ExecutorName,
+    /// Whether memory allocation time is excluded from results. Part of the run's
+    /// measurement configuration: runs with different values are not comparable.
+    ///
+    /// Skipped when `false` so the default payload stays byte-identical to runs
+    /// without this feature, keeping the metadata hash and version unchanged.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub exclude_allocations: bool,
     #[serde(flatten)]
     pub system_info: SystemInfo,
 }

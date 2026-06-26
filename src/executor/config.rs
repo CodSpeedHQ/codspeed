@@ -93,6 +93,8 @@ pub struct OrchestratorConfig {
     pub fair_sched: bool,
     /// Enable valgrind's --cycle-estimation option.
     pub cycle_estimation: bool,
+    /// Signal the backend to exclude memory allocation time from simulation results.
+    pub exclude_allocations: bool,
 }
 
 /// Per-execution configuration passed to executors.
@@ -128,6 +130,8 @@ pub struct ExecutorConfig {
     pub fair_sched: bool,
     /// Enable valgrind's --cycle-estimation option.
     pub cycle_estimation: bool,
+    /// Signal the backend to exclude memory allocation time from simulation results.
+    pub exclude_allocations: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -198,6 +202,7 @@ impl OrchestratorConfig {
             enable_introspection,
             fair_sched: self.fair_sched,
             cycle_estimation: self.cycle_estimation,
+            exclude_allocations: self.exclude_allocations,
         }
     }
 }
@@ -231,6 +236,7 @@ impl OrchestratorConfig {
             extra_env: HashMap::new(),
             fair_sched: false,
             cycle_estimation: false,
+            exclude_allocations: false,
         }
     }
 }

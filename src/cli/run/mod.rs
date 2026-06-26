@@ -79,6 +79,7 @@ impl RunArgs {
                 experimental: ExperimentalArgs {
                     experimental_fair_sched: false,
                     cycle_estimation: false,
+                    exclude_allocations: false,
                 },
             },
             instruments: vec![],
@@ -129,6 +130,7 @@ fn build_orchestrator_config(
         extra_env: HashMap::new(),
         fair_sched: args.shared.experimental.experimental_fair_sched,
         cycle_estimation: args.shared.experimental.cycle_estimation,
+        exclude_allocations: args.shared.experimental.exclude_allocations,
     })
 }
 
