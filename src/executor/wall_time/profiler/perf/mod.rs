@@ -286,14 +286,13 @@ impl BenchmarkData<'_> {
                 error!("Failed to harvest perf maps: {e}");
                 BenchmarkDataSaveError::FailedToHarvestPerfMaps
             })?;
-        let jit_unwind_data_by_pid = jit_dump::save_symbols_and_harvest_unwind_data_for_pids(path,
-            &jit_dump_paths_by_pid,
-        )
-        .await
-        .map_err(|e| {
-            error!("Failed to harvest jit dumps: {e}");
-            BenchmarkDataSaveError::FailedToHarvestJitDumps
-        })?;
+        let jit_unwind_data_by_pid =
+            jit_dump::save_symbols_and_harvest_unwind_data_for_pids(path, &jit_dump_paths_by_pid)
+                .await
+                .map_err(|e| {
+                    error!("Failed to harvest jit dumps: {e}");
+                    BenchmarkDataSaveError::FailedToHarvestJitDumps
+                })?;
 
         let artifacts =
             save_artifacts::save_artifacts(path, &loaded_modules_by_path, &jit_unwind_data_by_pid);
