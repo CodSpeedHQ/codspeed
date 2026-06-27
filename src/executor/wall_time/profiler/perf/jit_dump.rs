@@ -1,11 +1,14 @@
 use super::module_symbols::{ModuleSymbols, Symbol};
 use crate::prelude::*;
+use indexmap::IndexSet;
 use linux_perf_data::jitdump::{JitDumpReader, JitDumpRecord};
 use runner_shared::unwind_data::{ProcessUnwindData, UnwindData};
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
 };
+
+pub(super) type JitDumpPathsByPid = HashMap<libc::pid_t, IndexSet<PathBuf>>;
 
 struct JitDump {
     path: PathBuf,
@@ -106,7 +109,30 @@ impl JitDump {
     }
 }
 
-/// Converts all the `jit-<pid>.dump` into a perf-<pid>.map with symbols, and collects the unwind data
+pub(super) fn insert_jit_dump_path(
+    jit_dump_paths_by_pid: &mut JitDumpPathsByPid,
+    pid: libc::pid_t,
+    path: PathBuf,
+) -> bool {
+    jit_dump_paths_by_pid.entry(pid).or_default().insert(path)
+}
+
+pub(super) fn add_legacy_tmp_jit_dump_paths_for_pids(
+    jit_dump_paths_by_pid: &mut JitDumpPathsByPid,
+    pids: &HashSet<libc::pid_t>,
+) {
+    for pid in pids {
+        let path = PathBuf::from("/tmp").join(format!("jit-{pid}.dump"));
+        if path.exists() && insert_jit_dump_path(jit_dump_paths_by_pid, *pid, path.clone()) {
+            debug!("Found legacy JIT dump file: {path:?}");
+        }
+    }
+}
+
+/// Converts all the `jit-<pid>.dump` into a perf-<pid>.map with symbols, and collects the unwind data.
+///
+/// Jitdump file paths are discovered from MMAP2 records in the perf data, since JIT runtimes
+/// mmap the jitdump file and perf records the mapping with the actual path on disk.
 ///
 /// # Symbols
 /// Since a jit dump is by definition specific to a single pid, we append the harvested symbols
@@ -116,40 +142,66 @@ impl JitDump {
 /// Unwind data is generated as a list
 pub async fn save_symbols_and_harvest_unwind_data_for_pids(
     profile_folder: &Path,
-    pids: &HashSet<libc::pid_t>,
+    jit_dump_paths_by_pid: &JitDumpPathsByPid,
 ) -> Result<HashMap<i32, Vec<(UnwindData, ProcessUnwindData)>>> {
-    let mut jit_unwind_data_by_path = HashMap::new();
+    let mut jit_unwind_data_by_pid = HashMap::new();
 
-    for pid in pids {
-        let name = format!("jit-{pid}.dump");
-        let path = PathBuf::from("/tmp").join(&name);
+    for (pid, paths) in jit_dump_paths_by_pid {
+        for path in paths {
+            debug!("Found JIT dump file: {path:?}");
 
-        if !path.exists() {
-            continue;
+            let symbols = match JitDump::new(path.clone()).into_perf_map() {
+                Ok(symbols) => symbols,
+                Err(error) => {
+                    warn!("Failed to convert jit dump into perf map: {error:?}");
+                    continue;
+                }
+            };
+
+            symbols.append_to_file(profile_folder.join(format!("perf-{pid}.map")))?;
+
+            let jit_unwind_data = match JitDump::new(path.clone()).into_unwind_data() {
+                Ok(data) => data,
+                Err(error) => {
+                    warn!("Failed to convert jit dump into unwind data: {error:?}");
+                    continue;
+                }
+            };
+
+            jit_unwind_data_by_pid
+                .entry(*pid)
+                .or_insert_with(Vec::new)
+                .extend(jit_unwind_data);
         }
-        debug!("Found JIT dump file: {path:?}");
-
-        let symbols = match JitDump::new(path.clone()).into_perf_map() {
-            Ok(symbols) => symbols,
-            Err(error) => {
-                warn!("Failed to convert jit dump into perf map: {error:?}");
-                continue;
-            }
-        };
-
-        // Also write to perf-<pid>.map for harvested Python perf maps compatibility
-        symbols.append_to_file(profile_folder.join(format!("perf-{pid}.map")))?;
-
-        let jit_unwind_data = match JitDump::new(path).into_unwind_data() {
-            Ok(data) => data,
-            Err(error) => {
-                warn!("Failed to convert jit dump into unwind data: {error:?}");
-                continue;
-            }
-        };
-
-        jit_unwind_data_by_path.insert(*pid, jit_unwind_data);
     }
 
-    Ok(jit_unwind_data_by_path)
+    Ok(jit_unwind_data_by_pid)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn insert_jit_dump_path_dedupes_per_pid() {
+        let mut paths = HashMap::new();
+        let path = PathBuf::from("/tmp/jit-123.dump");
+
+        assert!(insert_jit_dump_path(&mut paths, 123, path.clone()));
+        assert!(!insert_jit_dump_path(&mut paths, 123, path.clone()));
+
+        assert_eq!(paths[&123].iter().collect::<Vec<_>>(), vec![&path]);
+    }
+
+    #[test]
+    fn insert_jit_dump_path_keeps_same_path_for_different_pids() {
+        let mut paths = HashMap::new();
+        let path = PathBuf::from("/tmp/jit-123.dump");
+
+        assert!(insert_jit_dump_path(&mut paths, 123, path.clone()));
+        assert!(insert_jit_dump_path(&mut paths, 456, path.clone()));
+
+        assert_eq!(paths[&123].iter().collect::<Vec<_>>(), vec![&path]);
+        assert_eq!(paths[&456].iter().collect::<Vec<_>>(), vec![&path]);
+    }
 }

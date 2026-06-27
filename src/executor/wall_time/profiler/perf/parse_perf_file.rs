@@ -1,3 +1,4 @@
+use super::jit_dump::{JitDumpPathsByPid, insert_jit_dump_path};
 use super::loaded_module::{LoadedModule, ProcessLoadedModule};
 use super::module_symbols::ModuleSymbols;
 use super::unwind_data::unwind_data_from_elf;
@@ -16,6 +17,8 @@ pub struct MemmapRecordsOutput {
     /// Module symbols and the computed load bias for each pid that maps the ELF path.
     pub loaded_modules_by_path: HashMap<PathBuf, LoadedModule>,
     pub tracked_pids: HashSet<pid_t>,
+    /// Jitdump file paths discovered from MMAP2 records, keyed by PID.
+    pub jit_dump_paths_by_pid: JitDumpPathsByPid,
 }
 
 /// Parse the perf file at `perf_file_path` and look for MMAP2 records for the given `pids`.
@@ -27,6 +30,7 @@ pub fn parse_for_memmap2<P: AsRef<Path>>(
     mut pid_filter: PidFilter,
 ) -> Result<MemmapRecordsOutput> {
     let mut loaded_modules_by_path = HashMap::<PathBuf, LoadedModule>::new();
+    let mut jit_dump_paths_by_pid = JitDumpPathsByPid::new();
 
     // 1MiB buffer
     let reader = std::io::BufReader::with_capacity(
@@ -115,6 +119,24 @@ pub fn parse_for_memmap2<P: AsRef<Path>>(
                     continue;
                 }
 
+                // Collect jitdump file paths before the PROT_EXEC filter in process_mmap2_record
+                // skips them. JIT runtimes mmap the jitdump file so perf records it.
+                // Match perf's jit_detect(): basename must be `jit-<digits>.dump`.
+                if is_jit_dump_path(&mmap2_record.path.as_slice()) {
+                    let path = PathBuf::from(
+                        String::from_utf8_lossy(&mmap2_record.path.as_slice()).into_owned(),
+                    );
+                    if path.exists()
+                        && insert_jit_dump_path(
+                            &mut jit_dump_paths_by_pid,
+                            mmap2_record.pid,
+                            path.clone(),
+                        )
+                    {
+                        debug!("Found jitdump path from MMAP2 record: {path:?}");
+                    }
+                }
+
                 process_mmap2_record(mmap2_record, &mut loaded_modules_by_path);
             }
             _ => continue,
@@ -133,6 +155,7 @@ pub fn parse_for_memmap2<P: AsRef<Path>>(
     Ok(MemmapRecordsOutput {
         loaded_modules_by_path,
         tracked_pids,
+        jit_dump_paths_by_pid,
     })
 }
 
@@ -206,6 +229,21 @@ fn purge_process_mappings(loaded_modules_by_path: &mut HashMap<PathBuf, LoadedMo
     for loaded_module in loaded_modules_by_path.values_mut() {
         loaded_module.process_loaded_modules.remove(&pid);
     }
+}
+
+/// Returns true if the path basename matches perf's `jit_detect()` pattern: `jit-<digits>.dump`.
+fn is_jit_dump_path(path: &[u8]) -> bool {
+    let Some(pos) = path.iter().rposition(|&b| b == b'/') else {
+        return false;
+    };
+    let basename = &path[pos + 1..];
+    let Some(pid) = basename
+        .strip_prefix(b"jit-")
+        .and_then(|path| path.strip_suffix(b".dump"))
+    else {
+        return false;
+    };
+    !pid.is_empty() && pid.iter().all(|b| b.is_ascii_digit())
 }
 
 /// Process a single MMAP2 record and add it to the symbols and unwind data maps
@@ -397,5 +435,20 @@ mod tests {
                 .symbols_load_bias,
             Some(0xaaaaaaaa0000)
         );
+    }
+
+    #[test]
+    fn is_jit_dump_path_accepts_numeric_pid() {
+        assert!(is_jit_dump_path(b"/tmp/jit-123.dump"));
+        assert!(is_jit_dump_path(b"/home/user/.debug/jit/abc/jit-123.dump"));
+    }
+
+    #[test]
+    fn is_jit_dump_path_rejects_non_perf_jitdump_names() {
+        assert!(!is_jit_dump_path(b"jit-123.dump"));
+        assert!(!is_jit_dump_path(b"/tmp/jit-.dump"));
+        assert!(!is_jit_dump_path(b"/tmp/jit-abc.dump"));
+        assert!(!is_jit_dump_path(b"/tmp/not-jit-123.dump"));
+        assert!(!is_jit_dump_path(b"/tmp/jit-123.dump.old"));
     }
 }
