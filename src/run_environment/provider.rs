@@ -4,7 +4,8 @@ use serde_json::Value;
 use simplelog::SharedLogger;
 use std::collections::BTreeMap;
 
-use crate::executor::{ExecutorConfig, ExecutorName, OrchestratorConfig};
+use crate::api_client::CodSpeedAPIClient;
+use crate::executor::{ExecutorConfig, ExecutorName};
 use crate::prelude::*;
 use crate::system::SystemInfo;
 use crate::upload::{
@@ -87,20 +88,15 @@ pub trait RunEnvironmentProvider {
     }
 
     /// Check the OIDC configuration for the current run environment, if supported.
-    fn check_oidc_configuration(&mut self, _config: &OrchestratorConfig) -> Result<()> {
+    fn check_oidc_configuration(&mut self, _api_client: &CodSpeedAPIClient) -> Result<()> {
         Ok(())
     }
 
-    /// Handle an OIDC token for the current run environment, if supported.
+    /// Request an OIDC token for the current run environment, if supported.
+    /// The requested token will be set to the `api_client` to be used to subsequent requests.
     ///
-    /// Updates the config if necessary.
-    ///
-    /// Depending on the provider, this may involve requesting the token,
-    /// warning the user about potential misconfigurations, or other necessary steps.
-    ///
-    /// Warning: OIDC tokens are typically short-lived. This method must be called
-    /// just before the upload step to ensure the token is valid during the upload.
-    async fn set_oidc_token(&self, _config: &mut ExecutorConfig) -> Result<()> {
+    /// For providers that do not support OIDC, or if the provider detects that OIDC is not in use, this is a no-op.
+    async fn set_oidc_token(&self, _api_client: &mut CodSpeedAPIClient) -> Result<()> {
         Ok(())
     }
 
@@ -111,6 +107,7 @@ pub trait RunEnvironmentProvider {
     async fn get_upload_metadata(
         &self,
         config: &ExecutorConfig,
+        api_client: &CodSpeedAPIClient,
         system_info: &SystemInfo,
         profile_archive: &ProfileArchive,
         executor_name: ExecutorName,
@@ -131,7 +128,7 @@ pub trait RunEnvironmentProvider {
 
         Ok(UploadMetadata {
             version: Some(LATEST_UPLOAD_METADATA_VERSION),
-            tokenless: config.token.is_none(),
+            tokenless: api_client.token().is_none(),
             repository_provider: self.get_repository_provider(),
             run_environment_metadata,
             profile_md5: profile_archive.hash.clone(),

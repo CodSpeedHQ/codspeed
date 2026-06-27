@@ -1,32 +1,25 @@
 use super::experimental::ExperimentalArgs;
 use crate::VERSION;
-use crate::executor::config::SimulationTool;
-use crate::local_logger::CODSPEED_U8_COLOR_CODE;
-use crate::local_logger::icons::Icon;
+use crate::executor::config::{SimulationTool, WalltimeProfiler};
 use crate::prelude::*;
 use crate::run_environment::interfaces::RepositoryProvider;
 use crate::runner_mode::{RunnerMode, load_shell_session_mode};
 use clap::Args;
 use clap::ValueEnum;
-use console::style;
 use std::path::PathBuf;
 
 pub(crate) fn show_banner() {
-    let logo = r#"   ______            __ _____                         __
+    let banner = format!(
+        r#"
+   ______            __ _____                         __
   / ____/____   ____/ // ___/ ____   ___   ___   ____/ /
  / /    / __ \ / __  / \__ \ / __ \ / _ \ / _ \ / __  /
 / /___ / /_/ // /_/ / ___/ // /_/ //  __//  __// /_/ /
 \____/ \____/ \__,_/ /____// .___/ \___/ \___/ \__,_/
-                          /_/"#;
-
-    let version_tag = style(format!("v{VERSION}")).bold();
-    let url = style("codspeed.io").color256(CODSPEED_U8_COLOR_CODE);
-    let separator = style(Icon::Separator.to_string().repeat(52)).dim();
-
-    eprintln!(
-        "\n{}\n  {separator}\n  {url}  {version_tag}\n",
-        style(logo).color256(CODSPEED_U8_COLOR_CODE).bold()
+  https://codspeed.io     /_/          runner v{VERSION}
+"#
     );
+    println!("{banner}");
     debug!("codspeed v{VERSION}");
 }
 
@@ -76,6 +69,11 @@ pub struct ExecAndRunSharedArgs {
     #[arg(long, value_enum, env = "CODSPEED_SIMULATION_TOOL", hide = true)]
     pub simulation_tool: Option<SimulationTool>,
 
+    /// The profiler to use for walltime mode (perf or samply).
+    /// If not provided, the profiler is selected based on the platform.
+    #[arg(long, value_enum, env = "CODSPEED_WALLTIME_PROFILER", hide = true)]
+    pub walltime_profiler: Option<WalltimeProfiler>,
+
     /// Profile folder to use for the run.
     #[arg(long)]
     pub profile_folder: Option<PathBuf>,
@@ -103,7 +101,7 @@ pub struct ExecAndRunSharedArgs {
     pub allow_empty: bool,
 
     /// The version of the go-runner to use (e.g., 1.2.3, 1.0.0-beta.1)
-    /// If not specified, the latest version will be installed
+    /// If not specified, the runner installs the pinned default version
     #[arg(long, env = "CODSPEED_GO_RUNNER_VERSION", value_parser = parse_version)]
     pub go_runner_version: Option<semver::Version>,
 
@@ -116,7 +114,7 @@ pub struct ExecAndRunSharedArgs {
     pub base: Option<String>,
 
     #[command(flatten)]
-    pub perf_run_args: PerfRunArgs,
+    pub profiler_run_args: ProfilerRunArgs,
 
     #[command(flatten)]
     pub experimental: ExperimentalArgs,
@@ -158,15 +156,39 @@ pub enum UnwindingMode {
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct PerfRunArgs {
-    /// Enable the linux perf profiler to collect granular performance data.
+pub struct ProfilerRunArgs {
+    /// Enable a profiler to collect granular performance data.
     /// This is only supported on Linux.
-    #[arg(long, env = "CODSPEED_PERF_ENABLED", default_value_t = true)]
-    pub enable_perf: bool,
+    #[arg(long, env = "CODSPEED_PROFILER_ENABLED", default_value_t = true)]
+    pub enable_profiler: bool,
 
+    /// Deprecated alias for --enable-profiler / CODSPEED_PROFILER_ENABLED.
+    #[arg(long, env = "CODSPEED_PERF_ENABLED", hide = true)]
+    pub enable_perf: Option<bool>,
+
+    #[command(flatten)]
+    pub perf: PerfRunArgs,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct PerfRunArgs {
     /// The unwinding mode that should be used with perf to collect the call stack.
     #[arg(long, env = "CODSPEED_PERF_UNWINDING_MODE")]
     pub perf_unwinding_mode: Option<UnwindingMode>,
+}
+
+impl ProfilerRunArgs {
+    /// Resolves the effective `enable_profiler` value, honoring the deprecated
+    /// `--enable-perf` / `CODSPEED_PERF_ENABLED` flag with a warning.
+    pub fn resolve_enable_profiler(&self) -> bool {
+        let Some(legacy) = self.enable_perf else {
+            return self.enable_profiler;
+        };
+        log::warn!(
+            "CODSPEED_PERF_ENABLED / --enable-perf is deprecated; use CODSPEED_PROFILER_ENABLED / --enable-profiler instead."
+        );
+        legacy
+    }
 }
 
 /// Parser for go-runner version that validates semver format

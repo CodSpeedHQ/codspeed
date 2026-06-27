@@ -1,8 +1,7 @@
 use super::ExecAndRunSharedArgs;
 use crate::api_client::CodSpeedAPIClient;
-use crate::config::CodSpeedConfig;
 use crate::executor;
-use crate::executor::config::{self, OrchestratorConfig, RepositoryOverride};
+use crate::executor::config::{OrchestratorConfig, RepositoryOverride};
 use crate::instruments::Instruments;
 use crate::prelude::*;
 use crate::project_config::ProjectConfig;
@@ -61,13 +60,12 @@ fn build_orchestrator_config(
     let raw_upload_url = args
         .shared
         .upload_url
-        .unwrap_or_else(|| config::DEFAULT_UPLOAD_URL.into());
+        .unwrap_or_else(|| crate::config::DEFAULT_UPLOAD_URL.into());
     let upload_url = Url::parse(&raw_upload_url)
         .map_err(|e| anyhow!("Invalid upload URL: {raw_upload_url}, {e}"))?;
 
     Ok(OrchestratorConfig {
         upload_url,
-        token: args.shared.token,
         repository_override: args
             .shared
             .repository
@@ -77,8 +75,9 @@ fn build_orchestrator_config(
         targets: vec![target],
         modes,
         instruments: Instruments { mongodb: None }, // exec doesn't support MongoDB
-        perf_unwinding_mode: args.shared.perf_run_args.perf_unwinding_mode,
-        enable_perf: args.shared.perf_run_args.enable_perf,
+        perf_unwinding_mode: args.shared.profiler_run_args.perf.perf_unwinding_mode,
+        enable_profiler: args.shared.profiler_run_args.resolve_enable_profiler(),
+        walltime_profiler: args.shared.walltime_profiler,
         simulation_tool: args.shared.simulation_tool.unwrap_or_default(),
         profile_folder: args.shared.profile_folder,
         skip_upload: args.shared.skip_upload,
@@ -90,13 +89,13 @@ fn build_orchestrator_config(
         poll_results_options,
         extra_env: HashMap::new(),
         fair_sched: args.shared.experimental.experimental_fair_sched,
+        cycle_estimation: args.shared.experimental.cycle_estimation,
     })
 }
 
 pub async fn run(
     args: ExecArgs,
-    api_client: &CodSpeedAPIClient,
-    codspeed_config: &CodSpeedConfig,
+    api_client: &mut CodSpeedAPIClient,
     project_config: Option<&ProjectConfig>,
     setup_cache_dir: Option<&Path>,
 ) -> Result<()> {
@@ -113,7 +112,7 @@ pub async fn run(
         PollResultsOptions::new(false, base_run_id),
     )?;
 
-    execute_config(config, api_client, codspeed_config, setup_cache_dir).await
+    execute_config(config, api_client, setup_cache_dir).await
 }
 
 /// Core execution logic shared by `codspeed exec` and `codspeed run` with config targets.
@@ -122,8 +121,7 @@ pub async fn run(
 /// by the orchestrator when exec targets are present.
 pub async fn execute_config(
     mut config: OrchestratorConfig,
-    api_client: &CodSpeedAPIClient,
-    codspeed_config: &CodSpeedConfig,
+    api_client: &mut CodSpeedAPIClient,
     setup_cache_dir: Option<&Path>,
 ) -> Result<()> {
     // Resolve exec target binary paths so memtrack can discover statically linked
@@ -160,7 +158,7 @@ pub async fn execute_config(
         );
     }
 
-    let orchestrator = executor::Orchestrator::new(config, codspeed_config, api_client).await?;
+    let orchestrator = executor::Orchestrator::new(config, api_client).await?;
 
     if !orchestrator.is_local() {
         super::show_banner();

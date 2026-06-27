@@ -1,22 +1,31 @@
 use super::helpers::validate_walltime_results;
-use super::perf::PerfRunner;
+use super::isolation::{requires_isolation, wrap_isolation_scope};
+use super::profiler::Profiler;
+use super::profiler::perf::PerfProfiler;
+use super::profiler::samply::SamplyProfiler;
 use crate::executor::Executor;
 use crate::executor::ExecutorConfig;
 use crate::executor::ToolStatus;
+use crate::executor::config::WalltimeProfiler;
 use crate::executor::helpers::command::CommandBuilder;
-use crate::executor::helpers::env::{
-    build_path_env, get_base_injected_env, is_codspeed_debug_enabled,
-};
+use crate::executor::helpers::env::{build_path_env, get_base_injected_env};
 use crate::executor::helpers::get_bench_command::get_bench_command;
 use crate::executor::helpers::run_command_with_log_pipe::run_command_with_log_pipe;
+use crate::executor::helpers::run_command_with_log_pipe::run_command_with_log_pipe_and_callback;
 use crate::executor::helpers::run_with_env::wrap_with_env;
 use crate::executor::helpers::run_with_sudo::wrap_with_sudo;
-use crate::executor::{ExecutionContext, ExecutorName};
+use crate::executor::shared::fifo::FifoBenchmarkData;
+use crate::executor::shared::fifo::RunnerFifo;
+use crate::executor::{ExecutionContext, ExecutorName, ExecutorSupport};
 use crate::instruments::mongo_tracer::MongoTracer;
 use crate::prelude::*;
 use crate::runner_mode::RunnerMode;
-use crate::system::SystemInfo;
+use crate::system::{SupportedOs, SystemInfo};
 use async_trait::async_trait;
+use runner_shared::artifacts::ExecutionTimestamps;
+use runner_shared::fifo::Command as FifoCommand;
+use runner_shared::fifo::IntegrationMode;
+use std::cell::OnceCell;
 use std::fs::canonicalize;
 use std::io::Write;
 use std::path::Path;
@@ -73,16 +82,39 @@ impl Drop for HookScriptsGuard {
 }
 
 pub struct WallTimeExecutor {
-    perf: Option<PerfRunner>,
+    profiler: Option<Box<dyn Profiler>>,
+
+    /// Stashed by [`Executor::run`] and consumed by [`Executor::teardown`] to
+    /// hand the run's outputs to [`Profiler::finalize`].
+    benchmark_state: OnceCell<(FifoBenchmarkData, ExecutionTimestamps)>,
+}
+
+fn select_profiler(profiler_override: Option<WalltimeProfiler>) -> Option<Box<dyn Profiler>> {
+    match profiler_override {
+        Some(WalltimeProfiler::Perf) => Some(Box::new(PerfProfiler::new())),
+        Some(WalltimeProfiler::Samply) => Some(Box::new(SamplyProfiler::new())),
+        None => {
+            if cfg!(target_os = "linux") {
+                Some(Box::new(PerfProfiler::new()))
+            } else if cfg!(target_os = "macos") {
+                Some(Box::new(SamplyProfiler::new()))
+            } else {
+                None
+            }
+        }
+    }
 }
 
 impl WallTimeExecutor {
-    pub fn new() -> Self {
+    pub fn new(profiler_override: Option<WalltimeProfiler>) -> Self {
         Self {
-            perf: cfg!(target_os = "linux").then(PerfRunner::new),
+            profiler: select_profiler(profiler_override),
+            benchmark_state: OnceCell::new(),
         }
     }
 
+    /// Prepare the benchmark command wrapped with the necessary environment variables for
+    /// introspection and environment forwarding ahead of privilege escalation and isolation.
     fn walltime_bench_cmd(
         config: &ExecutorConfig,
         execution_context: &ExecutionContext,
@@ -105,28 +137,10 @@ impl WallTimeExecutor {
         bench_cmd.arg(script_file.path());
         let (mut bench_cmd, env_file) = wrap_with_env(bench_cmd, &extra_env)?;
 
-        let mut cmd_builder = CommandBuilder::new("systemd-run");
         if let Some(cwd) = &config.working_directory {
             let abs_cwd = canonicalize(cwd)?;
-            cmd_builder.current_dir(abs_cwd);
+            bench_cmd.current_dir(abs_cwd);
         }
-        if !is_codspeed_debug_enabled() {
-            cmd_builder.arg("--quiet");
-        }
-        // Remarks:
-        // - We're using --scope so that perf is able to capture the events of the benchmark process.
-        // - We can't user `--user` here because we need to run in `codspeed.slice`, otherwise we'd run in
-        //   user.slice` (which is isolated). We can use `--gid` and `--uid` to run the command as the current user.
-        // - We must use `bash` here instead of `sh` since `source` isn't available when symlinked to `dash`.
-        // - We have to pass the environment variables because `--scope` only inherits the system and not the user environment variables.
-        cmd_builder.arg("--slice=codspeed.slice");
-        cmd_builder.arg("--scope");
-        cmd_builder.arg("--same-dir");
-        cmd_builder.arg(format!("--uid={}", nix::unistd::Uid::current().as_raw()));
-        cmd_builder.arg(format!("--gid={}", nix::unistd::Gid::current().as_raw()));
-        cmd_builder.args(["--"]);
-
-        bench_cmd.wrap_with(cmd_builder);
 
         Ok((env_file, script_file, bench_cmd))
     }
@@ -138,39 +152,73 @@ impl Executor for WallTimeExecutor {
         ExecutorName::WallTime
     }
 
-    fn tool_status(&self) -> ToolStatus {
-        super::perf::setup::get_perf_status()
+    fn tool_status(&self) -> Option<ToolStatus> {
+        self.profiler.as_ref().and_then(|p| p.tool_status())
+    }
+
+    fn support_level(&self, system_info: &SystemInfo) -> ExecutorSupport {
+        match &system_info.os {
+            SupportedOs::Linux(distro) if distro.is_supported() => ExecutorSupport::FullySupported,
+            SupportedOs::Macos { .. } => ExecutorSupport::FullySupported,
+            SupportedOs::Linux(_) => ExecutorSupport::RequiresManualInstallation,
+        }
     }
 
     async fn setup(&self, system_info: &SystemInfo, setup_cache_dir: Option<&Path>) -> Result<()> {
-        if self.perf.is_some() {
-            return PerfRunner::setup_environment(system_info, setup_cache_dir).await;
+        if let Some(profiler) = &self.profiler {
+            profiler.setup(system_info, setup_cache_dir).await?;
         }
-
         Ok(())
     }
 
     async fn run(
-        &self,
+        &mut self,
         execution_context: &ExecutionContext,
         _mongo_tracer: &Option<MongoTracer>,
     ) -> Result<()> {
-        let status = {
-            let _guard = HookScriptsGuard::setup();
+        let _guard = HookScriptsGuard::setup();
 
-            let (_env_file, _script_file, cmd_builder) =
-                WallTimeExecutor::walltime_bench_cmd(&execution_context.config, execution_context)?;
-            if let Some(perf) = &self.perf
-                && execution_context.config.enable_perf
-            {
-                perf.run(
+        let (_env_file, _script_file, cmd_builder) =
+            WallTimeExecutor::walltime_bench_cmd(&execution_context.config, execution_context)?;
+
+        // Resolve the isolation decision once and reuse it for both the scope
+        // wrapping here and the privilege wrapping below (or in the profiler).
+        let isolate = requires_isolation();
+        let cmd_builder = if isolate {
+            wrap_isolation_scope(cmd_builder)?
+        } else {
+            cmd_builder
+        };
+
+        // Split-borrow `self` so the closure inside `run_with_profiler` can
+        // capture `benchmark_state` while we hold `&mut profiler`.
+        let Self {
+            profiler,
+            benchmark_state,
+        } = self;
+
+        let status = match profiler.as_mut() {
+            Some(profiler) if execution_context.config.enable_profiler => {
+                run_with_profiler(
+                    profiler.as_mut(),
                     cmd_builder,
                     &execution_context.config,
                     &execution_context.profile_folder,
+                    isolate,
+                    benchmark_state,
                 )
                 .await
-            } else {
-                let cmd = wrap_with_sudo(cmd_builder)?.build();
+            }
+            _ => {
+                // No profiler: still honor the isolation decision, since the
+                // scope (and the sudo it requires) is a property of the run, not
+                // of the profiler.
+                let cmd_builder = if isolate {
+                    wrap_with_sudo(cmd_builder)?
+                } else {
+                    cmd_builder
+                };
+                let cmd = cmd_builder.build();
                 debug!("cmd: {cmd:?}");
                 run_command_with_log_pipe(cmd).await
             }
@@ -189,10 +237,11 @@ impl Executor for WallTimeExecutor {
     async fn teardown(&self, execution_context: &ExecutionContext) -> Result<()> {
         debug!("Copying files to the profile folder");
 
-        if let Some(perf) = &self.perf
-            && execution_context.config.enable_perf
+        if let (Some(profiler), Some((fifo_data, timestamps))) =
+            (&self.profiler, self.benchmark_state.get())
         {
-            perf.save_files_to(&execution_context.profile_folder)
+            profiler
+                .finalize(fifo_data, timestamps, &execution_context.profile_folder)
                 .await?;
         }
 
@@ -203,6 +252,57 @@ impl Executor for WallTimeExecutor {
 
         Ok(())
     }
+}
+
+/// Drive a single benchmark run through a [`Profiler`]: wrap the command,
+/// spawn it, dispatch FIFO commands from the integration into the profiler's
+/// hooks, and stash the run's outputs for [`Profiler::finalize`] in teardown.
+async fn run_with_profiler(
+    profiler: &mut dyn Profiler,
+    cmd_builder: CommandBuilder,
+    config: &ExecutorConfig,
+    profile_folder: &Path,
+    isolate: bool,
+    benchmark_state: &OnceCell<(FifoBenchmarkData, ExecutionTimestamps)>,
+) -> Result<std::process::ExitStatus> {
+    let wrapped = profiler
+        .wrap_command(cmd_builder, config, profile_folder, isolate)
+        .await?;
+    let cmd = wrapped.build();
+    debug!("cmd: {cmd:?}");
+
+    let mut runner_fifo = RunnerFifo::new()?;
+
+    run_command_with_log_pipe_and_callback(cmd, async move |mut child| {
+        let on_cmd = async |c: &FifoCommand| match c {
+            FifoCommand::StartProfiler => {
+                profiler.on_start_profiler().await?;
+                Ok(None)
+            }
+            FifoCommand::StopProfiler => {
+                profiler.on_stop_profiler().await?;
+                Ok(None)
+            }
+            #[allow(deprecated)]
+            FifoCommand::PingProfiler => Ok(Some(if profiler.on_ping().await? {
+                FifoCommand::Ack
+            } else {
+                FifoCommand::Err
+            })),
+            FifoCommand::GetIntegrationMode => Ok(Some(FifoCommand::IntegrationModeResponse(
+                IntegrationMode::Walltime,
+            ))),
+            _ => Ok(None),
+        };
+
+        let (timestamps, fifo_data, exit_status) =
+            runner_fifo.handle_fifo_messages(&mut child, on_cmd).await?;
+
+        let _ = benchmark_state.set((fifo_data, timestamps));
+
+        Ok(exit_status)
+    })
+    .await
 }
 
 #[cfg(test)]

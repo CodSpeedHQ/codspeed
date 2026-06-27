@@ -9,8 +9,9 @@ use simplelog::SharedLogger;
 use std::collections::BTreeMap;
 use std::{env, fs};
 
+use crate::api_client::CodSpeedAPIClient;
 use crate::cli::run::helpers::{find_repository_root, get_env_variable};
-use crate::executor::config::{ExecutorConfig, OrchestratorConfig};
+use crate::executor::config::OrchestratorConfig;
 use crate::prelude::*;
 use crate::request_client::OIDC_CLIENT;
 use crate::run_environment::interfaces::{
@@ -288,9 +289,9 @@ impl RunEnvironmentProvider for GitHubActionsProvider {
     /// - https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-with-reusable-workflows
     /// - https://docs.github.com/en/actions/concepts/security/openid-connect
     /// - https://docs.github.com/en/actions/reference/security/oidc#methods-for-requesting-the-oidc-token
-    fn check_oidc_configuration(&mut self, config: &OrchestratorConfig) -> Result<()> {
+    fn check_oidc_configuration(&mut self, api_client: &CodSpeedAPIClient) -> Result<()> {
         // Check if a static token is already set
-        if config.token.is_some() {
+        if api_client.token().is_some() {
             announcement!(
                 "You can now authenticate your CI workflows using OpenID Connect (OIDC) tokens instead of `CODSPEED_TOKEN` secrets.\n\
                 This makes integrating and authenticating jobs safer and simpler.\n\
@@ -343,7 +344,7 @@ impl RunEnvironmentProvider for GitHubActionsProvider {
     ///
     /// All the validation has already been performed in `check_oidc_configuration`.
     /// So if the oidc_config is None, we simply return.
-    async fn set_oidc_token(&self, config: &mut ExecutorConfig) -> Result<()> {
+    async fn set_oidc_token(&self, api_client: &mut CodSpeedAPIClient) -> Result<()> {
         if let Some(oidc_config) = &self.oidc_config {
             let request_url = format!(
                 "{}&audience={}",
@@ -370,7 +371,7 @@ impl RunEnvironmentProvider for GitHubActionsProvider {
 
             if token.is_some() {
                 debug!("Successfully retrieved OIDC token for authentication.");
-                config.set_token(token);
+                api_client.set_token(token);
             } else if self.is_repository_private {
                 bail!(
                     "Unable to retrieve OIDC token for authentication. \n\
@@ -436,7 +437,6 @@ mod tests {
             ],
             || {
                 let config = OrchestratorConfig {
-                    token: Some("token".into()),
                     ..OrchestratorConfig::test()
                 };
                 let github_actions_provider = GitHubActionsProvider::try_from(&config).unwrap();
@@ -494,7 +494,6 @@ mod tests {
             ],
             || {
                 let config = OrchestratorConfig {
-                    token: Some("token".into()),
                     ..OrchestratorConfig::test()
                 };
                 let github_actions_provider = GitHubActionsProvider::try_from(&config).unwrap();
@@ -550,7 +549,6 @@ mod tests {
             ],
             || {
                 let config = OrchestratorConfig {
-                    token: Some("token".into()),
                     ..OrchestratorConfig::test()
                 };
                 let github_actions_provider = GitHubActionsProvider::try_from(&config).unwrap();
@@ -633,7 +631,6 @@ mod tests {
             ],
             || {
                 let config = OrchestratorConfig {
-                    token: Some("token".into()),
                     ..OrchestratorConfig::test()
                 };
                 let github_actions_provider = GitHubActionsProvider::try_from(&config).unwrap();

@@ -7,30 +7,34 @@ on:
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           submodules: true
-      - uses: moonrepo/setup-rust@ede6de059f8046a5e236c94046823e2af11ca670 # v1
+      - uses: ./.github/actions/install-rust
         with:
           components: rustfmt, clippy
-      - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
+      - uses: j178/prek-action@bdca6f102f98e2b4c7029491a53dfd366469e33d # v2.0.4
         with:
-          extra_args: --all-files
+          extra-args: --all-files
+      - name: Check config schema is up to date
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo run --bin generate_config_schema && git diff --exit-code schemas/codspeed.schema.json
 
   tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           lfs: true
           submodules: true
 
-      - name: "Install rust-toolchain.toml"
-        run: rustup toolchain install
-      # We use Swatinem/rust-cache to cache cargo registry, index and target in this job
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+      - uses: ./.github/actions/install-rust
 
       # Install memtrack for the memory integration tests
       - name: Install dependencies required for libbpf-sys (vendored feature)
@@ -42,39 +46,65 @@ jobs:
         run: |
           cargo install --path crates/exec-harness --locked
 
+      - name: Grant memtrack file capabilities
+        run: cargo r -- setup --mode memory
+
       - run: cargo test --all --exclude memtrack --exclude exec-harness
 
   exec-harness-tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           submodules: true
-      - uses: moonrepo/setup-rust@ede6de059f8046a5e236c94046823e2af11ca670 # v1
+      - uses: ./.github/actions/install-rust
       - name: Run tests
         run: cargo test -p exec-harness
 
   basic-run-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           submodules: true
-      - name: "Install rust-toolchain.toml"
-        run: rustup toolchain install
-      # We use Swatinem/rust-cache to cache cargo registry, index and target in this job
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+      - uses: ./.github/actions/install-rust
       - name: Run tests
-        run: cargo run -- exec -m simulation,walltime,memory --skip-upload -- ls -la
+        run: cargo run -- exec -m simulation,walltime,memory --warmup-time 0s --max-rounds 5 -- sleep 1
+
+  macos-basic-run-test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: true
+      - uses: ./.github/actions/install-rust
+      - name: Install exec-harness
+        run: |
+          cargo install --path crates/exec-harness --locked
+
+      - name: Run tests
+        env:
+          # Profiling system commands (e.g. `ls`) with samply is not yet supported on MacOS
+          CODSPEED_PROFILER_ENABLED: "false"
+        run: cargo run -- exec -m walltime --skip-upload --warmup-time 0s --max-rounds 5 -- ls -la
 
   bpf-tests:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each memtrack integration test binary runs its cases serially
+        # (eBPF tracker can't overlap with itself in one process), so we
+        # shard at the test-binary level to parallelize across jobs.
+        test: [c_tests, cpp_tests, rust_tests, spawn_tests]
     steps:
-      - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           lfs: true
           submodules: true
-      - uses: moonrepo/setup-rust@ede6de059f8046a5e236c94046823e2af11ca670 # v1
+      - uses: ./.github/actions/install-rust
+        with:
+          cache-key: ${{ matrix.test }}
       - name: Install dependencies required for libbpf-sys (vendored feature)
         run: sudo apt-get update && sudo apt-get install -y autopoint bison flex
 
@@ -84,7 +114,7 @@ jobs:
       - name: Run tests
         env:
           RUST_LOG: debug
-        run: sudo -E $(which cargo) test -- --test-threads 1 --nocapture
+        run: sudo -E $(which cargo) test --lib --test ${{ matrix.test }} -- --test-threads 1 --nocapture
         working-directory: crates/memtrack
 
       # Since we ran the tests with sudo, the build artifacts will have root ownership
@@ -94,22 +124,36 @@ jobs:
   benchmarks:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           submodules: true
 
-      - name: "Install rust-toolchain.toml"
-        run: rustup toolchain install
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+      - uses: ./.github/actions/install-rust
       - name: Install cargo codspeed
-        uses: taiki-e/install-action@f92912fad184299a31e22ad070a5059fd07d4f59 # v2
+        uses: taiki-e/install-action@e0eafa9a0d485c37f97c0f7beb930a58a2facbac # v2
         with:
           tool: cargo-codspeed
 
       - name: Build benchmarks
         run: cargo codspeed build -p runner-shared
       - name: Run benchmarks
-        uses: CodSpeedHQ/action@4deb3275dd364fb96fb074c953133d29ec96f80f # v4
+        uses: CodSpeedHQ/action@3194d9a39c4d46684cb44bf7207fc56626aad8fd # v4
         with:
           mode: simulation
           run: cargo codspeed run -p runner-shared
+
+  check:
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - lint
+      - tests
+      - exec-harness-tests
+      - basic-run-test
+      - macos-basic-run-test
+      - bpf-tests
+      - benchmarks
+    steps:
+      - uses: re-actors/alls-green@release/v1
+        with:
+          jobs: ${{ toJson( needs ) }}

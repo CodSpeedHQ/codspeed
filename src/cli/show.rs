@@ -1,7 +1,8 @@
 use crate::prelude::*;
+use crate::runner_mode::load_shell_session_mode;
 
 pub fn run() -> Result<()> {
-    let modes = crate::runner_mode::load_shell_session_mode()?;
+    let modes = load_shell_session_mode()?;
 
     if modes.is_empty() {
         info!("No mode set for this shell session");

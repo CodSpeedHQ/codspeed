@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::env;
 
 use crate::cli::run::helpers::get_env_variable;
-use crate::executor::config::{ExecutorConfig, OrchestratorConfig};
+use crate::executor::config::OrchestratorConfig;
 use crate::prelude::*;
 use crate::run_environment::interfaces::{
     GlData, RepositoryProvider, RunEnvironment, RunEnvironmentMetadata, RunEvent, Sender,
@@ -178,18 +178,6 @@ impl RunEnvironmentProvider for GitLabCIProvider {
             metadata: BTreeMap::new(),
         })
     }
-
-    /// For GitLab CI, OIDC tokens must be pre-generated and passed via env variable.
-    ///
-    /// In [our documentation](https://codspeed.io/docs/integrations/ci/gitlab-ci#openid-connect-oidc-authentication), we ask
-    /// user to create a variable named `CODSPEED_TOKEN` with the OIDC token. So there is nothing to do here.
-    ///
-    /// See:
-    /// - https://docs.gitlab.com/integration/openid_connect_provider/
-    /// - https://docs.gitlab.com/ci/secrets/id_token_authentication/
-    async fn set_oidc_token(&self, _config: &mut ExecutorConfig) -> Result<()> {
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -225,7 +213,6 @@ mod tests {
             ],
             || {
                 let config = OrchestratorConfig {
-                    token: Some("token".into()),
                     ..OrchestratorConfig::test()
                 };
                 let gitlab_ci_provider = GitLabCIProvider::try_from(&config).unwrap();
@@ -272,7 +259,6 @@ mod tests {
             ],
             || {
                 let config = OrchestratorConfig {
-                    token: Some("token".into()),
                     ..OrchestratorConfig::test()
                 };
                 let gitlab_ci_provider = GitLabCIProvider::try_from(&config).unwrap();
@@ -319,7 +305,6 @@ mod tests {
             ],
             || {
                 let config = OrchestratorConfig {
-                    token: Some("token".into()),
                     ..OrchestratorConfig::test()
                 };
                 let gitlab_ci_provider = GitLabCIProvider::try_from(&config).unwrap();

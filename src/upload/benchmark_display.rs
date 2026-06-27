@@ -29,6 +29,9 @@ fn format_with_thousands_sep(n: u64) -> String {
 
 /// Format StdDev with color coding based on value
 fn format_stdev_colored(stdev_pct: f64) -> String {
+    if !stdev_pct.is_finite() {
+        return format!("{}", style("N/A").dim());
+    }
     let formatted = format!("{stdev_pct:.2}%");
     if stdev_pct <= 2.0 {
         format!("{}", style(&formatted).green())
@@ -441,6 +444,7 @@ mod tests {
                     executor: ExecutorName::Valgrind,
                 },
                 value: 0.001234,
+                issues: None,
                 valgrind: Some(ValgrindResult {
                     time_distribution: Some(TimeDistribution {
                         ir: 0.001048900,  // 85% of 0.001234
@@ -458,6 +462,7 @@ mod tests {
                     executor: ExecutorName::Valgrind,
                 },
                 value: 0.002567,
+                issues: None,
                 valgrind: Some(ValgrindResult {
                     time_distribution: Some(TimeDistribution {
                         ir: 0.001796900,  // 70% of 0.002567
@@ -476,6 +481,7 @@ mod tests {
                     executor: ExecutorName::WallTime,
                 },
                 value: 0.150,
+                issues: None,
                 valgrind: None,
                 walltime: Some(WallTimeResult {
                     iterations: 100.0,
@@ -490,6 +496,7 @@ mod tests {
                     executor: ExecutorName::WallTime,
                 },
                 value: 0.025,
+                issues: None,
                 valgrind: None,
                 walltime: Some(WallTimeResult {
                     iterations: 500.0,
@@ -505,6 +512,7 @@ mod tests {
                     executor: ExecutorName::Memory,
                 },
                 value: 10485760.0,
+                issues: None,
                 valgrind: None,
                 walltime: None,
                 memory: Some(MemoryResult {
@@ -519,6 +527,7 @@ mod tests {
                     executor: ExecutorName::Memory,
                 },
                 value: 1048576.0,
+                issues: None,
                 valgrind: None,
                 walltime: None,
                 memory: Some(MemoryResult {
@@ -544,6 +553,7 @@ mod tests {
                 executor: ExecutorName::Valgrind,
             },
             value: 0.001234, // 1.23 ms
+            issues: None,
             valgrind: None,
             walltime: None,
             memory: None,
@@ -562,6 +572,7 @@ mod tests {
                 executor: ExecutorName::WallTime,
             },
             value: 1.5,
+            issues: None,
             valgrind: None,
             walltime: Some(WallTimeResult {
                 iterations: 50.0,
@@ -584,6 +595,7 @@ mod tests {
                 executor: ExecutorName::Memory,
             },
             value: 1048576.0,
+            issues: None,
             valgrind: None,
             walltime: None,
             memory: Some(MemoryResult {

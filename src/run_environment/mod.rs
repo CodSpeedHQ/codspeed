@@ -44,7 +44,7 @@ pub async fn get_provider(
         }
     };
 
-    provider.check_oidc_configuration(config)?;
+    provider.check_oidc_configuration(api_client)?;
 
     Ok(provider)
 }

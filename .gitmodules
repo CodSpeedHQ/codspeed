@@ -1,3 +1,6 @@
 [submodule "crates/instrument-hooks-bindings/instrument-hooks"]
 	path = crates/instrument-hooks-bindings/instrument-hooks
 	url = https://github.com/CodSpeedHQ/instrument-hooks.git
+[submodule "crates/samply-codspeed"]
+	path = crates/samply-codspeed
+	url = https://github.com/CodSpeedHQ/samply-codspeed.git

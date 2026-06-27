@@ -287,7 +287,7 @@ Good benchmarks are representative, isolated, and stable. Here are guidelines:
 
 - **Avoid benchmarking setup**: Use the framework's setup/teardown mechanisms to exclude initialization from measurements.
 
-- **Prevent dead code elimination**: Use `black_box()` (Rust), `benchmark.pedantic()` (Python), or equivalent to ensure the compiler/runtime doesn't optimize away the work you're measuring.
+- **Prevent dead code elimination**: Use `black_box()` (Rust), `benchmark::DoNotOptimize` (C++), or `Blackhole.consume` (JMH) so the compiler doesn't optimize away unused results.
 
 - **Cover the critical path**: Benchmark the functions that matter most to your users — the ones called frequently or on the hot path.
 

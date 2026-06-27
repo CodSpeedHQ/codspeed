@@ -42,6 +42,15 @@ pub enum SimulationTool {
     Tracegrind,
 }
 
+/// The profiler to use for walltime mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum WalltimeProfiler {
+    /// Use perf to collect profiling data (Linux).
+    Perf,
+    /// Use samply to collect profiling data (macOS).
+    Samply,
+}
+
 /// Run-level configuration owned by the orchestrator.
 ///
 /// Holds all parameters that are constant across benchmark targets within a run,
@@ -51,7 +60,6 @@ pub enum SimulationTool {
 #[derive(Debug, Clone)]
 pub struct OrchestratorConfig {
     pub upload_url: Url,
-    pub token: Option<String>,
     pub repository_override: Option<RepositoryOverride>,
     pub working_directory: Option<String>,
 
@@ -59,9 +67,11 @@ pub struct OrchestratorConfig {
 
     pub modes: Vec<RunnerMode>,
     pub instruments: Instruments,
-    pub enable_perf: bool,
+    pub enable_profiler: bool,
     /// Stack unwinding mode for perf (if enabled)
     pub perf_unwinding_mode: Option<UnwindingMode>,
+    /// Profiler override for walltime mode (if None, selected based on the platform)
+    pub walltime_profiler: Option<WalltimeProfiler>,
 
     pub simulation_tool: SimulationTool,
 
@@ -81,6 +91,8 @@ pub struct OrchestratorConfig {
     pub extra_env: HashMap<String, String>,
     /// Enable valgrind's --fair-sched option.
     pub fair_sched: bool,
+    /// Enable valgrind's --cycle-estimation option.
+    pub cycle_estimation: bool,
 }
 
 /// Per-execution configuration passed to executors.
@@ -91,12 +103,11 @@ pub struct OrchestratorConfig {
 /// `skip_upload`, `repository_override`) live on [`OrchestratorConfig`].
 #[derive(Debug, Clone)]
 pub struct ExecutorConfig {
-    pub token: Option<String>,
     pub working_directory: Option<String>,
     pub command: String,
 
     pub instruments: Instruments,
-    pub enable_perf: bool,
+    pub enable_profiler: bool,
     /// Stack unwinding mode for perf (if enabled)
     pub perf_unwinding_mode: Option<UnwindingMode>,
 
@@ -115,6 +126,8 @@ pub struct ExecutorConfig {
     pub enable_introspection: bool,
     /// Enable valgrind's --fair-sched option.
     pub fair_sched: bool,
+    /// Enable valgrind's --cycle-estimation option.
+    pub cycle_estimation: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -141,13 +154,7 @@ impl RepositoryOverride {
     }
 }
 
-pub const DEFAULT_UPLOAD_URL: &str = "https://api.codspeed.io/upload";
-
 impl OrchestratorConfig {
-    pub fn set_token(&mut self, token: Option<String>) {
-        self.token = token;
-    }
-
     /// Compute the total number of executor runs that will be performed.
     ///
     /// All `Exec` targets are combined into a single invocation, while each
@@ -177,11 +184,10 @@ impl OrchestratorConfig {
         enable_introspection: bool,
     ) -> ExecutorConfig {
         ExecutorConfig {
-            token: self.token.clone(),
             working_directory: self.working_directory.clone(),
             command,
             instruments: self.instruments.clone(),
-            enable_perf: self.enable_perf,
+            enable_profiler: self.enable_profiler,
             perf_unwinding_mode: self.perf_unwinding_mode,
             simulation_tool: self.simulation_tool,
             skip_run: self.skip_run,
@@ -191,13 +197,8 @@ impl OrchestratorConfig {
             extra_env: self.extra_env.clone(),
             enable_introspection,
             fair_sched: self.fair_sched,
+            cycle_estimation: self.cycle_estimation,
         }
-    }
-}
-
-impl ExecutorConfig {
-    pub fn set_token(&mut self, token: Option<String>) {
-        self.token = token;
     }
 }
 
@@ -206,8 +207,7 @@ impl OrchestratorConfig {
     /// Constructs a new `OrchestratorConfig` with default values for testing purposes
     pub fn test() -> Self {
         Self {
-            upload_url: Url::parse(DEFAULT_UPLOAD_URL).unwrap(),
-            token: None,
+            upload_url: Url::parse(crate::config::DEFAULT_UPLOAD_URL).unwrap(),
             repository_override: None,
             working_directory: None,
             targets: vec![BenchmarkTarget::Entrypoint {
@@ -217,7 +217,8 @@ impl OrchestratorConfig {
             modes: vec![RunnerMode::Simulation],
             instruments: Instruments::test(),
             perf_unwinding_mode: None,
-            enable_perf: false,
+            walltime_profiler: None,
+            enable_profiler: false,
             simulation_tool: SimulationTool::default(),
             profile_folder: None,
             skip_upload: false,
@@ -229,6 +230,7 @@ impl OrchestratorConfig {
             poll_results_options: PollResultsOptions::new(false, None),
             extra_env: HashMap::new(),
             fair_sched: false,
+            cycle_estimation: false,
         }
     }
 }

@@ -62,6 +62,7 @@ fn main() {
         core_c: instrument_hooks_dir.join("dist/core.c"),
         includes_dir: instrument_hooks_dir.join("includes"),
     };
+    println!("cargo:rerun-if-changed={}", paths.core_c.display());
     paths.check_sources_exist();
     build_shared_library(&paths, &preload_constants);
 }

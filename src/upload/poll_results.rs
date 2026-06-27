@@ -12,7 +12,7 @@ use crate::api_client::{
     FetchLocalRunResponse, FetchLocalRunVars, RunStatus,
 };
 use crate::local_logger::icons::Icon;
-use crate::local_logger::{start_spinner, stop_spinner};
+use crate::local_logger::{IS_TTY, start_spinner, stop_spinner};
 use crate::prelude::*;
 
 use super::UploadResult;
@@ -192,6 +192,19 @@ async fn display_single_run_results(
             }
         }
 
+        let failed: Vec<&str> = response
+            .run
+            .results
+            .iter()
+            .filter_map(|r| {
+                r.issues
+                    .as_ref()
+                    .and_then(|i| i.callgraph_generation_failure.as_ref())
+                    .map(|_| r.benchmark.name.as_str())
+            })
+            .collect();
+        warn_callgraph_failures(&failed);
+
         let run_id = &upload_result.run_id;
         info!(
             "\n{} {}",
@@ -204,7 +217,20 @@ async fn display_single_run_results(
     Ok(())
 }
 
+fn warn_callgraph_failures(names: &[&str]) {
+    if names.is_empty() {
+        return;
+    }
+    warn!("We were unable to generate profiling data for the following benchmarks:");
+    for name in names {
+        warn!("  - {name}");
+    }
+}
+
 fn show_comparison_suggestion(run_id: &str) {
+    if !*IS_TTY {
+        return;
+    }
     info!(
         "\n{} {}",
         style("To compare future runs against this one, use:").dim(),
@@ -268,6 +294,19 @@ async fn display_comparison_results(
                 }
             }
         }
+
+        let failed: Vec<&str> = comparison
+            .result_comparisons
+            .iter()
+            .filter_map(|r| {
+                r.result
+                    .as_ref()
+                    .and_then(|res| res.issues.as_ref())
+                    .and_then(|i| i.callgraph_generation_failure.as_ref())
+                    .map(|_| r.benchmark.name.as_str())
+            })
+            .collect();
+        warn_callgraph_failures(&failed);
 
         info!(
             "\n{} {}",

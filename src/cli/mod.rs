@@ -1,7 +1,9 @@
 mod auth;
 pub(crate) mod exec;
 pub(crate) mod experimental;
+mod profile;
 pub(crate) mod run;
+pub(crate) mod samply;
 mod setup;
 mod shared;
 mod show;
@@ -15,8 +17,9 @@ use std::path::PathBuf;
 
 use crate::{
     api_client::CodSpeedAPIClient,
-    config::CodSpeedConfig,
-    local_logger::{CODSPEED_U8_COLOR_CODE, IS_TTY, init_local_logger},
+    config::{CodSpeedConfig, ConfigOverrides},
+    executor::helpers::command::CommandBuilder,
+    local_logger::{CODSPEED_U8_COLOR_CODE, init_local_logger},
     prelude::*,
     project_config::DiscoveredProjectConfig,
 };
@@ -24,27 +27,6 @@ use clap::{
     Parser, Subcommand,
     builder::{Styles, styling},
 };
-use console::Term;
-
-/// Guard that hides the terminal cursor on creation and restores it on drop.
-struct CursorGuard;
-
-impl CursorGuard {
-    fn new() -> Self {
-        if *IS_TTY {
-            let _ = Term::stderr().hide_cursor();
-        }
-        Self
-    }
-}
-
-impl Drop for CursorGuard {
-    fn drop(&mut self) {
-        if *IS_TTY {
-            let _ = Term::stderr().show_cursor();
-        }
-    }
-}
 
 fn create_styles() -> Styles {
     styling::Styles::styled()
@@ -60,24 +42,22 @@ fn create_styles() -> Styles {
 #[command(version, about = "The CodSpeed CLI tool", styles = create_styles())]
 pub struct Cli {
     /// The URL of the CodSpeed GraphQL API
-    #[arg(
-        long,
-        env = "CODSPEED_API_URL",
-        global = true,
-        hide = true,
-        default_value = "https://gql.codspeed.io/"
-    )]
-    pub api_url: String,
+    #[arg(long, env = "CODSPEED_API_URL", global = true, hide = true)]
+    pub api_url: Option<String>,
 
     /// The OAuth token to use for all requests
     #[arg(long, env = "CODSPEED_OAUTH_TOKEN", global = true, hide = true)]
     pub oauth_token: Option<String>,
 
-    /// The configuration name to use
-    /// If provided, the configuration will be loaded from ~/.config/codspeed/{config-name}.yaml
-    /// Otherwise, loads from ~/.config/codspeed/config.yaml
-    #[arg(long, env = "CODSPEED_CONFIG_NAME", global = true)]
+    /// [deprecated] Load configuration from `~/.config/codspeed/{config-name}.yaml`
+    /// instead of the default `config.yaml`. Prefer `--profile` instead.
+    #[arg(long, env = "CODSPEED_CONFIG_NAME", global = true, hide = true)]
+    #[deprecated(note = "use `--profile` / `CODSPEED_PROFILE` instead")]
     pub config_name: Option<String>,
+
+    /// The CodSpeed profile to use
+    #[arg(long, env = "CODSPEED_PROFILE", global = true)]
+    pub profile: Option<String>,
 
     /// Path to project configuration file (codspeed.yaml)
     /// If provided, loads config from this path. Otherwise, searches for config files
@@ -107,6 +87,8 @@ enum Commands {
     Exec(Box<exec::ExecArgs>),
     /// Manage the CLI authentication state
     Auth(auth::AuthArgs),
+    /// Manage CodSpeed profiles
+    Profile(profile::ProfileArgs),
     /// Pre-install the codspeed executors
     Setup(setup::SetupArgs),
     /// Show the overall status of CodSpeed (authentication, tools, system)
@@ -117,15 +99,40 @@ enum Commands {
     Show,
     /// Update the CodSpeed CLI to the latest version
     Update,
+
+    #[command(flatten)]
+    Internal(InternalCommands),
+}
+
+/// Subcommands the CLI uses to re-invoke itself; not user-facing entry points.
+#[derive(Subcommand, Debug)]
+pub(crate) enum InternalCommands {
+    /// Run the bundled samply profiler. Args are forwarded to samply.
+    #[command(disable_help_flag = true, disable_help_subcommand = true)]
+    Samply(samply::SamplyArgs),
+}
+
+impl InternalCommands {
+    /// Build a [`CommandBuilder`] that re-execs the current binary into this
+    /// internal subcommand. Each variant owns its own arg layout.
+    pub fn get_command_builder(&self) -> Result<CommandBuilder> {
+        let current_exe = std::env::current_exe()
+            .context("failed to resolve current executable for internal subcommand")?;
+        let mut builder = CommandBuilder::new(current_exe);
+        match self {
+            InternalCommands::Samply(args) => {
+                builder.arg("samply");
+                builder.args(args.args.iter().cloned());
+            }
+        }
+        Ok(builder)
+    }
 }
 
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
-    // Important: keep this after the Cli::parse() because the function can exit the process by itself, skipping the drop of the CursorGuard
-    let _cursor_guard = CursorGuard::new();
-    let codspeed_config =
-        CodSpeedConfig::load_with_override(cli.config_name.as_deref(), cli.oauth_token.as_deref())?;
-    let api_client = CodSpeedAPIClient::try_from((&cli, &codspeed_config))?;
+    let codspeed_config = load_config(&cli)?;
+    let mut api_client = build_api_client(&cli, &codspeed_config);
 
     // Discover project configuration file
     let discovered_config = DiscoveredProjectConfig::discover_and_load(
@@ -141,7 +148,7 @@ pub async fn run() -> Result<()> {
     let setup_cache_dir = setup_cache_dir.as_deref();
 
     match cli.command {
-        Commands::Run(_) | Commands::Exec(_) => {} // Run and Exec are responsible for their own logger initialization
+        Commands::Run(_) | Commands::Exec(_) | Commands::Internal(InternalCommands::Samply(_)) => {} // these are responsible for their own logger initialization
         _ => {
             init_local_logger()?;
         }
@@ -149,48 +156,100 @@ pub async fn run() -> Result<()> {
 
     match cli.command {
         Commands::Run(args) => {
+            let mut args = *args;
+            args.shared
+                .upload_url
+                .get_or_insert_with(|| codspeed_config.upload_url.clone());
             args.shared.experimental.warn_if_active();
             run::run(
-                *args,
-                &api_client,
-                &codspeed_config,
+                args,
+                &mut api_client,
                 discovered_config.as_ref(),
                 setup_cache_dir,
             )
             .await?
         }
         Commands::Exec(args) => {
+            let mut args = *args;
+            args.shared
+                .upload_url
+                .get_or_insert_with(|| codspeed_config.upload_url.clone());
             args.shared.experimental.warn_if_active();
             exec::run(
-                *args,
-                &api_client,
-                &codspeed_config,
+                args,
+                &mut api_client,
                 discovered_config.as_ref().map(|d| &d.config),
                 setup_cache_dir,
             )
             .await?
         }
-        Commands::Auth(args) => auth::run(args, &api_client, cli.config_name.as_deref()).await?,
+        Commands::Auth(args) => {
+            #[allow(deprecated)]
+            let config_name = cli.config_name.as_deref();
+            auth::run(args, &api_client, config_name, codspeed_config).await?
+        }
+        Commands::Profile(args) => {
+            #[allow(deprecated)]
+            let config_name = cli.config_name.as_deref();
+            profile::run(args, config_name, cli.profile.as_deref())?
+        }
         Commands::Setup(args) => setup::run(args, setup_cache_dir).await?,
-        Commands::Status => status::run(&api_client).await?,
+        Commands::Status => status::run(&api_client, &codspeed_config).await?,
         Commands::Use(args) => use_mode::run(args)?,
         Commands::Show => show::run()?,
         Commands::Update => update::run().await?,
+        Commands::Internal(InternalCommands::Samply(args)) => samply::run(args)?,
     }
     Ok(())
 }
 
-impl Cli {
-    /// Create a test CLI instance with a custom API URL for use in tests
-    #[cfg(test)]
-    pub fn test_with_url(api_url: String) -> Self {
-        Self {
-            api_url,
-            oauth_token: None,
-            config_name: None,
-            config: None,
-            setup_cache_dir: None,
-            command: Commands::Setup(setup::SetupArgs::default()),
-        }
+/// Load the CodSpeed config for this invocation, resolving the active
+/// profile (CLI `--profile` / `CODSPEED_PROFILE` / shell-session / built-in
+/// `default`) and applying CLI overrides for the OAuth token and api URL.
+///
+/// `auth` and `profile` subcommands are allowed to run against a config
+/// where the selected profile does not yet exist (e.g. first-time setup).
+fn load_config(cli: &Cli) -> Result<CodSpeedConfig> {
+    // The field carries a `#[deprecated]` marker but we still need to
+    // honour it during the deprecation window.
+    #[allow(deprecated)]
+    let config_name = cli.config_name.as_deref();
+    if config_name.is_some() {
+        warn!(
+            "`--config-name` / `CODSPEED_CONFIG_NAME` is deprecated; use `--profile` / `CODSPEED_PROFILE` instead."
+        );
     }
+    CodSpeedConfig::load_with_profile(
+        config_name,
+        cli.profile.as_deref(),
+        ConfigOverrides {
+            oauth_token: cli.oauth_token.as_deref(),
+            api_url: cli.api_url.as_deref(),
+            upload_url: None,
+        },
+        matches!(&cli.command, Commands::Auth(_) | Commands::Profile(_)),
+    )
+}
+
+/// Build the api client for this invocation, resolving the auth token
+/// from the most specific source available. This is the single source
+/// of truth for token resolution; the result lives on the returned
+/// client and every downstream consumer (GraphQL queries, upload
+/// `Authorization` header, executor env injection) reads it from there.
+///
+/// Priority (most specific first):
+///   1. `--token` / `CODSPEED_TOKEN`           — run/exec-level override
+///   2. `--oauth-token` / `CODSPEED_OAUTH_TOKEN` and the persisted CLI
+///      token from the selected profile.
+fn build_api_client(cli: &Cli, config: &CodSpeedConfig) -> CodSpeedAPIClient {
+    let explicit = match &cli.command {
+        Commands::Run(args) => args.shared.token.clone(),
+        Commands::Exec(args) => args.shared.token.clone(),
+        _ => None,
+    };
+    let token = match explicit {
+        Some(token) => Some(token),
+        None => config.auth.token.clone(),
+    };
+    CodSpeedAPIClient::new(token, config.api_url.clone())
 }

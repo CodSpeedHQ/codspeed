@@ -1,56 +1,90 @@
-use crate::cli::run::helpers::download_file;
+use crate::binary_pins::{
+    Arch, DistroVersion, PinnedBinary, VALGRIND_CODSPEED_ITERATION, VALGRIND_CODSPEED_VERSION,
+    VALGRIND_CODSPEED_VERSION_STRING, ValgrindTarget,
+};
+use crate::cli::run::helpers::download_pinned_file;
 use crate::executor::helpers::apt;
 use crate::executor::{ToolInstallStatus, ToolStatus};
 use crate::prelude::*;
-use crate::system::SystemInfo;
-use crate::{
-    VALGRIND_CODSPEED_DEB_VERSION, VALGRIND_CODSPEED_VERSION, VALGRIND_CODSPEED_VERSION_STRING,
-};
+use crate::system::{LinuxDistribution, SupportedOs, SystemInfo};
 use semver::Version;
 use std::{env, path::Path, process::Command};
-use url::Url;
 
-fn get_codspeed_valgrind_filename(system_info: &SystemInfo) -> Result<String> {
-    let (version, architecture) = match (
-        system_info.os.as_str(),
-        system_info.os_version.as_str(),
-        system_info.arch.as_str(),
-    ) {
-        ("ubuntu", "22.04", "x86_64") | ("debian", "12", "x86_64") => ("22.04", "amd64"),
-        ("ubuntu", "24.04", "x86_64") => ("24.04", "amd64"),
-        ("ubuntu", "22.04", "aarch64") | ("debian", "12", "aarch64") => ("22.04", "arm64"),
-        ("ubuntu", "24.04", "aarch64") => ("24.04", "arm64"),
+fn get_codspeed_valgrind_target(system_info: &SystemInfo) -> Result<ValgrindTarget> {
+    let SupportedOs::Linux(distro) = &system_info.os else {
+        bail!("Unsupported system");
+    };
+
+    let (distro_version, arch) = match (distro, system_info.arch.as_str()) {
+        (LinuxDistribution::Ubuntu { version }, "x86_64")
+        | (LinuxDistribution::Debian { version }, "x86_64")
+            if version == "22.04" || version == "12" =>
+        {
+            (DistroVersion::Ubuntu2204, Arch::Amd64)
+        }
+        (LinuxDistribution::Ubuntu { version }, "x86_64") if version == "24.04" => {
+            (DistroVersion::Ubuntu2404, Arch::Amd64)
+        }
+        (LinuxDistribution::Ubuntu { version }, "aarch64")
+        | (LinuxDistribution::Debian { version }, "aarch64")
+            if version == "22.04" || version == "12" =>
+        {
+            (DistroVersion::Ubuntu2204, Arch::Arm64)
+        }
+        (LinuxDistribution::Ubuntu { version }, "aarch64") if version == "24.04" => {
+            (DistroVersion::Ubuntu2404, Arch::Arm64)
+        }
         _ => bail!("Unsupported system"),
     };
 
-    Ok(format!(
-        "valgrind_{}_ubuntu-{}_{}.deb",
-        VALGRIND_CODSPEED_DEB_VERSION.as_str(),
-        version,
-        architecture
-    ))
+    Ok(ValgrindTarget {
+        distro_version,
+        arch,
+    })
 }
 
-/// Parse a valgrind version string and extract the semantic version.
-/// Expected format: "valgrind-3.25.1.codspeed" or "3.25.1.codspeed"
-/// Returns Some(Version) if parsing succeeds, None otherwise.
-fn parse_valgrind_codspeed_version(version_str: &str) -> Option<Version> {
-    let version_str = version_str.trim();
+fn get_codspeed_valgrind_binary(system_info: &SystemInfo) -> Result<PinnedBinary> {
+    Ok(PinnedBinary::ValgrindDeb(get_codspeed_valgrind_target(
+        system_info,
+    )?))
+}
 
-    // Extract the version numbers before .codspeed
-    let version_part = if let Some(codspeed_idx) = version_str.find(".codspeed") {
-        &version_str[..codspeed_idx]
+pub(super) fn is_codspeed_valgrind_installation_supported(system_info: &SystemInfo) -> bool {
+    get_codspeed_valgrind_target(system_info).is_ok()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ValgrindVersion {
+    semver: Version,
+    codspeed_iteration: Option<u32>,
+}
+
+/// Parse a valgrind version string and extract the upstream semver plus the
+/// optional CodSpeed iteration number.
+///
+/// Accepted formats:
+/// - `valgrind-3.25.1.codspeed`  (legacy, no iteration)
+/// - `valgrind-3.25.1.codspeed2` (with iteration)
+/// - same forms without the `valgrind-` prefix
+fn parse_valgrind_codspeed_version(version_str: &str) -> Option<ValgrindVersion> {
+    let stripped = version_str
+        .trim()
+        .strip_prefix("valgrind-")
+        .unwrap_or(version_str.trim());
+
+    let (semver_part, iteration_part) = stripped.split_once(".codspeed")?;
+    let semver = Version::parse(semver_part).ok()?;
+
+    let codspeed_iteration = if iteration_part.is_empty() {
+        None
     } else {
-        return None;
+        Some(iteration_part.parse::<u32>().ok()?)
     };
 
-    // Remove "valgrind-" prefix if present
-    let version_part = version_part
-        .strip_prefix("valgrind-")
-        .unwrap_or(version_part);
-
-    // Parse using semver
-    Version::parse(version_part).ok()
+    Some(ValgrindVersion {
+        semver,
+        codspeed_iteration,
+    })
 }
 
 const TOOL_NAME: &str = "valgrind";
@@ -91,53 +125,70 @@ pub fn get_valgrind_status() -> ToolStatus {
     let version = String::from_utf8_lossy(&version_output.stdout)
         .trim()
         .to_string();
+    debug!(
+        "Found installed valgrind version: {version} (expecting {} or higher)",
+        VALGRIND_CODSPEED_VERSION_STRING.as_str()
+    );
 
+    ToolStatus {
+        tool_name,
+        status: classify_valgrind_version(version),
+    }
+}
+
+/// Classify a trimmed `valgrind --version` output against the pinned CodSpeed
+/// valgrind version.
+fn classify_valgrind_version(version: String) -> ToolInstallStatus {
     // Check if it's a codspeed version
     if !version.contains(".codspeed") {
-        return ToolStatus {
-            tool_name,
-            status: ToolInstallStatus::IncorrectVersion {
-                version,
-                message: "not a CodSpeed build".to_string(),
-            },
+        return ToolInstallStatus::IncorrectVersion {
+            version,
+            message: "not a CodSpeed build".to_string(),
         };
     }
 
     // Parse the installed version
     let Some(installed_version) = parse_valgrind_codspeed_version(&version) else {
-        return ToolStatus {
-            tool_name,
-            status: ToolInstallStatus::IncorrectVersion {
-                version,
-                message: "could not parse version".to_string(),
-            },
+        return ToolInstallStatus::IncorrectVersion {
+            version,
+            message: "could not parse version".to_string(),
         };
     };
 
-    if installed_version < VALGRIND_CODSPEED_VERSION {
-        return ToolStatus {
-            tool_name,
-            status: ToolInstallStatus::IncorrectVersion {
-                version,
-                message: format!(
-                    "version too old, expecting {} or higher",
-                    VALGRIND_CODSPEED_VERSION_STRING.as_str()
-                ),
-            },
+    // Legacy `.codspeed` builds (no iteration suffix) predate iteration
+    // tracking, so they count as iteration 0.
+    let installed_iteration = installed_version.codspeed_iteration.unwrap_or(0);
+    let is_version_outdated = (installed_version.semver, installed_iteration)
+        < (VALGRIND_CODSPEED_VERSION, VALGRIND_CODSPEED_ITERATION);
+    if is_version_outdated {
+        return ToolInstallStatus::IncorrectVersion {
+            version,
+            message: format!(
+                "version too old, expecting {} or higher",
+                VALGRIND_CODSPEED_VERSION_STRING.as_str()
+            ),
         };
     }
 
-    ToolStatus {
-        tool_name,
-        status: ToolInstallStatus::Installed { version },
-    }
+    ToolInstallStatus::Installed { version }
 }
 
-fn is_valgrind_installed() -> bool {
-    matches!(
+fn is_valgrind_installed(system_info: &SystemInfo) -> bool {
+    if !matches!(
         get_valgrind_status().status,
         ToolInstallStatus::Installed { .. }
-    )
+    ) {
+        return false;
+    }
+
+    // `libc6-dbg` is only relevant on apt-based systems; on others (e.g. NixOS)
+    // `dpkg` is absent and would spuriously report it as missing.
+    if apt::is_system_compatible(system_info) {
+        apt::is_package_installed("libc6-dbg")
+    } else {
+        debug!("Skipping libc6-dbg check on non-apt-based system");
+        true
+    }
 }
 
 pub async fn install_valgrind(
@@ -147,20 +198,20 @@ pub async fn install_valgrind(
     apt::install_cached(
         system_info,
         setup_cache_dir,
-        is_valgrind_installed,
+        || is_valgrind_installed(system_info),
         || async {
             debug!("Installing valgrind");
-            let valgrind_deb_url = format!(
-                "https://github.com/CodSpeedHQ/valgrind-codspeed/releases/download/{}/{}",
-                VALGRIND_CODSPEED_DEB_VERSION.as_str(),
-                get_codspeed_valgrind_filename(system_info)?
-            );
+            let binary = get_codspeed_valgrind_binary(system_info)?;
             let deb_path = env::temp_dir().join("valgrind-codspeed.deb");
-            download_file(&Url::parse(valgrind_deb_url.as_str()).unwrap(), &deb_path).await?;
-            apt::install(system_info, &[deb_path.to_str().unwrap()])?;
+            download_pinned_file(binary, &deb_path).await?;
+
+            // Install libc debug symbols alongside valgrind, as GitHub runners
+            // do not include them by default. Keeping them in the same install
+            // call puts them under the same caching and idempotency logic.
+            apt::install(system_info, &[deb_path.to_str().unwrap(), "libc6-dbg"])?;
 
             // Return package names for caching
-            Ok(vec!["valgrind".to_string()])
+            Ok(vec!["valgrind".to_string(), "libc6-dbg".to_string()])
         },
     )
     .await
@@ -173,88 +224,182 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_system_info_to_codspeed_valgrind_version_ubuntu() {
+    fn test_system_info_to_codspeed_valgrind_url_ubuntu() {
         let system_info = SystemInfo {
-            os: "ubuntu".to_string(),
-            os_version: "22.04".to_string(),
+            os: SupportedOs::Linux(LinuxDistribution::Ubuntu {
+                version: "22.04".into(),
+            }),
             arch: "x86_64".to_string(),
             ..SystemInfo::test()
         };
         assert_snapshot!(
-            get_codspeed_valgrind_filename(&system_info).unwrap(),
-            @"valgrind_3.26.0-0codspeed0_ubuntu-22.04_amd64.deb"
+            get_codspeed_valgrind_binary(&system_info).unwrap().url(),
+            @"https://github.com/CodSpeedHQ/valgrind-codspeed/releases/download/3.26.0-0codspeed4/valgrind_3.26.0-0codspeed4_ubuntu-22.04_amd64.deb"
         );
     }
 
     #[test]
-    fn test_system_info_to_codspeed_valgrind_version_ubuntu_24() {
+    fn test_system_info_to_codspeed_valgrind_url_ubuntu_24() {
         let system_info = SystemInfo {
-            os: "ubuntu".to_string(),
-            os_version: "24.04".to_string(),
+            os: SupportedOs::Linux(LinuxDistribution::Ubuntu {
+                version: "24.04".into(),
+            }),
             arch: "x86_64".to_string(),
             ..SystemInfo::test()
         };
         assert_snapshot!(
-            get_codspeed_valgrind_filename(&system_info).unwrap(),
-            @"valgrind_3.26.0-0codspeed0_ubuntu-24.04_amd64.deb"
+            get_codspeed_valgrind_binary(&system_info).unwrap().url(),
+            @"https://github.com/CodSpeedHQ/valgrind-codspeed/releases/download/3.26.0-0codspeed4/valgrind_3.26.0-0codspeed4_ubuntu-24.04_amd64.deb"
         );
     }
 
     #[test]
-    fn test_system_info_to_codspeed_valgrind_version_debian() {
+    fn test_system_info_to_codspeed_valgrind_url_debian() {
         let system_info = SystemInfo {
-            os: "debian".to_string(),
-            os_version: "12".to_string(),
+            os: SupportedOs::Linux(LinuxDistribution::Debian {
+                version: "12".into(),
+            }),
             arch: "x86_64".to_string(),
             ..SystemInfo::test()
         };
         assert_snapshot!(
-            get_codspeed_valgrind_filename(&system_info).unwrap(),
-            @"valgrind_3.26.0-0codspeed0_ubuntu-22.04_amd64.deb"
+            get_codspeed_valgrind_binary(&system_info).unwrap().url(),
+            @"https://github.com/CodSpeedHQ/valgrind-codspeed/releases/download/3.26.0-0codspeed4/valgrind_3.26.0-0codspeed4_ubuntu-22.04_amd64.deb"
         );
     }
 
     #[test]
-    fn test_system_info_to_codspeed_valgrind_version_ubuntu_arm() {
+    fn test_system_info_to_codspeed_valgrind_url_ubuntu_arm() {
         let system_info = SystemInfo {
-            os: "ubuntu".to_string(),
-            os_version: "22.04".to_string(),
+            os: SupportedOs::Linux(LinuxDistribution::Ubuntu {
+                version: "22.04".into(),
+            }),
             arch: "aarch64".to_string(),
             ..SystemInfo::test()
         };
         assert_snapshot!(
-            get_codspeed_valgrind_filename(&system_info).unwrap(),
-            @"valgrind_3.26.0-0codspeed0_ubuntu-22.04_arm64.deb"
+            get_codspeed_valgrind_binary(&system_info).unwrap().url(),
+            @"https://github.com/CodSpeedHQ/valgrind-codspeed/releases/download/3.26.0-0codspeed4/valgrind_3.26.0-0codspeed4_ubuntu-22.04_arm64.deb"
         );
+    }
+
+    #[test]
+    fn test_codspeed_valgrind_unsupported_os() {
+        let system_info = SystemInfo {
+            os: SupportedOs::Macos {
+                version: "14.0".into(),
+            },
+            ..SystemInfo::test()
+        };
+        assert!(get_codspeed_valgrind_binary(&system_info).is_err());
+    }
+
+    #[test]
+    fn test_codspeed_valgrind_unsupported_distro() {
+        let system_info = SystemInfo {
+            os: SupportedOs::Linux(LinuxDistribution::Ubuntu {
+                version: "20.04".into(),
+            }),
+            ..SystemInfo::test()
+        };
+        assert!(get_codspeed_valgrind_binary(&system_info).is_err());
     }
 
     #[test]
     fn test_parse_valgrind_codspeed_version_with_prefix() {
         let version = parse_valgrind_codspeed_version("valgrind-3.25.1.codspeed").unwrap();
-        assert_eq!(version, Version::new(3, 25, 1));
+        assert_eq!(version.semver, Version::new(3, 25, 1));
+        assert_eq!(version.codspeed_iteration, None);
     }
 
     #[test]
     fn test_parse_valgrind_codspeed_version_without_prefix() {
         let version = parse_valgrind_codspeed_version("3.25.1.codspeed").unwrap();
-        assert_eq!(version, Version::new(3, 25, 1));
+        assert_eq!(version.semver, Version::new(3, 25, 1));
+        assert_eq!(version.codspeed_iteration, None);
     }
 
     #[test]
     fn test_parse_valgrind_codspeed_version_higher_patch() {
         let version = parse_valgrind_codspeed_version("valgrind-3.25.2.codspeed").unwrap();
-        assert_eq!(version, Version::new(3, 25, 2));
+        assert_eq!(version.semver, Version::new(3, 25, 2));
     }
 
     #[test]
     fn test_parse_valgrind_codspeed_version_with_newline() {
         let version = parse_valgrind_codspeed_version("valgrind-3.25.1.codspeed\n").unwrap();
-        assert_eq!(version, Version::new(3, 25, 1));
+        assert_eq!(version.semver, Version::new(3, 25, 1));
     }
 
     #[test]
     fn test_parse_valgrind_codspeed_version_without_codspeed_suffix() {
         assert_eq!(parse_valgrind_codspeed_version("valgrind-3.25.1"), None);
+    }
+
+    #[test]
+    fn test_parse_valgrind_codspeed_version_iterations_are_differentiated() {
+        let legacy = parse_valgrind_codspeed_version("valgrind-3.26.0.codspeed").unwrap();
+        let v1 = parse_valgrind_codspeed_version("valgrind-3.26.0.codspeed1").unwrap();
+        let v2 = parse_valgrind_codspeed_version("valgrind-3.26.0.codspeed2").unwrap();
+
+        assert_eq!(legacy.semver, v1.semver);
+        assert_eq!(legacy.codspeed_iteration, None);
+        assert_eq!(v1.codspeed_iteration, Some(1));
+        assert_eq!(v2.codspeed_iteration, Some(2));
+
+        assert_ne!(legacy, v1);
+        assert_ne!(v1, v2);
+    }
+
+    #[test]
+    fn test_classify_same_version_older_iteration_is_rejected() {
+        // Pinned is 3.26.0-0codspeed3: a cached 3.26.0.codspeed2 build is the
+        // same upstream valgrind but an older repackaging, so it must be
+        // rejected and reinstalled.
+        let status = classify_valgrind_version("valgrind-3.26.0.codspeed2".to_string());
+        assert!(
+            matches!(status, ToolInstallStatus::IncorrectVersion { .. }),
+            "stale codspeed iteration must be rejected, got: Installed"
+        );
+    }
+
+    #[test]
+    fn test_classify_legacy_suffix_with_pinned_semver_is_rejected() {
+        // Old builds report just `.codspeed` (no iteration); for the pinned
+        // upstream version they predate the pinned iteration.
+        let version = format!("valgrind-{VALGRIND_CODSPEED_VERSION}.codspeed");
+        let status = classify_valgrind_version(version);
+        assert!(matches!(status, ToolInstallStatus::IncorrectVersion { .. }));
+    }
+
+    #[test]
+    fn test_classify_pinned_iteration_is_installed() {
+        let version =
+            format!("valgrind-{VALGRIND_CODSPEED_VERSION}.codspeed{VALGRIND_CODSPEED_ITERATION}");
+        let status = classify_valgrind_version(version);
+        assert!(matches!(status, ToolInstallStatus::Installed { .. }));
+    }
+
+    #[test]
+    fn test_classify_newer_iteration_is_installed() {
+        let version = format!(
+            "valgrind-{VALGRIND_CODSPEED_VERSION}.codspeed{}",
+            VALGRIND_CODSPEED_ITERATION + 1
+        );
+        let status = classify_valgrind_version(version);
+        assert!(matches!(status, ToolInstallStatus::Installed { .. }));
+    }
+
+    #[test]
+    fn test_classify_newer_semver_with_legacy_suffix_is_installed() {
+        let status = classify_valgrind_version("valgrind-3.99.0.codspeed".to_string());
+        assert!(matches!(status, ToolInstallStatus::Installed { .. }));
+    }
+
+    #[test]
+    fn test_classify_non_codspeed_build_is_rejected() {
+        let status = classify_valgrind_version("valgrind-3.26.0".to_string());
+        assert!(matches!(status, ToolInstallStatus::IncorrectVersion { .. }));
     }
 
     #[test]

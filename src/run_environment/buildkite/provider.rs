@@ -3,10 +3,11 @@ use std::env;
 use async_trait::async_trait;
 use simplelog::SharedLogger;
 
+use crate::api_client::CodSpeedAPIClient;
 use crate::cli::run::helpers::{
     GitRemote, find_repository_root, get_env_variable, parse_git_remote,
 };
-use crate::executor::config::{ExecutorConfig, OrchestratorConfig};
+use crate::executor::config::OrchestratorConfig;
 use crate::prelude::*;
 use crate::run_environment::interfaces::{RepositoryProvider, RunEnvironmentMetadata, RunEvent};
 use crate::run_environment::provider::{RunEnvironmentDetector, RunEnvironmentProvider};
@@ -55,10 +56,6 @@ pub fn get_ref() -> Result<String> {
 impl TryFrom<&OrchestratorConfig> for BuildkiteProvider {
     type Error = Error;
     fn try_from(config: &OrchestratorConfig) -> Result<Self> {
-        if config.token.is_none() {
-            bail!("Token authentication is required for Buildkite");
-        }
-
         if config.repository_override.is_some() {
             bail!("Specifying owner and repository from CLI is not supported for Buildkite");
         }
@@ -152,14 +149,15 @@ impl RunEnvironmentProvider for BuildkiteProvider {
         None
     }
 
-    /// For now, we do not support OIDC tokens for Buildkite
-    ///
-    /// If we want to in the future, we can implement it using the Buildkite Agent CLI.
-    ///
-    /// Docs:
-    /// - https://buildkite.com/docs/agent/v3/cli-oidc
-    /// - https://buildkite.com/docs/pipelines/security/oidc
-    async fn set_oidc_token(&self, _config: &mut ExecutorConfig) -> Result<()> {
+    /// Buildkite requires a static `CODSPEED_TOKEN`. We don't yet support
+    /// OIDC tokens here (could be added via the Buildkite Agent CLI:
+    /// <https://buildkite.com/docs/agent/v3/cli-oidc>,
+    /// <https://buildkite.com/docs/pipelines/security/oidc>), so this
+    /// just enforces token presence.
+    fn check_oidc_configuration(&mut self, api_client: &CodSpeedAPIClient) -> Result<()> {
+        if api_client.token().is_none() {
+            bail!("Token authentication is required for Buildkite");
+        }
         Ok(())
     }
 }
@@ -200,7 +198,6 @@ mod tests {
             ],
             || {
                 let config = OrchestratorConfig {
-                    token: Some("token".into()),
                     ..OrchestratorConfig::test()
                 };
                 let provider = BuildkiteProvider::try_from(&config).unwrap();
@@ -239,7 +236,6 @@ mod tests {
             ],
             || {
                 let config = OrchestratorConfig {
-                    token: Some("token".into()),
                     ..OrchestratorConfig::test()
                 };
                 let provider = BuildkiteProvider::try_from(&config).unwrap();
@@ -278,7 +274,6 @@ mod tests {
             ],
             || {
                 let config = OrchestratorConfig {
-                    token: Some("token".into()),
                     ..OrchestratorConfig::test()
                 };
                 let provider = BuildkiteProvider::try_from(&config).unwrap();

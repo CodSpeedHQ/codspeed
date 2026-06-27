@@ -1,5 +1,6 @@
 # See https://pre-commit.com for more information
 # See https://pre-commit.com/hooks.html for more hooks
+default_install_hook_types: [pre-commit, post-checkout]
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.5.0
@@ -16,18 +17,22 @@ repos:
     rev: v1.0
     hooks:
       - id: fmt
-        args: [--all, --]
+        args: [--]
+        pass_filenames: false
       - id: clippy
         args: [--all-targets, --, -D, warnings]
   - repo: https://github.com/cpp-linter/cpp-linter-hooks
-    rev: v0.8.1
+    rev: v1.4.0
     hooks:
       - id: clang-format
         files: ^crates/memtrack/src/ebpf/c/.*\.(c|h|bpf\.c)$
         args: [--style=file, -i]
   - repo: local
     hooks:
-      - id: check-config-schema
-        name: check config schema is up to date
-        entry: bash -c 'cargo run --bin generate_config_schema && git diff --exit-code schemas/codspeed.schema.json'
-        language: system
+      - id: init-worktree
+        name: Initialize worktree
+        entry: scripts/init-worktree.sh
+        language: script
+        stages: [post-checkout]
+        always_run: true
+        pass_filenames: false

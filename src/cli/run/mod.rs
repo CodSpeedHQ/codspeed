@@ -1,8 +1,7 @@
 use super::ExecAndRunSharedArgs;
 use crate::api_client::CodSpeedAPIClient;
-use crate::config::CodSpeedConfig;
 use crate::executor;
-use crate::executor::config::{self, OrchestratorConfig, RepositoryOverride};
+use crate::executor::config::{OrchestratorConfig, RepositoryOverride};
 use crate::instruments::Instruments;
 use crate::prelude::*;
 use crate::project_config::DiscoveredProjectConfig;
@@ -48,8 +47,8 @@ pub enum MessageFormat {
 impl RunArgs {
     /// Constructs a new `RunArgs` with default values for testing purposes
     pub fn test() -> Self {
-        use super::PerfRunArgs;
         use super::experimental::ExperimentalArgs;
+        use super::{PerfRunArgs, ProfilerRunArgs};
         use crate::RunnerMode;
 
         Self {
@@ -61,6 +60,7 @@ impl RunArgs {
                 working_directory: None,
                 mode: vec![RunnerMode::Simulation],
                 simulation_tool: None,
+                walltime_profiler: None,
                 profile_folder: None,
                 skip_upload: false,
                 skip_run: false,
@@ -69,12 +69,16 @@ impl RunArgs {
                 go_runner_version: None,
                 show_full_output: false,
                 base: None,
-                perf_run_args: PerfRunArgs {
-                    enable_perf: false,
-                    perf_unwinding_mode: None,
+                profiler_run_args: ProfilerRunArgs {
+                    enable_profiler: false,
+                    enable_perf: None,
+                    perf: PerfRunArgs {
+                        perf_unwinding_mode: None,
+                    },
                 },
                 experimental: ExperimentalArgs {
                     experimental_fair_sched: false,
+                    cycle_estimation: false,
                 },
             },
             instruments: vec![],
@@ -95,13 +99,12 @@ fn build_orchestrator_config(
     let raw_upload_url = args
         .shared
         .upload_url
-        .unwrap_or_else(|| config::DEFAULT_UPLOAD_URL.into());
+        .unwrap_or_else(|| crate::config::DEFAULT_UPLOAD_URL.into());
     let upload_url = Url::parse(&raw_upload_url)
         .map_err(|e| anyhow!("Invalid upload URL: {raw_upload_url}, {e}"))?;
 
     Ok(OrchestratorConfig {
         upload_url,
-        token: args.shared.token,
         repository_override: args
             .shared
             .repository
@@ -111,8 +114,9 @@ fn build_orchestrator_config(
         targets,
         modes,
         instruments,
-        perf_unwinding_mode: args.shared.perf_run_args.perf_unwinding_mode,
-        enable_perf: args.shared.perf_run_args.enable_perf,
+        perf_unwinding_mode: args.shared.profiler_run_args.perf.perf_unwinding_mode,
+        enable_profiler: args.shared.profiler_run_args.resolve_enable_profiler(),
+        walltime_profiler: args.shared.walltime_profiler,
         simulation_tool: args.shared.simulation_tool.unwrap_or_default(),
         profile_folder: args.shared.profile_folder,
         skip_upload: args.shared.skip_upload,
@@ -124,6 +128,7 @@ fn build_orchestrator_config(
         poll_results_options,
         extra_env: HashMap::new(),
         fair_sched: args.shared.experimental.experimental_fair_sched,
+        cycle_estimation: args.shared.experimental.cycle_estimation,
     })
 }
 
@@ -142,8 +147,7 @@ enum RunTarget<'a> {
 
 pub async fn run(
     args: RunArgs,
-    api_client: &CodSpeedAPIClient,
-    codspeed_config: &CodSpeedConfig,
+    api_client: &mut CodSpeedAPIClient,
     discovered_config: Option<&DiscoveredProjectConfig>,
     setup_cache_dir: Option<&Path>,
 ) -> Result<()> {
@@ -188,8 +192,7 @@ pub async fn run(
                 poll_opts,
             )?;
 
-            let orchestrator =
-                executor::Orchestrator::new(config, codspeed_config, api_client).await?;
+            let orchestrator = executor::Orchestrator::new(config, api_client).await?;
 
             if !orchestrator.is_local() {
                 super::show_banner();
@@ -244,8 +247,7 @@ pub async fn run(
                 PollResultsOptions::new(false, base_run_id),
             )?;
             config.working_directory = resolved_working_directory;
-            super::exec::execute_config(config, api_client, codspeed_config, setup_cache_dir)
-                .await?;
+            super::exec::execute_config(config, api_client, setup_cache_dir).await?;
         }
     }
 

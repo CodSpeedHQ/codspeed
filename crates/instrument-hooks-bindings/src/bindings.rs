@@ -4,7 +4,11 @@ pub const MARKER_TYPE_SAMPLE_START: u32 = 0;
 pub const MARKER_TYPE_SAMPLE_END: u32 = 1;
 pub const MARKER_TYPE_BENCHMARK_START: u32 = 2;
 pub const MARKER_TYPE_BENCHMARK_END: u32 = 3;
-pub type InstrumentHooks = *mut u64;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct InstrumentHooks {
+    _unused: [u8; 0],
+}
 unsafe extern "C" {
     pub fn instrument_hooks_init() -> *mut InstrumentHooks;
 }
@@ -44,7 +48,7 @@ unsafe extern "C" {
 unsafe extern "C" {
     pub fn instrument_hooks_add_marker(
         arg1: *mut InstrumentHooks,
-        pid: u32,
+        pid: i32,
         marker_type: u8,
         timestamp: u64,
     ) -> u8;
@@ -56,5 +60,25 @@ pub const instrument_hooks_feature_t_FEATURE_DISABLE_CALLGRIND_MARKERS: instrume
     0;
 pub type instrument_hooks_feature_t = ::std::os::raw::c_uint;
 unsafe extern "C" {
-    pub fn instrument_hooks_set_feature(feature: instrument_hooks_feature_t, enabled: bool);
+    pub fn instrument_hooks_set_feature(feature: u64, enabled: bool);
+}
+unsafe extern "C" {
+    pub fn instrument_hooks_set_environment(
+        arg1: *mut InstrumentHooks,
+        section_name: *const ::std::os::raw::c_char,
+        key: *const ::std::os::raw::c_char,
+        value: *const ::std::os::raw::c_char,
+    ) -> u8;
+}
+unsafe extern "C" {
+    pub fn instrument_hooks_set_environment_list(
+        arg1: *mut InstrumentHooks,
+        section_name: *const ::std::os::raw::c_char,
+        key: *const ::std::os::raw::c_char,
+        values: *const *const ::std::os::raw::c_char,
+        count: u32,
+    ) -> u8;
+}
+unsafe extern "C" {
+    pub fn instrument_hooks_write_environment(arg1: *mut InstrumentHooks, pid: i32) -> u8;
 }

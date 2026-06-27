@@ -1,6 +1,6 @@
 [package]
 name = "codspeed-runner"
-version = "4.13.0"
+version = "4.18.1"
 edition = "2024"
 repository = "https://github.com/CodSpeedHQ/codspeed"
 publish = false
@@ -15,103 +15,106 @@ anyhow = { workspace = true }
 clap = { workspace = true, features = ["env", "color"] }
 itertools = { workspace = true }
 log = { workspace = true }
-rand = "0.8.5"
-rayon = "1.10"
-regex = "1.10.2"
+rand = "0.10"
+rayon = "1.12"
+regex = "1.12.3"
 semver = "1.0"
-reqwest = { version = "0.11.22", features = [
-    "json",
-    "stream",
-    "native-tls-vendored",
-] }
-reqwest-middleware = "0.2.4"
-reqwest-retry = "0.3.0"
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "rustls", "charset", "http2", "system-proxy"] }
+reqwest-middleware = { version = "0.5", features = ["json"] }
+reqwest-retry = "0.9"
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["preserve_order"] }
-url = "2.4.1"
-sha256 = "1.4.0"
+url = "2.5.8"
+sha256 = "1.6"
 tokio = { version = "1", features = ["macros", "rt"] }
-tokio-tar = { package = "astral-tokio-tar", version = "0.6.0" }
-tokio-util = "0.7.16"
-md5 = "0.7.0"
-base64 = "0.21.0"
-async-compression = { version = "0.4.5", features = ["tokio", "gzip"] }
+tokio-tar = { package = "astral-tokio-tar", version = "0.6.2" }
+tokio-util = "0.7.18"
+md5 = "0.8"
+base64 = "0.22.1"
+async-compression = { version = "0.4.42", features = ["tokio", "gzip"] }
 schemars = "1.2.1"
-simplelog = { version = "0.12.1", default-features = false, features = [
-    "termcolor",
-] }
+simplelog = { version = "0.12.2", default-features = false, features = ["termcolor"] }
 tempfile = { workspace = true }
-git2 = "0.20.2"
+git2 = "0.21"
 nestify = "0.3.3"
-gql_client = { git = "https://github.com/CodSpeedHQ/gql-client-rs" }
+gql_client = { git = "https://github.com/CodSpeedHQ/gql-client-rs", rev = "c269153c495b9e4eded1b17c351d499ce43ee516" }
 serde_yaml = "0.9.34"
-sysinfo = { version = "0.33.1", features = ["serde"] }
-indicatif = "0.17.8"
-console = "0.15.8"
-async-trait = "0.1.82"
+sysinfo = { version = "0.37", features = ["serde"] }
+indicatif = "0.18"
+console = "0.16"
+async-trait = "0.1.89"
 libc = { workspace = true }
-bincode = "1.3.3"
-object = "0.36.7"
+xattr = "1.6"
+bincode = "1.3.3" # Pinned to 1.x: 2.0 changes the wire format and serde integration
+object = "0.39"
 linux-perf-data = { git = "https://github.com/mstange/linux-perf-data.git", rev = "da5bce4b9fb724e84b1eea0cb6ab9c8a291bc676", features = [
-    "zstd",
+  "zstd",
 ] } # unreleased main as of 2026-03-19
 debugid = "0.8.0"
-memmap2 = "0.9.5"
-nix = { version = "0.31.1", features = ["fs", "time", "user"] }
-futures = "0.3.31"
+memmap2 = "0.9.10"
+nix = { version = "0.31.3", features = ["fs", "time", "user"] }
+futures = "0.3.32"
 runner-shared = { path = "crates/runner-shared" }
-memtrack = { path = "crates/memtrack", default-features = false }
 exec-harness = { path = "crates/exec-harness" }
-ipc-channel = "0.18"
-shellexpand = { version = "3.1.1", features = ["tilde"] }
-addr2line = "0.25"
-gimli = "0.32"
-open = "5.3.2"
+instrument-hooks-bindings = { path = "crates/instrument-hooks-bindings" }
+shellexpand = { version = "3.1.2", features = ["tilde"] }
+addr2line = "0.26"
+gimli = "0.33"
+open = "5.3.5"
 axoupdater = { version = "0.10.0", features = ["github_releases"] }
 tabled = { version = "0.20.0", features = ["ansi"] }
-shell-words = "1.1.0"
-rmp-serde = "1.3.0"
-uuid = { version = "1.21.0", features = ["v4"] }
+shell-words = "1.1.1"
+rmp-serde = "1.3.1"
+uuid = { version = "1.23.1", features = ["v4"] }
 which = "8.0.2"
+crc32fast = "1.5.0"
+samply = { path = "crates/samply-codspeed/samply" }
 
+# Memory profiling (memtrack) and the capability handling around it are Linux-only.
 [target.'cfg(target_os = "linux")'.dependencies]
-procfs = "0.17.0"
+procfs = "0.18"
+caps = "0.5"
+memtrack = { path = "crates/memtrack", default-features = false }
+ipc-channel = { workspace = true }
 
 [dev-dependencies]
 temp-env = { version = "0.3.6", features = ["async_closure"] }
-insta = { version = "1.29.0", features = ["json", "redactions"] }
-test-log = "0.2.19"
-test-with = { version = "0.15", default-features = false, features = [] }
-rstest = { version = "0.25.0", default-features = false }
+insta = { workspace = true, features = ["json", "redactions"] }
+test-log = { workspace = true }
+test-with = { workspace = true }
+rstest = { workspace = true }
 rstest_reuse = "0.7.0"
 shell-quote = "0.7.2"
-assert_cmd = "2.0.16"
+assert_cmd = "2.2"
 predicates = "3.1.4"
 strum = { version = "0.28.0", features = ["derive"] }
 
 [workspace]
 members = [
-    "crates/runner-shared",
-    "crates/memtrack",
-    "crates/exec-harness",
-    "crates/instrument-hooks-bindings",
+  "crates/runner-shared",
+  "crates/memtrack",
+  "crates/exec-harness",
+  "crates/instrument-hooks-bindings",
 ]
+exclude = ["crates/samply-codspeed"]
 
 [workspace.dependencies]
 anyhow = "1.0"
-clap = { version = "4.5", features = ["derive", "env"] }
+clap = { version = "4.6", features = ["derive", "env"] }
 libc = "0.2"
 log = "0.4.28"
 serde_json = "1.0"
 serde = { version = "1.0.228", features = ["derive"] }
-ipc-channel = "0.18"
+ipc-channel = "0.20"
 itertools = "0.14.0"
-env_logger = "0.11.8"
-tempfile = "3.10.0"
-object = { version = "0.36", default-features = false, features = [
-    "read_core",
-    "elf",
-] }
+linux-perf-event-reader = "0.10.2"                                                       # matches the version linux-perf-data resolves to
+env_logger = "0.11.10"
+tempfile = "3.27.0"
+object = { version = "0.39", default-features = false, features = ["read_core", "elf"] }
+insta = { version = "1.47", default-features = false }
+rstest = { version = "0.26", default-features = false }
+test-log = "0.2.20"
+test-with = { version = "0.16", default-features = false, features = [] }
 
 [workspace.metadata.release]
 sign-tag = true
@@ -129,6 +132,7 @@ lto = "thin"
 strip = true
 
 [package.metadata.dist]
-targets = ["aarch64-unknown-linux-musl", "x86_64-unknown-linux-musl"]
+targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-musl", "x86_64-unknown-linux-musl"]
+binaries.aarch64-apple-darwin = ["codspeed"]
 binaries.aarch64-unknown-linux-musl = ["codspeed"]
 binaries.x86_64-unknown-linux-musl = ["codspeed"]

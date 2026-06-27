@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -eo pipefail
+set -euo pipefail
 
 # Custom script to replace node and run with V8 flags that make the execution of the
 # benchmarks more predictable.
@@ -7,13 +7,21 @@ set -eo pipefail
 
 # a custom bash function to echo debug messages only if CODSPEED_DEBUG is set to true
 function echo_debug {
-    if [ "$CODSPEED_DEBUG" = "true" ]; then
+    if [ "${CODSPEED_DEBUG:-}" = "true" ]; then
         echo "::debug::" "$@"
     fi
 }
 
 # to avoid setting the variable for the children processes, unset it before running the node command
 unset __CODSPEED_NODE_CORE_INTROSPECTION_PATH__
+
+# macOS SIP strips DYLD_* across system-binary execs (/usr/bin/env, /bin/sh, …),
+# which removes samply's injection library from this subtree. samply also exposes
+# the value under a SAMPLY_-prefixed name that SIP does NOT strip; restore it
+# here so the profiler's preload re-arms in the real node process.
+if [ -n "${SAMPLY_DYLD_INSERT_LIBRARIES:-}" ]; then
+    export DYLD_INSERT_LIBRARIES="$SAMPLY_DYLD_INSERT_LIBRARIES"
+fi
 
 # Retrieve the original path by removing the folder containing codspeed_introspected_node from the path.
 ORIGINAL_PATH=$(echo "$PATH" | tr ":" "\n" | grep -v "codspeed_introspected_node" | tr "\n" ":")

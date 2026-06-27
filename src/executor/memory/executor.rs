@@ -1,17 +1,19 @@
 use crate::executor::ExecutorName;
+use crate::executor::ExecutorSupport;
+use crate::executor::PrivilegeStatus;
 use crate::executor::ToolStatus;
 use crate::executor::helpers::command::CommandBuilder;
-use crate::executor::helpers::env::get_base_injected_env;
+use crate::executor::helpers::env::{build_path_env, get_base_injected_env};
 use crate::executor::helpers::get_bench_command::get_bench_command;
 use crate::executor::helpers::run_command_with_log_pipe::run_command_with_log_pipe_and_callback;
 use crate::executor::helpers::run_with_env::wrap_with_env;
-use crate::executor::helpers::run_with_sudo::wrap_with_sudo;
+use crate::executor::helpers::run_with_sudo::is_root_user;
 use crate::executor::shared::fifo::RunnerFifo;
 use crate::executor::{ExecutionContext, Executor};
 use crate::instruments::mongo_tracer::MongoTracer;
 use crate::prelude::*;
 use crate::runner_mode::RunnerMode;
-use crate::system::SystemInfo;
+use crate::system::{SupportedOs, SystemInfo};
 use async_trait::async_trait;
 use ipc_channel::ipc;
 use memtrack::MemtrackIpcClient;
@@ -26,7 +28,10 @@ use std::rc::Rc;
 use tempfile::NamedTempFile;
 use tokio::time::{Duration, timeout};
 
-use super::setup::{MEMTRACK_COMMAND, get_memtrack_status, install_memtrack};
+use super::setup::{
+    MEMTRACK_COMMAND, ensure_memtrack_capabilities, get_memtrack_status, has_memtrack_capabilities,
+    install_memtrack,
+};
 
 pub struct MemoryExecutor;
 
@@ -34,7 +39,16 @@ impl MemoryExecutor {
     fn build_memtrack_command(
         execution_context: &ExecutionContext,
     ) -> Result<(MemtrackIpcServer, CommandBuilder, NamedTempFile)> {
-        // FIXME: We only support native languages for now
+        let mut extra_env = get_base_injected_env(
+            RunnerMode::Memory,
+            &execution_context.profile_folder,
+            &execution_context.config,
+        );
+
+        extra_env.insert(
+            "PATH".into(),
+            build_path_env(execution_context.config.enable_introspection)?,
+        );
 
         // Setup memtrack IPC server
         let (ipc_server, server_name) = ipc::IpcOneShotServer::new()?;
@@ -54,15 +68,29 @@ impl MemoryExecutor {
             cmd_builder.current_dir(abs_cwd);
         }
 
-        // Wrap command with environment forwarding
-        let extra_env = get_base_injected_env(
-            RunnerMode::Memory,
-            &execution_context.profile_folder,
-            &execution_context.config,
-        );
         let (cmd_builder, env_file) = wrap_with_env(cmd_builder, &extra_env)?;
 
         Ok((ipc_server, cmd_builder, env_file))
+    }
+
+    /// Ensure memtrack can load its eBPF programs: either run as root or hold the
+    /// required file capabilities. Tries a one-time capability grant if neither
+    /// holds, and bails if that fails.
+    fn ensure_privileges() -> Result<()> {
+        if is_root_user() || has_memtrack_capabilities() {
+            return Ok(());
+        }
+
+        ensure_memtrack_capabilities()?;
+
+        if has_memtrack_capabilities() {
+            return Ok(());
+        }
+
+        bail!(
+            "{MEMTRACK_COMMAND} needs elevated privileges to load its eBPF programs, but the \
+             required capabilities could not be granted."
+        );
     }
 }
 
@@ -72,8 +100,31 @@ impl Executor for MemoryExecutor {
         ExecutorName::Memory
     }
 
-    fn tool_status(&self) -> ToolStatus {
-        get_memtrack_status()
+    fn tool_status(&self) -> Option<ToolStatus> {
+        Some(get_memtrack_status())
+    }
+
+    fn privilege_status(&self) -> Option<PrivilegeStatus> {
+        if is_root_user() {
+            return Some(PrivilegeStatus::Satisfied {
+                detail: "running as root".to_string(),
+            });
+        }
+        if has_memtrack_capabilities() {
+            return Some(PrivilegeStatus::Satisfied {
+                detail: "capabilities granted".to_string(),
+            });
+        }
+        Some(PrivilegeStatus::Missing {
+            message: "capabilities missing, run `codspeed setup --mode memory`".to_string(),
+        })
+    }
+
+    fn support_level(&self, system_info: &SystemInfo) -> ExecutorSupport {
+        match &system_info.os {
+            SupportedOs::Linux(_) => ExecutorSupport::FullySupported,
+            SupportedOs::Macos { .. } => ExecutorSupport::Unsupported,
+        }
     }
 
     async fn setup(
@@ -84,16 +135,22 @@ impl Executor for MemoryExecutor {
         install_memtrack().await
     }
 
+    fn grant_privileges(&self) -> Result<()> {
+        ensure_memtrack_capabilities()
+    }
+
     async fn run(
-        &self,
+        &mut self,
         execution_context: &ExecutionContext,
         _mongo_tracer: &Option<MongoTracer>,
     ) -> Result<()> {
         // Create the results/ directory inside the profile folder to avoid having memtrack create it with wrong permissions
         std::fs::create_dir_all(execution_context.profile_folder.join("results"))?;
 
+        Self::ensure_privileges()?;
+
         let (ipc, cmd_builder, _env_file) = Self::build_memtrack_command(execution_context)?;
-        let cmd = wrap_with_sudo(cmd_builder)?.build();
+        let cmd = cmd_builder.build();
         debug!("cmd: {cmd:?}");
 
         let runner_fifo = RunnerFifo::new()?;
@@ -199,14 +256,14 @@ impl MemoryExecutor {
                         );
                     }
                 }
-                FifoCommand::StartBenchmark => {
+                FifoCommand::StartProfiler => {
                     debug!("Enabling memtrack via IPC");
                     if let Err(e) = ipc_client.enable() {
                         error!("Failed to enable memtrack: {e}");
                         return Ok(Some(FifoCommand::Err));
                     }
                 }
-                FifoCommand::StopBenchmark => {
+                FifoCommand::StopProfiler => {
                     debug!("Disabling memtrack via IPC");
                     if let Err(e) = ipc_client.disable() {
                         // There's a chance that memtrack has already exited here, so just log as debug

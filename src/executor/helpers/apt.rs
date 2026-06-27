@@ -1,13 +1,13 @@
 use super::run_with_sudo::run_with_sudo;
 use crate::prelude::*;
-use crate::system::SystemInfo;
+use crate::system::{SupportedOs, SystemInfo};
 use std::path::Path;
 use std::process::Command;
 
 const METADATA_FILENAME: &str = "./tmp/codspeed-cache-metadata.txt";
 
-fn is_system_compatible(system_info: &SystemInfo) -> bool {
-    system_info.os == "ubuntu" || system_info.os == "debian"
+pub fn is_system_compatible(system_info: &SystemInfo) -> bool {
+    matches!(system_info.os, SupportedOs::Linux(ref distro) if distro.is_supported())
 }
 
 /// Installs packages with caching support.
@@ -85,6 +85,14 @@ where
     }
 
     Ok(())
+}
+
+/// Returns whether a package is currently installed according to `dpkg`.
+pub fn is_package_installed(package: &str) -> bool {
+    Command::new("dpkg")
+        .args(["-s", package])
+        .output()
+        .is_ok_and(|output| output.status.success())
 }
 
 pub fn install(system_info: &SystemInfo, packages: &[&str]) -> Result<()> {

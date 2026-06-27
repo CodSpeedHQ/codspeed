@@ -1,0 +1,11 @@
+# Taplo TOML formatter configuration
+# https://taplo.tamasfe.dev/configuration/formatter-options.html
+
+exclude = ["target/**", ".cache/**"]
+
+[formatting]
+indent_string = "  "
+array_auto_expand = false
+array_auto_collapse = false
+inline_table_expand = false
+column_width = 120

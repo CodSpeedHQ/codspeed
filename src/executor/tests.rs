@@ -1,31 +1,34 @@
-use super::ExecutorConfig;
-use crate::executor::ExecutionContext;
-use crate::executor::Executor;
-use crate::system::SystemInfo;
-use rstest_reuse::{self, *};
-use shell_quote::{Bash, QuoteRefExt};
-use tempfile::TempDir;
-use tokio::sync::{OnceCell, Semaphore, SemaphorePermit};
+// Shared test helpers. On non-linux platforms, the only consumer is the `walltime` mod, which is
+// gated behind `GITHUB_ACTIONS`. Apply the same gate here so dead-code lints don't fire on macOS
+// without the env var. On linux, valgrind always uses these helpers, so no gate is needed.
+#[cfg_attr(not(target_os = "linux"), test_with::env(GITHUB_ACTIONS))]
+mod helpers {
+    pub use crate::executor::{ExecutionContext, Executor, ExecutorConfig};
+    pub use crate::system::SystemInfo;
+    pub use rstest_reuse::{self, *};
+    pub use shell_quote::{Bash, QuoteRefExt};
+    pub use tempfile::TempDir;
+    pub use tokio::sync::{OnceCell, Semaphore, SemaphorePermit};
 
-const TESTS: [&str; 6] = [
-    // Simple echo command
-    "echo 'Hello, World!'",
-    // Multi-line commands without semicolons
-    "echo \"Working\"
+    pub const TESTS: [&str; 6] = [
+        // Simple echo command
+        "echo 'Hello, World!'",
+        // Multi-line commands without semicolons
+        "echo \"Working\"
 echo \"with\"
 echo \"multiple lines\"",
-    // Multi-line commands with semicolons
-    "echo \"Working\";
+        // Multi-line commands with semicolons
+        "echo \"Working\";
 echo \"with\";
 echo \"multiple lines\";",
-    // Directory change and validation
-    "cd /tmp
+        // Directory change and validation
+        "cd /tmp
 # Check that the directory is actually changed
 if [ $(basename $(pwd)) != \"tmp\" ]; then
   exit 1
 fi",
-    // Quote escaping test
-    "#!/bin/bash
+        // Quote escaping test
+        "#!/bin/bash
 VALUE=\"He said \\\"Hello 'world'\\\" & echo \\$HOME\"
 if [ \"$VALUE\" = \"He said \\\"Hello 'world'\\\" & echo \\$HOME\" ]; then
   echo \"Quote test passed\"
@@ -33,8 +36,8 @@ else
   echo \"ERROR: Quote handling failed\"
   exit 1
 fi",
-    // Command substitution test
-    "#!/bin/bash
+        // Command substitution test
+        "#!/bin/bash
 RESULT=$(echo \"test 'nested' \\\"quotes\\\" here\")
 COUNT=$(echo \"$RESULT\" | wc -w)
 if [ \"$COUNT\" -eq \"4\" ]; then
@@ -43,127 +46,123 @@ else
   echo \"ERROR: Expected 4 words, got $COUNT\"
   exit 1
 fi",
-];
+    ];
 
-fn env_var_validation_script(env: &str, expected: &str) -> String {
-    let expected: String = expected.quoted(Bash);
-    format!(
-        r#"
+    pub fn env_var_validation_script(env: &str, expected: &str) -> String {
+        let expected: String = expected.quoted(Bash);
+        format!(
+            r#"
 if [ "${env}" != {expected} ]; then
   echo "FAIL: Environment variable not set correctly"
   echo "Got: '${env}'"
   exit 1
 fi
 "#
-    )
-}
-
-const ENV_TESTS: [(&str, &str); 8] = [
-    // Mixed quotes, backticks, and shell metacharacters
-    (
-        "quotes_and_escapes",
-        r#""'He said "Hello 'world' `date`" & echo "done" with \\n\\t\\"#,
-    ),
-    // Multiline content with tabs and trailing whitespace
-    (
-        "multiline_and_whitespace",
-        "Line 1\nLine 2\tTabbed\n   \t  ",
-    ),
-    // Shell metacharacters: pipes, redirects, operators
-    (
-        "shell_metacharacters",
-        r#"*.txt | grep "test" && echo "found" || echo "error" ; ls > /tmp/out"#,
-    ),
-    // Variable expansion and command substitution
-    (
-        "variables_and_commands",
-        r#"$HOME ${PATH} $((1+1)) $(echo "embedded") VAR="value with spaces""#,
-    ),
-    // Unicode characters and ANSI escape sequences
-    (
-        "unicode_and_special",
-        "🚀 café naïve\u{200b}hidden\x1b[31mRed\x1b[0m\x01\x02",
-    ),
-    // Complex mix of quoting styles with shell operators
-    (
-        "complex_mixed",
-        r#"start'single'middle"double"end $VAR | cmd && echo "done" || fail"#,
-    ),
-    // Empty string edge case
-    ("empty", ""),
-    // Whitespace-only content
-    ("space_only", "   "),
-];
-
-#[template]
-#[rstest::rstest]
-#[case(TESTS[0])]
-#[case(TESTS[1])]
-#[case(TESTS[2])]
-#[case(TESTS[3])]
-#[case(TESTS[4])]
-#[case(TESTS[5])]
-fn test_cases(#[case] cmd: &str) {}
-
-#[template]
-#[rstest::rstest]
-#[case(ENV_TESTS[0])]
-#[case(ENV_TESTS[1])]
-#[case(ENV_TESTS[2])]
-#[case(ENV_TESTS[3])]
-#[case(ENV_TESTS[4])]
-#[case(ENV_TESTS[5])]
-#[case(ENV_TESTS[6])]
-#[case(ENV_TESTS[7])]
-fn env_test_cases(#[case] env_case: (&str, &str)) {}
-
-async fn create_test_setup(config: ExecutorConfig) -> (ExecutionContext, TempDir) {
-    let temp_dir = TempDir::new().unwrap();
-
-    let mut config = config;
-
-    // Provide a test token so authentication doesn't fail
-    if config.token.is_none() {
-        config.token = Some("test-token".to_string());
+        )
     }
 
-    let profile_folder = temp_dir.path().to_path_buf();
-    let execution_context = ExecutionContext::new(config, profile_folder);
+    pub const ENV_TESTS: [(&str, &str); 8] = [
+        // Mixed quotes, backticks, and shell metacharacters
+        (
+            "quotes_and_escapes",
+            r#""'He said "Hello 'world' `date`" & echo "done" with \\n\\t\\"#,
+        ),
+        // Multiline content with tabs and trailing whitespace
+        (
+            "multiline_and_whitespace",
+            "Line 1\nLine 2\tTabbed\n   \t  ",
+        ),
+        // Shell metacharacters: pipes, redirects, operators
+        (
+            "shell_metacharacters",
+            r#"*.txt | grep "test" && echo "found" || echo "error" ; ls > /tmp/out"#,
+        ),
+        // Variable expansion and command substitution
+        (
+            "variables_and_commands",
+            r#"$HOME ${PATH} $((1+1)) $(echo "embedded") VAR="value with spaces""#,
+        ),
+        // Unicode characters and ANSI escape sequences
+        (
+            "unicode_and_special",
+            "🚀 café naïve\u{200b}hidden\x1b[31mRed\x1b[0m\x01\x02",
+        ),
+        // Complex mix of quoting styles with shell operators
+        (
+            "complex_mixed",
+            r#"start'single'middle"double"end $VAR | cmd && echo "done" || fail"#,
+        ),
+        // Empty string edge case
+        ("empty", ""),
+        // Whitespace-only content
+        ("space_only", "   "),
+    ];
 
-    (execution_context, temp_dir)
+    #[template]
+    #[rstest::rstest]
+    #[case(TESTS[0])]
+    #[case(TESTS[1])]
+    #[case(TESTS[2])]
+    #[case(TESTS[3])]
+    #[case(TESTS[4])]
+    #[case(TESTS[5])]
+    pub fn test_cases(#[case] cmd: &str) {}
+
+    #[template]
+    #[rstest::rstest]
+    #[case(ENV_TESTS[0])]
+    #[case(ENV_TESTS[1])]
+    #[case(ENV_TESTS[2])]
+    #[case(ENV_TESTS[3])]
+    #[case(ENV_TESTS[4])]
+    #[case(ENV_TESTS[5])]
+    #[case(ENV_TESTS[6])]
+    #[case(ENV_TESTS[7])]
+    pub fn env_test_cases(#[case] env_case: (&str, &str)) {}
+
+    pub async fn create_test_setup(config: ExecutorConfig) -> (ExecutionContext, TempDir) {
+        let temp_dir = TempDir::new().unwrap();
+
+        let profile_folder = temp_dir.path().to_path_buf();
+        let execution_context = ExecutionContext::new(config, profile_folder);
+
+        (execution_context, temp_dir)
+    }
+
+    // Uprobes set by memtrack, lead to crashes in valgrind because they work by setting breakpoints on the first
+    // instruction. Valgrind doesn't rethrow those breakpoint exceptions, which makes the test crash.
+    //
+    // Therefore, we can only execute either valgrind or memtrack at any time, and not both at the same time.
+    #[cfg(target_os = "linux")]
+    pub static BPF_INSTRUMENTATION_LOCK: OnceCell<Semaphore> = OnceCell::const_new();
+
+    #[cfg(target_os = "linux")]
+    pub async fn acquire_bpf_instrumentation_lock() -> SemaphorePermit<'static> {
+        let semaphore = BPF_INSTRUMENTATION_LOCK
+            .get_or_init(|| async { Semaphore::new(1) })
+            .await;
+        semaphore.acquire().await.unwrap()
+    }
 }
 
-// Uprobes set by memtrack, lead to crashes in valgrind because they work by setting breakpoints on the first
-// instruction. Valgrind doesn't rethrow those breakpoint exceptions, which makes the test crash.
-//
-// Therefore, we can only execute either valgrind or memtrack at any time, and not both at the same time.
-static BPF_INSTRUMENTATION_LOCK: OnceCell<Semaphore> = OnceCell::const_new();
-
-async fn acquire_bpf_instrumentation_lock() -> SemaphorePermit<'static> {
-    let semaphore = BPF_INSTRUMENTATION_LOCK
-        .get_or_init(|| async { Semaphore::new(1) })
-        .await;
-    semaphore.acquire().await.unwrap()
-}
-
+#[cfg(target_os = "linux")]
 mod valgrind {
-    use super::*;
+    use super::helpers::*;
     use crate::executor::valgrind::executor::ValgrindExecutor;
 
-    async fn get_valgrind_executor() -> (SemaphorePermit<'static>, &'static ValgrindExecutor) {
-        static VALGRIND_EXECUTOR: OnceCell<ValgrindExecutor> = OnceCell::const_new();
+    async fn get_valgrind_executor() -> (SemaphorePermit<'static>, ValgrindExecutor) {
+        static VALGRIND_SETUP: OnceCell<()> = OnceCell::const_new();
 
-        let executor = VALGRIND_EXECUTOR
+        VALGRIND_SETUP
             .get_or_init(|| async {
                 let executor = ValgrindExecutor;
                 let system_info = SystemInfo::new().unwrap();
                 executor.setup(&system_info, None).await.unwrap();
-                executor
             })
             .await;
         let _lock = acquire_bpf_instrumentation_lock().await;
 
-        (_lock, executor)
+        (_lock, ValgrindExecutor)
     }
 
     fn valgrind_config(command: &str) -> ExecutorConfig {
@@ -176,7 +175,7 @@ mod valgrind {
     #[apply(test_cases)]
     #[test_log::test(tokio::test)]
     async fn test_valgrind_executor(#[case] cmd: &str) {
-        let (_lock, executor) = get_valgrind_executor().await;
+        let (_lock, mut executor) = get_valgrind_executor().await;
 
         let config = valgrind_config(cmd);
         // Unset GITHUB_ACTIONS to force LocalProvider which supports repository_override
@@ -190,7 +189,7 @@ mod valgrind {
     #[apply(env_test_cases)]
     #[test_log::test(tokio::test)]
     async fn test_valgrind_executor_with_env(#[case] env_case: (&str, &str)) {
-        let (_lock, executor) = get_valgrind_executor().await;
+        let (_lock, mut executor) = get_valgrind_executor().await;
 
         let (env_var, env_value) = env_case;
         temp_env::async_with_vars(
@@ -208,7 +207,7 @@ mod valgrind {
 
 #[test_with::env(GITHUB_ACTIONS)]
 mod walltime {
-    use super::*;
+    use super::helpers::*;
     use crate::executor::wall_time::executor::WallTimeExecutor;
 
     async fn get_walltime_executor() -> (SemaphorePermit<'static>, WallTimeExecutor) {
@@ -217,7 +216,7 @@ mod walltime {
 
         WALLTIME_INIT
             .get_or_init(|| async {
-                let executor = WallTimeExecutor::new();
+                let executor = WallTimeExecutor::new(None);
                 let system_info = SystemInfo::new().unwrap();
                 executor.setup(&system_info, None).await.unwrap();
             })
@@ -230,13 +229,13 @@ mod walltime {
             .await;
         let permit = semaphore.acquire().await.unwrap();
 
-        (permit, WallTimeExecutor::new())
+        (permit, WallTimeExecutor::new(None))
     }
 
-    fn walltime_config(command: &str, enable_perf: bool) -> ExecutorConfig {
+    fn walltime_config(command: &str, enable_profiler: bool) -> ExecutorConfig {
         ExecutorConfig {
             command: command.to_string(),
-            enable_perf,
+            enable_profiler,
             ..ExecutorConfig::test()
         }
     }
@@ -244,10 +243,13 @@ mod walltime {
     #[apply(test_cases)]
     #[rstest::rstest]
     #[test_log::test(tokio::test)]
-    async fn test_walltime_executor(#[case] cmd: &str, #[values(false, true)] enable_perf: bool) {
-        let (_permit, executor) = get_walltime_executor().await;
+    async fn test_walltime_executor(
+        #[case] cmd: &str,
+        #[values(false, true)] enable_profiler: bool,
+    ) {
+        let (_permit, mut executor) = get_walltime_executor().await;
 
-        let config = walltime_config(cmd, enable_perf);
+        let config = walltime_config(cmd, enable_profiler);
         // Unset GITHUB_ACTIONS to force LocalProvider which supports repository_override
         temp_env::async_with_vars(&[("GITHUB_ACTIONS", None::<&str>)], async {
             let (execution_context, _temp_dir) = create_test_setup(config).await;
@@ -261,16 +263,16 @@ mod walltime {
     #[test_log::test(tokio::test)]
     async fn test_walltime_executor_with_env(
         #[case] env_case: (&str, &str),
-        #[values(false, true)] enable_perf: bool,
+        #[values(false, true)] enable_profiler: bool,
     ) {
-        let (_permit, executor) = get_walltime_executor().await;
+        let (_permit, mut executor) = get_walltime_executor().await;
 
         let (env_var, env_value) = env_case;
         temp_env::async_with_vars(
             &[(env_var, Some(env_value)), ("GITHUB_ACTIONS", None)],
             async {
                 let cmd = env_var_validation_script(env_var, env_value);
-                let config = walltime_config(&cmd, enable_perf);
+                let config = walltime_config(&cmd, enable_profiler);
                 let (execution_context, _temp_dir) = create_test_setup(config).await;
                 executor.run(&execution_context, &None).await.unwrap();
             },
@@ -281,8 +283,8 @@ mod walltime {
     // Ensure that the working directory is used correctly
     #[rstest::rstest]
     #[test_log::test(tokio::test)]
-    async fn test_walltime_executor_in_working_dir(#[values(false, true)] enable_perf: bool) {
-        let (_permit, executor) = get_walltime_executor().await;
+    async fn test_walltime_executor_in_working_dir(#[values(false, true)] enable_profiler: bool) {
+        let (_permit, mut executor) = get_walltime_executor().await;
 
         let cmd = r#"
 if [ "$(basename "$(pwd)")" != "within_sub_directory" ]; then
@@ -291,7 +293,7 @@ if [ "$(basename "$(pwd)")" != "within_sub_directory" ]; then
 fi
 "#;
 
-        let mut config = walltime_config(cmd, enable_perf);
+        let mut config = walltime_config(cmd, enable_profiler);
 
         let dir = TempDir::new().unwrap();
         config.working_directory = Some(
@@ -313,10 +315,10 @@ fi
     // Ensure that commands that fail actually fail
     #[rstest::rstest]
     #[test_log::test(tokio::test)]
-    async fn test_walltime_executor_fails(#[values(false, true)] enable_perf: bool) {
-        let (_permit, executor) = get_walltime_executor().await;
+    async fn test_walltime_executor_fails(#[values(false, true)] enable_profiler: bool) {
+        let (_permit, mut executor) = get_walltime_executor().await;
 
-        let config = walltime_config("exit 1", enable_perf);
+        let config = walltime_config("exit 1", enable_profiler);
         // Unset GITHUB_ACTIONS to force LocalProvider which supports repository_override
         temp_env::async_with_vars(&[("GITHUB_ACTIONS", None::<&str>)], async {
             let (execution_context, _temp_dir) = create_test_setup(config).await;
@@ -354,7 +356,7 @@ fi
     async fn test_exec_harness(#[case] cmd: &str) {
         use exec_harness::walltime::WalltimeExecutionArgs;
 
-        let (_permit, executor) = get_walltime_executor().await;
+        let (_permit, mut executor) = get_walltime_executor().await;
 
         let walltime_args = WalltimeExecutionArgs {
             warmup_time: Some("0s".to_string()),
@@ -377,9 +379,10 @@ fi
     }
 }
 
+#[cfg(target_os = "linux")]
 #[test_with::env(GITHUB_ACTIONS)]
 mod memory {
-    use super::*;
+    use super::helpers::*;
     use crate::executor::memory::executor::MemoryExecutor;
 
     async fn get_memory_executor() -> (
@@ -395,6 +398,7 @@ mod memory {
                 let executor = MemoryExecutor;
                 let system_info = SystemInfo::new().unwrap();
                 executor.setup(&system_info, None).await.unwrap();
+                executor.grant_privileges().unwrap();
             })
             .await;
 
@@ -419,7 +423,7 @@ mod memory {
     #[apply(test_cases)]
     #[test_log::test(tokio::test)]
     async fn test_memory_executor(#[case] cmd: &str) {
-        let (_permit, _lock, executor) = get_memory_executor().await;
+        let (_permit, _lock, mut executor) = get_memory_executor().await;
 
         // Unset GITHUB_ACTIONS to force LocalProvider which supports repository_override
         temp_env::async_with_vars(&[("GITHUB_ACTIONS", None::<&str>)], async {
@@ -433,7 +437,7 @@ mod memory {
     #[apply(env_test_cases)]
     #[test_log::test(tokio::test)]
     async fn test_memory_executor_with_env(#[case] env_case: (&str, &str)) {
-        let (_permit, _lock, executor) = get_memory_executor().await;
+        let (_permit, _lock, mut executor) = get_memory_executor().await;
 
         let (env_var, env_value) = env_case;
         temp_env::async_with_vars(
@@ -465,7 +469,7 @@ fi
         );
         let config = memory_config(&cmd);
         let (execution_context, _temp_dir) = create_test_setup(config).await;
-        let (_permit, _lock, executor) = get_memory_executor().await;
+        let (_permit, _lock, mut executor) = get_memory_executor().await;
 
         temp_env::async_with_vars(&[("PATH", Some(&modified_path))], async {
             executor.run(&execution_context, &None).await.unwrap();

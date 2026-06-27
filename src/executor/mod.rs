@@ -2,8 +2,9 @@ use std::fmt::Display;
 
 pub mod config;
 mod execution_context;
-mod helpers;
+pub(crate) mod helpers;
 mod interfaces;
+#[cfg(target_os = "linux")]
 mod memory;
 pub mod orchestrator;
 mod shared;
@@ -13,15 +14,17 @@ mod valgrind;
 mod wall_time;
 
 use crate::instruments::mongo_tracer::{MongoTracer, install_mongodb_tracer};
+use crate::local_logger::rolling_buffer::{activate_rolling_buffer, deactivate_rolling_buffer};
 use crate::prelude::*;
 use crate::runner_mode::RunnerMode;
 use crate::system::SystemInfo;
 use async_trait::async_trait;
-pub use config::{BenchmarkTarget, ExecutorConfig, OrchestratorConfig};
+pub use config::{BenchmarkTarget, ExecutorConfig, WalltimeProfiler};
 pub use execution_context::ExecutionContext;
 pub use interfaces::ExecutorName;
 pub use orchestrator::Orchestrator;
 
+#[cfg(target_os = "linux")]
 use memory::executor::MemoryExecutor;
 use std::path::Path;
 use valgrind::executor::ValgrindExecutor;
@@ -34,6 +37,7 @@ impl Display for RunnerMode {
             RunnerMode::Instrumentation => write!(f, "instrumentation"),
             RunnerMode::Simulation => write!(f, "simulation"),
             RunnerMode::Walltime => write!(f, "walltime"),
+            #[cfg(target_os = "linux")]
             RunnerMode::Memory => write!(f, "memory"),
         }
     }
@@ -41,21 +45,28 @@ impl Display for RunnerMode {
 
 pub const EXECUTOR_TARGET: &str = "executor";
 
-pub fn get_executor_from_mode(mode: &RunnerMode) -> Box<dyn Executor> {
+pub fn get_executor_from_mode(
+    mode: &RunnerMode,
+    walltime_profiler: Option<WalltimeProfiler>,
+) -> Box<dyn Executor> {
     match mode {
         #[allow(deprecated)]
         RunnerMode::Instrumentation | RunnerMode::Simulation => Box::new(ValgrindExecutor),
-        RunnerMode::Walltime => Box::new(WallTimeExecutor::new()),
+        RunnerMode::Walltime => Box::new(WallTimeExecutor::new(walltime_profiler)),
+        #[cfg(target_os = "linux")]
         RunnerMode::Memory => Box::new(MemoryExecutor),
     }
 }
 
 pub fn get_all_executors() -> Vec<Box<dyn Executor>> {
-    vec![
+    #[cfg_attr(not(target_os = "linux"), allow(unused_mut))]
+    let mut executors: Vec<Box<dyn Executor>> = vec![
         Box::new(ValgrindExecutor),
-        Box::new(WallTimeExecutor::new()),
-        Box::new(MemoryExecutor),
-    ]
+        Box::new(WallTimeExecutor::new(None)),
+    ];
+    #[cfg(target_os = "linux")]
+    executors.push(Box::new(MemoryExecutor));
+    executors
 }
 
 /// Installation status of a tool required by an executor.
@@ -73,12 +84,46 @@ pub enum ToolInstallStatus {
     NotInstalled,
 }
 
+/// Readiness of any elevated privileges an executor needs beyond a plain install
+/// (e.g. file capabilities). Reported alongside [`ToolStatus`] in `setup status`.
+/// Only the Linux-only memory executor produces these today.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub enum PrivilegeStatus {
+    /// Privileges are in place; `detail` explains how (root, capabilities granted, …).
+    Satisfied { detail: String },
+    /// Privileges are missing; `message` tells the user how to obtain them.
+    Missing { message: String },
+}
+
+/// How well a given executor runs on a given [`SupportedOs`].
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+pub enum ExecutorSupport {
+    /// The executor cannot run on this OS at all — `run_executor` hard-bails.
+    Unsupported,
+    /// The executor runs on this OS, but the user is responsible for installing the required tooling themselves.
+    RequiresManualInstallation,
+    /// The executor runs on this OS and `setup()` knows how to auto-install tooling.
+    FullySupported,
+}
+
 #[async_trait(?Send)]
 pub trait Executor {
     fn name(&self) -> ExecutorName;
 
     /// Report the installation status of the tool(s) this executor depends on.
-    fn tool_status(&self) -> ToolStatus;
+    fn tool_status(&self) -> Option<ToolStatus>;
+
+    /// Report whether the elevated privileges this executor needs are in place.
+    /// Defaults to `None` for executors that need none. Only consulted once the
+    /// tool itself is installed.
+    fn privilege_status(&self) -> Option<PrivilegeStatus> {
+        None
+    }
+
+    /// Declare how well this executor runs on the host system. Drives whether `setup()` is invoked
+    /// (only when [`ExecutorSupport::FullySupported`]) and whether we bail out of running the
+    /// executor at all (on [`ExecutorSupport::Unsupported`]).
+    fn support_level(&self, system_info: &SystemInfo) -> ExecutorSupport;
 
     async fn setup(
         &self,
@@ -88,9 +133,16 @@ pub trait Executor {
         Ok(())
     }
 
+    /// Grant any elevated privileges this executor needs (e.g. file capabilities).
+    /// Runs after [`setup`](Self::setup) and may prompt for sudo. Defaults to a
+    /// no-op for executors that need none.
+    fn grant_privileges(&self) -> Result<()> {
+        Ok(())
+    }
+
     /// Runs the executor
     async fn run(
-        &self,
+        &mut self,
         execution_context: &ExecutionContext,
         // TODO: use Instruments instead of directly passing the mongodb tracer
         mongo_tracer: &Option<MongoTracer>,
@@ -102,16 +154,31 @@ pub trait Executor {
 /// Run a single executor: setup → run → teardown → persist logs.
 /// Does NOT upload.
 pub async fn run_executor(
-    executor: &dyn Executor,
+    executor: &mut dyn Executor,
     orchestrator: &Orchestrator,
     execution_context: &ExecutionContext,
     setup_cache_dir: Option<&Path>,
+    rolling_buffer_label: Option<&str>,
 ) -> Result<()> {
-    if !execution_context.config.skip_setup {
-        executor
-            .setup(&orchestrator.system_info, setup_cache_dir)
-            .await?;
+    match executor.support_level(&orchestrator.system_info) {
+        ExecutorSupport::Unsupported => {
+            bail!(
+                "The {} executor is not supported on {}",
+                executor.name(),
+                orchestrator.system_info.os
+            );
+        }
+        ExecutorSupport::RequiresManualInstallation | ExecutorSupport::FullySupported => {
+            if !execution_context.config.skip_setup {
+                executor
+                    .setup(&orchestrator.system_info, setup_cache_dir)
+                    .await?;
+                executor.grant_privileges()?;
+            }
+        }
+    }
 
+    if !execution_context.config.skip_setup {
         // TODO: refactor and move directly in the Instruments struct as a `setup` method
         if execution_context.config.instruments.is_mongodb_enabled() {
             install_mongodb_tracer().await?;
@@ -132,7 +199,14 @@ pub async fn run_executor(
                 None
             };
 
-        executor.run(execution_context, &mongo_tracer).await?;
+        if let Some(label) = rolling_buffer_label {
+            activate_rolling_buffer(label);
+        }
+        let run_result = executor.run(execution_context, &mongo_tracer).await;
+        if rolling_buffer_label.is_some() {
+            deactivate_rolling_buffer();
+        }
+        run_result?;
 
         // TODO: refactor and move directly in the Instruments struct as a `stop` method
         if let Some(mut mongo_tracer) = mongo_tracer {

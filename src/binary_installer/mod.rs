@@ -1,29 +1,26 @@
-use crate::cli::run::helpers::download_file;
+use crate::binary_pins::PinnedBinary;
+use crate::cli::run::helpers::download_pinned_file;
 use crate::prelude::*;
 use semver::Version;
 use std::process::Command;
 use tempfile::NamedTempFile;
-use url::Url;
 
 mod versions;
 
-/// Ensure a binary is installed, or install it from a runner's GitHub release using the installer script.
+/// Ensure a binary is installed, or install it from a `PinnedBinary` installer script.
 ///
 /// This function checks if the binary is already installed with the correct version.
-/// If not, it downloads and executes an installer script from the CodSpeed runner repository.
+/// If not, it downloads and executes the pinned installer script.
 ///
 /// # Arguments
 /// * `binary_name` - The binary command name (e.g., "codspeed-memtrack", "codspeed-exec-harness")
 /// * `version` - The version to install (e.g., "4.4.2-alpha.2")
-/// * `get_installer_url` - A closure that returns the URL to download the installer script.
-pub async fn ensure_binary_installed<F>(
+/// * `installer` - The `PinnedBinary` installer to download.
+pub async fn ensure_binary_installed(
     binary_name: &str,
     version: &str,
-    get_installer_url: F,
-) -> Result<()>
-where
-    F: FnOnce() -> String,
-{
+    installer: PinnedBinary,
+) -> Result<()> {
     if is_command_installed(
         binary_name,
         Version::parse(version).context("Invalid version format")?,
@@ -32,13 +29,11 @@ where
         return Ok(());
     }
 
-    let installer_url = Url::parse(&get_installer_url()).context("Invalid installer URL")?;
+    debug!("Downloading installer for {binary_name}");
 
-    debug!("Downloading installer from: {installer_url}");
-
-    // Download the installer script to a temporary file
+    // Download the installer script to a temporary file (with sha256 verification)
     let temp_file = NamedTempFile::new().context("Failed to create temporary file")?;
-    download_file(&installer_url, temp_file.path()).await?;
+    download_pinned_file(installer, temp_file.path()).await?;
 
     // Execute the installer script
     let output = Command::new("sh")

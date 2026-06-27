@@ -18,13 +18,16 @@ pub fn get_base_injected_env(
         #[allow(deprecated)]
         RunnerMode::Instrumentation | RunnerMode::Simulation => "instrumentation",
         RunnerMode::Walltime => "walltime",
+        #[cfg(target_os = "linux")]
         RunnerMode::Memory => "memory",
     };
     let mut env = HashMap::from([
         ("PYTHONHASHSEED".into(), "0".into()),
         (
             "PYTHON_PERF_JIT_SUPPORT".into(),
-            if mode == RunnerMode::Walltime {
+            // FIXME(COD-2645): Keep this disabled on macOS. Enabling it causes
+            // many unresolved addresses on the stack when profiling with samply.
+            if mode == RunnerMode::Walltime && !cfg!(target_os = "macos") {
                 "1".into()
             } else {
                 "0".into()
@@ -47,10 +50,13 @@ pub fn get_base_injected_env(
     // - PreserveFramePointer: Preserves frame pointers for profiling.
     // - DumpPerfMapAtExit: Writes /tmp/perf-<pid>.map on JVM exit for symbol resolution.
     // - DebugNonSafepoints: Enables debug info for JIT-compiled non-safepoint code.
+    // - EnableDynamicAgentLoading: Suppresses warning when loading JVMTI agents at runtime.
+    // - jdk.attach.allowAttachSelf: Allows the JVM to attach a JVMTI agent to itself
+    //   (used by codspeed-jvm's perf-map agent for @Fork(0) benchmarks).
     if mode == RunnerMode::Walltime {
         env.insert(
             "JAVA_TOOL_OPTIONS".into(),
-            "-XX:+PreserveFramePointer -XX:+UnlockDiagnosticVMOptions -XX:+DumpPerfMapAtExit -XX:+DebugNonSafepoints".into(),
+            "-XX:+PreserveFramePointer -XX:+UnlockDiagnosticVMOptions -XX:+DebugNonSafepoints -XX:+EnableDynamicAgentLoading -Djdk.attach.allowAttachSelf=true".into(),
         );
     }
 

@@ -5,6 +5,265 @@
 
 
 
+## [4.18.1] - 2026-06-24
+
+### <!-- 0 -->🚀 Features
+- Bump go-runner to 1.2.1 by @adriencaccia
+
+### <!-- 3 -->📚 Documentation
+- Document go-runner hash table and test-driven hash workflow by @adriencaccia in [#421](https://github.com/CodSpeedHQ/runner/pull/421)
+
+
+## [4.18.0] - 2026-06-23
+
+### <!-- 0 -->🚀 Features
+- Bump valgrind-codspeed to 3.26.0-0codspeed4 by @adriencaccia
+- Bump samply by @GuillaumeLagrange in [#415](https://github.com/CodSpeedHQ/runner/pull/415)
+- Set env var to have node dump inlining information by @GuillaumeLagrange
+- Change isolation logic to include samply and non root fallback by @GuillaumeLagrange
+- Add experimental --cycle-estimation flag by @not-matthias in [#412](https://github.com/CodSpeedHQ/runner/pull/412)
+- Make samply-codspeed a submodule rather than git rev with cargo by @GuillaumeLagrange in [#416](https://github.com/CodSpeedHQ/runner/pull/416)
+
+### <!-- 1 -->🐛 Bug Fixes
+- Honor locally-installed valgrind on non-apt systems by @not-matthias in [#414](https://github.com/CodSpeedHQ/runner/pull/414)
+
+
+## [4.17.6] - 2026-06-18
+
+### <!-- 0 -->🚀 Features
+- Show memtrack capability status in setup status by @not-matthias
+- Run memtrack sudo-less via file capabilities by @not-matthias
+- Use extra events when using samply on linux by @GuillaumeLagrange in [#404](https://github.com/CodSpeedHQ/runner/pull/404)
+- Update `PerfEvent` to also support samply format by @GuillaumeLagrange
+- Use isolation for with samply by @GuillaumeLagrange
+- Make eh_frame_hdr optional in unwind data (V4) by @not-matthias
+
+### <!-- 1 -->🐛 Bug Fixes
+- Keep rolling buffer off during executor setup by @not-matthias in [#411](https://github.com/CodSpeedHQ/runner/pull/411)
+- Gate memory executor behind Linux target by @not-matthias
+- Enable tracking when running without IPC by @not-matthias
+- Tolerate RLIMIT_MEMLOCK EPERM on modern kernels by @not-matthias
+- Install libc6-dbg during valgrind setup by @not-matthias in [#394](https://github.com/CodSpeedHQ/runner/pull/394)
+- Skip rustup-wrapped proxy in trace-children by @not-matthias in [#405](https://github.com/CodSpeedHQ/runner/pull/405)
+- Retry streamed uploads on transient failures by @not-matthias in [#399](https://github.com/CodSpeedHQ/runner/pull/399)
+- Extract unwind data for binaries without eh_frame_hdr by @not-matthias
+
+### <!-- 10 -->💼 Other
+- Drop OpenSSL, move TLS stack to rustls (#406) by @art049 in [#406](https://github.com/CodSpeedHQ/runner/pull/406)
+
+### <!-- 2 -->🏗️ Refactor
+- Split executor privilege granting into grant_privileges by @not-matthias
+
+### <!-- 3 -->📚 Documentation
+- Add unwind data version changelog by @not-matthias in [#393](https://github.com/CodSpeedHQ/runner/pull/393)
+
+### <!-- 7 -->⚙️ Internals
+- Grant memtrack file capabilities before memory tests by @not-matthias in [#407](https://github.com/CodSpeedHQ/runner/pull/407)
+- Bump samply to support additional events by @GuillaumeLagrange
+- Add helper script to use local versions of samply and framehop easily by @GuillaumeLagrange
+
+
+## [4.17.5] - 2026-06-10
+
+### <!-- 0 -->🚀 Features
+- Add optional `mode` arg to target setup by @fargito in [#397](https://github.com/CodSpeedHQ/runner/pull/397)
+- Restore DYLD_INSERT_LIBRARIES from SAMPLY_ alias by @not-matthias
+- Restore DYLD_INSERT_LIBRARIES from SAMPLY_ alias by @not-matthias
+
+### <!-- 1 -->🐛 Bug Fixes
+- Use %p in log file path to avoid multi-process overwrite by @not-matthias in [#381](https://github.com/CodSpeedHQ/runner/pull/381)
+
+### <!-- 10 -->💼 Other
+- Enable set -u to match go.sh by @not-matthias in [#389](https://github.com/CodSpeedHQ/runner/pull/389)
+
+### <!-- 7 -->⚙️ Internals
+- Bump samply by @not-matthias
+- Bump samply to fix sigkill by @not-matthias in [#386](https://github.com/CodSpeedHQ/runner/pull/386)
+
+
+## [4.17.4] - 2026-06-05
+
+### <!-- 1 -->🐛 Bug Fixes
+- Purge inherited mappings on execve to fix unknown symbols (#392) by @GuillaumeLagrange in [#392](https://github.com/CodSpeedHQ/runner/pull/392)
+
+
+## [4.17.3] - 2026-06-04
+
+### <!-- 1 -->🐛 Bug Fixes
+- Compare codspeed iteration of installed valgrind by @not-matthias
+
+### <!-- 2 -->🏗️ Refactor
+- Parse codspeed iteration from version string by @not-matthias
+
+### <!-- 7 -->⚙️ Internals
+- Log detected valgrind version by @not-matthias in [#390](https://github.com/CodSpeedHQ/runner/pull/390)
+
+
+## [4.17.2] - 2026-06-04
+
+### <!-- 0 -->🚀 Features
+- Bump valgrind-codspeed to 3.26.0-0codspeed3 by @adriencaccia
+
+
+## [4.17.1] - 2026-05-29
+
+### <!-- 7 -->⚙️ Internals
+- Bump samply-codspeed to disable jit classification and add fp-anchoring to unwinding (#382) by @GuillaumeLagrange in [#382](https://github.com/CodSpeedHQ/runner/pull/382)
+
+
+## [4.17.0] - 2026-05-29
+
+### <!-- 0 -->🚀 Features
+- Configure samply symbol resolution env vars by @not-matthias
+- Add CODSPEED_WALLTIME_PROFILER override by @not-matthias
+- Make benchmark isolation profiler-driven by @not-matthias
+- Add profile-based auth configuration (#366) by @art049 in [#366](https://github.com/CodSpeedHQ/runner/pull/366)
+- Bump instrument-hooks to not use stubs on macos (#373) by @GuillaumeLagrange in [#373](https://github.com/CodSpeedHQ/runner/pull/373)
+- Pin codspeed-go-runner installer downloads with sha256 verification by @art049 in [#362](https://github.com/CodSpeedHQ/runner/pull/362)
+- Pin downloaded binaries with sha256 verification by @art049
+
+### <!-- 1 -->🐛 Bug Fixes
+- Use introspected env for memory executor by @GuillaumeLagrange
+- Misleading DCE advice in setup-harness (#350) by @SuperMuel in [#350](https://github.com/CodSpeedHQ/runner/pull/350)
+
+### <!-- 10 -->💼 Other
+- Select profiler via typed CLI arg by @GuillaumeLagrange in [#379](https://github.com/CodSpeedHQ/runner/pull/379)
+- Bump workspace dependencies (#370) by @art049 in [#370](https://github.com/CodSpeedHQ/runner/pull/370)
+
+### <!-- 6 -->🧪 Testing
+- Update valgrind snapshot tests by @adriencaccia
+
+### <!-- 7 -->⚙️ Internals
+- Add taplo config file by @GuillaumeLagrange in [#363](https://github.com/CodSpeedHQ/runner/pull/363)
+- Bump samply fork to use framehop-codspeed by @not-matthias
+- Add retry to sha256 tests to prevent transient failures by @GuillaumeLagrange in [#375](https://github.com/CodSpeedHQ/runner/pull/375)
+- Update setarch command arguments to use long options (#304) by @xtqqczze in [#304](https://github.com/CodSpeedHQ/runner/pull/304)
+
+
+## [4.16.2] - 2026-05-22
+
+### <!-- 0 -->🚀 Features
+- Search NixOS debug info path by @not-matthias in [#354](https://github.com/CodSpeedHQ/runner/pull/354)
+- Inherit process mapping on forks by @GuillaumeLagrange
+
+### <!-- 1 -->🐛 Bug Fixes
+- Flush rolling buffer when executor errors by @not-matthias in [#352](https://github.com/CodSpeedHQ/runner/pull/352)
+
+### <!-- 7 -->⚙️ Internals
+- Bump valgrind-codspeed to 3.26.0-0codspeed2 by @adriencaccia
+- Fix macOS rustup cache corruption in install-rust action by @GuillaumeLagrange in [#357](https://github.com/CodSpeedHQ/runner/pull/357)
+- Give each bpf-tests shard its own cache key by @not-matthias in [#358](https://github.com/CodSpeedHQ/runner/pull/358)
+- Shard bpf-tests by integration test binary by @not-matthias
+- Use rustup show instead of toolchain install by @GuillaumeLagrange in [#349](https://github.com/CodSpeedHQ/runner/pull/349)
+
+
+## [4.16.1] - 2026-05-13
+
+### <!-- 1 -->🐛 Bug Fixes
+- Use brew-installed bash for samply on macOS by @not-matthias in [#347](https://github.com/CodSpeedHQ/runner/pull/347)
+- Keep old name aliases to for deserialization purposes by @GuillaumeLagrange in [#345](https://github.com/CodSpeedHQ/runner/pull/345)
+- Handle malformed token from backend better by @GuillaumeLagrange
+
+### <!-- 7 -->⚙️ Internals
+- Move samply fork from AvalancheHQ to CodSpeedHQ by @not-matthias
+- Remove the cursor hiding by @GuillaumeLagrange
+
+
+## [4.16.0] - 2026-05-12
+
+### <!-- 0 -->🚀 Features
+- Bundle samply via library crate by @not-matthias
+- Add samply profiler for macOS by @not-matthias
+- Rename CODSPEED_PERF_ENABLED to CODSPEED_PROFILER_ENABLED by @not-matthias
+- Add Profiler trait abstraction by @not-matthias
+- Restore cursor on ctrl c by @GuillaumeLagrange in [#341](https://github.com/CodSpeedHQ/runner/pull/341)
+- Validate tokens and repository access up front by @GuillaumeLagrange
+
+### <!-- 1 -->🐛 Bug Fixes
+- Disable PYTHON_PERF_JIT_SUPPORT on macOS by @not-matthias
+- Use mach_absolute_time for FIFO timestamps on macOS by @not-matthias
+- Use O_RDWR to open FIFOs on all Unix platforms by @not-matthias
+
+### <!-- 10 -->💼 Other
+- Make api_client the single source of truth for the auth token by @GuillaumeLagrange
+- Bump gql_client to partial-data fork by @GuillaumeLagrange
+
+### <!-- 2 -->🏗️ Refactor
+- Centralize internal re-exec via InternalCommands::get_command_builder by @not-matthias in [#338](https://github.com/CodSpeedHQ/runner/pull/338)
+- Rename Benchmark FIFO commands/markers to Profiler/Round by @not-matthias
+- Rename Profiler::wrap to wrap_command by @not-matthias
+- Share Linux profiler sysctl setup by @not-matthias
+- Port PerfRunner to Profiler trait by @not-matthias
+- Rename PerfMetadata to WalltimeMetadata by @not-matthias
+- Move perf module under profiler/ by @not-matthias
+- Rename FifoCommand::PingPerf to PingProfiler by @not-matthias
+- Rename IntegrationMode::Perf to Walltime by @not-matthias
+
+### <!-- 7 -->⚙️ Internals
+- Disable profiler in macos-basic-run-test by @not-matthias
+- Upload the basic run to validate auth of integration test by @GuillaumeLagrange
+
+
+## [4.15.1] - 2026-05-06
+
+### <!-- 0 -->🚀 Features
+- Add a way to disable perf compression through env var by @GuillaumeLagrange in [#334](https://github.com/CodSpeedHQ/runner/pull/334)
+- Do not display the comparison nudge when not in an interactive terminal by @GuillaumeLagrange in [#300](https://github.com/CodSpeedHQ/runner/pull/300)
+- Display a warning when profiling generation failed by @GuillaumeLagrange
+- Detect and abort on ring buffer overflow by @not-matthias in [#321](https://github.com/CodSpeedHQ/runner/pull/321)
+- Grow ring buffer to 16 MiB by @not-matthias
+
+### <!-- 7 -->⚙️ Internals
+- Increase stack sampling for python by @GuillaumeLagrange in [#337](https://github.com/CodSpeedHQ/runner/pull/337)
+- Replace hard coded lint job for a dedicated check action by @GuillaumeLagrange in [#320](https://github.com/CodSpeedHQ/runner/pull/320)
+- Bump cpp-linter-hooks to support darwin by @GuillaumeLagrange
+- Swap pre-commit action for prek by @GuillaumeLagrange
+- Fix unused clippy errors in test targets on macos by @GuillaumeLagrange
+- Run pre-commit hooks on macos and ubuntu-latest by @GuillaumeLagrange
+
+
+## [4.15.0] - 2026-04-28
+
+### <!-- 0 -->🚀 Features
+- Revert logo changes by @GuillaumeLagrange
+- Display N/A rather than NaN/inf in the benchmarks results table by @GuillaumeLagrange in [#314](https://github.com/CodSpeedHQ/runner/pull/314)
+- Only wrap walltime command with sudo on linux by @GuillaumeLagrange
+- Add `--with-token` flag to read token from stdin by @fargito in [#313](https://github.com/CodSpeedHQ/runner/pull/313)
+- Warn when libc debug info is not found by @not-matthias in [#310](https://github.com/CodSpeedHQ/runner/pull/310)
+- Resolve debug info and symbols from separate debug files by @not-matthias in [#303](https://github.com/CodSpeedHQ/runner/pull/303)
+
+### <!-- 6 -->🧪 Testing
+- Add libc debuglink/build-id fixtures by @not-matthias
+- Add stripped binary and debug file test fixtures by @not-matthias
+
+### <!-- 7 -->⚙️ Internals
+- Bump exec-harness version by @adriencaccia
+- Add macos basic run test by @GuillaumeLagrange in [#319](https://github.com/CodSpeedHQ/runner/pull/319)
+- Remove DumpPerfMapAtExit in favor of custom dumper by @not-matthias in [#295](https://github.com/CodSpeedHQ/runner/pull/295)
+
+
+## [4.14.0] - 2026-04-17
+
+### <!-- 0 -->🚀 Features
+- Stop panicking when parsing invalid perf file by @GuillaumeLagrange in [#298](https://github.com/CodSpeedHQ/runner/pull/298)
+- Make the basic run only 5 rounds to make logs not crash the github page by @GuillaumeLagrange
+- Represent the host OS as a  SupportedOs enum with per-executor support gates by @GuillaumeLagrange
+- Bypass systemd-run usage on macos by @GuillaumeLagrange
+- Add aarch64-apple-darwin to the release targets by @GuillaumeLagrange
+- Collect cpu flags in system info by @GuillaumeLagrange in [#281](https://github.com/CodSpeedHQ/runner/pull/281)
+
+### <!-- 1 -->🐛 Bug Fixes
+- Fix instropected_go's behavior on macos by @GuillaumeLagrange
+- Update rust crate git2 to 0.20.4 (#284) by @xtqqczze in [#284](https://github.com/CodSpeedHQ/runner/pull/284)
+
+### <!-- 7 -->⚙️ Internals
+- Move the config schema check from pre-commit to ci-only check by @GuillaumeLagrange in [#287](https://github.com/CodSpeedHQ/runner/pull/287)
+- Skip tests that rely on linux behavior by @GuillaumeLagrange
+- Bump instrument-hooks submodule to include stubs improvement by @GuillaumeLagrange
+- Rerun exec harness build if instrument hooks sources change by @GuillaumeLagrange
+- Make update-bindings.sh PWD agnostic by @GuillaumeLagrange
+
+
 ## [4.13.0] - 2026-03-26
 
 ### <!-- 0 -->🚀 Features
@@ -1071,6 +1330,21 @@
 - Add linting components to the toolchain by @art049
 
 
+[4.18.1]: https://github.com/CodSpeedHQ/runner/compare/v4.18.0..v4.18.1
+[4.18.0]: https://github.com/CodSpeedHQ/runner/compare/v4.17.6..v4.18.0
+[4.17.6]: https://github.com/CodSpeedHQ/runner/compare/v4.17.5..v4.17.6
+[4.17.5]: https://github.com/CodSpeedHQ/runner/compare/v4.17.4..v4.17.5
+[4.17.4]: https://github.com/CodSpeedHQ/runner/compare/v4.17.3..v4.17.4
+[4.17.3]: https://github.com/CodSpeedHQ/runner/compare/v4.17.2..v4.17.3
+[4.17.2]: https://github.com/CodSpeedHQ/runner/compare/v4.17.1..v4.17.2
+[4.17.1]: https://github.com/CodSpeedHQ/runner/compare/v4.17.0..v4.17.1
+[4.17.0]: https://github.com/CodSpeedHQ/runner/compare/v4.16.2..v4.17.0
+[4.16.2]: https://github.com/CodSpeedHQ/runner/compare/v4.16.1..v4.16.2
+[4.16.1]: https://github.com/CodSpeedHQ/runner/compare/v4.16.0..v4.16.1
+[4.16.0]: https://github.com/CodSpeedHQ/runner/compare/v4.15.1..v4.16.0
+[4.15.1]: https://github.com/CodSpeedHQ/runner/compare/v4.15.0..v4.15.1
+[4.15.0]: https://github.com/CodSpeedHQ/runner/compare/v4.14.0..v4.15.0
+[4.14.0]: https://github.com/CodSpeedHQ/runner/compare/v4.13.0..v4.14.0
 [4.13.0]: https://github.com/CodSpeedHQ/runner/compare/v4.12.1..v4.13.0
 [4.12.1]: https://github.com/CodSpeedHQ/runner/compare/v4.12.0..v4.12.1
 [4.12.0]: https://github.com/CodSpeedHQ/runner/compare/v4.11.1..v4.12.0

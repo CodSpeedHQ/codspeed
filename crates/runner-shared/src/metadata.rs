@@ -12,7 +12,7 @@ use crate::module_symbols::MappedProcessModuleSymbols;
 use crate::unwind_data::MappedProcessUnwindData;
 
 #[derive(Serialize, Deserialize, Default)]
-pub struct PerfMetadata {
+pub struct WalltimeMetadata {
     /// The version of this metadata format.
     pub version: u64,
 
@@ -71,13 +71,13 @@ pub struct PerfMetadata {
     pub debug_info_by_pid: HashMap<pid_t, Vec<ModuleDebugInfo>>,
 }
 
-impl PerfMetadata {
+impl WalltimeMetadata {
     pub fn from_reader<R: std::io::Read>(reader: R) -> anyhow::Result<Self> {
-        serde_json::from_reader(reader).context("Could not parse perf metadata from JSON")
+        serde_json::from_reader(reader).context("Could not parse walltime metadata from JSON")
     }
 
     pub fn save_to<P: AsRef<Path>>(&self, path: P) -> anyhow::Result<()> {
-        let file = std::fs::File::create(path.as_ref().join("perf.metadata"))?;
+        let file = std::fs::File::create(path.as_ref().join("walltime.metadata"))?;
         const BUFFER_SIZE: usize = 256 * 1024 /* 256 KB */;
 
         let writer = BufWriter::with_capacity(BUFFER_SIZE, file);

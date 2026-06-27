@@ -32,7 +32,6 @@ pub enum Icon {
     BoxTLeft,
 
     // Miscellaneous
-    Separator,
     Ellipsis,
 }
 
@@ -70,7 +69,6 @@ impl fmt::Display for Icon {
             Icon::BoxTDown => "\u{252c}",         // ┬
             Icon::BoxTRight => "\u{251c}",        // ├
             Icon::BoxTLeft => "\u{2524}",         // ┤
-            Icon::Separator => "\u{2500}",        // ─
             Icon::Ellipsis => "\u{2026}",         // …
         };
         f.write_str(ch)

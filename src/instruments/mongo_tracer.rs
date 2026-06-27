@@ -11,8 +11,9 @@ use reqwest::Client;
 use tokio::fs;
 use url::Url;
 
-use crate::{MONGODB_TRACER_VERSION, cli::run::helpers::get_env_variable};
-use crate::{cli::run::helpers::download_file, prelude::*};
+use crate::binary_pins::PinnedBinary;
+use crate::cli::run::helpers::{download_pinned_file, get_env_variable};
+use crate::prelude::*;
 
 use super::MongoDBConfig;
 
@@ -227,16 +228,8 @@ impl MongoTracer {
 
 pub async fn install_mongodb_tracer() -> Result<()> {
     debug!("Installing mongodb-tracer");
-    // TODO: release the tracer and update this url
-    let installer_url = format!(
-        "https://codspeed-public-assets.s3.eu-west-1.amazonaws.com/mongo-tracer/{MONGODB_TRACER_VERSION}/cs-mongo-tracer-installer.sh"
-    );
     let installer_path = env::temp_dir().join("cs-mongo-tracer-installer.sh");
-    download_file(
-        &Url::parse(installer_url.as_str()).unwrap(),
-        &installer_path,
-    )
-    .await?;
+    download_pinned_file(PinnedBinary::MongoTracerInstaller, &installer_path).await?;
 
     let output = Command::new("bash")
         .arg(installer_path.to_str().unwrap())

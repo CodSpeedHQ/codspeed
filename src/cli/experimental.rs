@@ -16,6 +16,15 @@ pub struct ExperimentalArgs {
         env = "CODSPEED_EXPERIMENTAL_FAIR_SCHED"
     )]
     pub experimental_fair_sched: bool,
+
+    /// Enable Valgrind cycle estimation (--cycle-estimation) in simulation mode.
+    #[arg(
+        long,
+        default_value_t = false,
+        help_heading = "Experimental",
+        env = "CODSPEED_CYCLE_ESTIMATION"
+    )]
+    pub cycle_estimation: bool,
 }
 
 impl ExperimentalArgs {
@@ -24,6 +33,9 @@ impl ExperimentalArgs {
         let mut flags = Vec::new();
         if self.experimental_fair_sched {
             flags.push("--experimental-fair-sched");
+        }
+        if self.cycle_estimation {
+            flags.push("--cycle-estimation");
         }
         flags
     }

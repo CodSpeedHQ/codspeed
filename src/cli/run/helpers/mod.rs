@@ -5,7 +5,7 @@ mod format_memory;
 mod get_env_var;
 mod parse_git_remote;
 
-pub(crate) use download_file::download_file;
+pub(crate) use download_file::download_pinned_file;
 pub(crate) use find_repository_root::find_repository_root;
 pub(crate) use format_duration::format_duration;
 pub(crate) use format_memory::format_memory;

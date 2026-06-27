@@ -4,7 +4,7 @@ expression: upload_metadata
 ---
 {
   "repositoryProvider": "PROJECT",
-  "version": 9,
+  "version": 10,
   "tokenless": false,
   "profileMd5": "tfC4VxYiYdJcTWpHpv4Ouw==",
   "profileEncoding": "gzip",
@@ -22,7 +22,13 @@ expression: upload_metadata
     "cpuName": "cpu0",
     "cpuVendorId": "GenuineIntel",
     "cpuCores": 6,
-    "totalMemoryGb": 16
+    "totalMemoryGb": 16,
+    "cpuFlags": [
+      "sse2",
+      "avx",
+      "avx2",
+      "erms"
+    ]
   },
   "runEnvironment": "LOCAL",
   "runPart": {

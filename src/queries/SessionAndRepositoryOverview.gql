@@ -1,0 +1,26 @@
+query SessionAndRepositoryOverview(
+  $owner: String!
+  $name: String!
+  $provider: RepositoryProvider
+) {
+  session {
+    user {
+      login
+      provider
+    }
+  }
+  repositoryOverview(owner: $owner, name: $name, provider: $provider) {
+    ... on Repository {
+      owner
+      name
+      provider
+      hasWriteAccess
+    }
+    ... on AvailableRepository {
+      owner
+      name
+      provider
+      hasWriteAccess
+    }
+  }
+}

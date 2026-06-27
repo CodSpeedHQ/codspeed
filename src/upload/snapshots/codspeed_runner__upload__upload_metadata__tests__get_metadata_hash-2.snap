@@ -4,7 +4,7 @@ expression: upload_metadata
 ---
 {
   "repositoryProvider": "GITHUB",
-  "version": 9,
+  "version": 10,
   "tokenless": true,
   "profileMd5": "jp/k05RKuqP3ERQuIIvx4Q==",
   "profileEncoding": "gzip",
@@ -24,7 +24,13 @@ expression: upload_metadata
     "cpuName": "cpu0",
     "cpuVendorId": "GenuineIntel",
     "cpuCores": 2,
-    "totalMemoryGb": 8
+    "totalMemoryGb": 8,
+    "cpuFlags": [
+      "sse2",
+      "avx",
+      "avx2",
+      "erms"
+    ]
   },
   "runEnvironment": "GITHUB_ACTIONS",
   "runPart": {
