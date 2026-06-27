@@ -41,6 +41,7 @@ gql_client = { git = "https://github.com/CodSpeedHQ/gql-client-rs", rev = "c2691
 serde_yaml = "0.9.34"
 sysinfo = { version = "0.37", features = ["serde"] }
 indicatif = "0.18"
+indexmap = "2.14"
 console = "0.16"
 async-trait = "0.1.89"
 libc = { workspace = true }
