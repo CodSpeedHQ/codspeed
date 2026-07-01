@@ -91,7 +91,7 @@ impl Profiler for PerfProfiler {
         mut cmd_builder: CommandBuilder,
         config: &ExecutorConfig,
         profile_folder: &Path,
-        isolate: bool,
+        requires_sudo: bool,
     ) -> anyhow::Result<CommandBuilder> {
         let perf_fifo = PerfFifo::new()?;
         let perf_file_path = profile_folder.join(PERF_PIPEDATA_FILE_NAME);
@@ -183,10 +183,9 @@ impl Profiler for PerfProfiler {
         self.perf_fifo = Some(perf_fifo);
         self.perf_file_path = Some(perf_file_path);
 
-        // Isolated runs reparent the benchmark out of perf's subtree, so perf
-        // must record system-wide under sudo. Unisolated runs record perf's own
-        // descendant tree unprivileged.
-        let wrapped_builder = if isolate {
+        // When the benchmark was reparented out of perf's subtree, perf needs
+        // sudo to observe it; otherwise it records its own descendants unprivileged.
+        let wrapped_builder = if requires_sudo {
             wrap_with_sudo(wrapped_builder)?
         } else {
             wrapped_builder
