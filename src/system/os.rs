@@ -29,11 +29,19 @@ impl SupportedOs {
         match os {
             "linux" => {
                 let os_id = System::distribution_id();
-                let os_version = linux_os_version()?;
+                let os_version = System::os_version()
+                    .or_else(|| {
+                        OsRelease::read().and_then(|release| release.version().map(str::to_owned))
+                    })
+                    .ok_or(anyhow!(
+                        "Failed to get Linux OS version from sysinfo or os-release"
+                    ))?;
+
                 Ok(Self::Linux(LinuxDistribution::from_id(&os_id, &os_version)))
             }
             "macos" => {
                 let os_version = System::os_version().ok_or(anyhow!("Failed to get OS version"))?;
+
                 Ok(Self::Macos {
                     version: os_version,
                 })
@@ -58,60 +66,69 @@ impl SupportedOs {
     }
 }
 
-fn linux_os_version() -> Result<String> {
-    System::os_version()
-        .or_else(read_linux_os_release_version)
-        .ok_or(anyhow!(
-            "Failed to get Linux OS version from sysinfo or os-release"
-        ))
+#[derive(Debug, Eq, PartialEq)]
+struct OsRelease {
+    version_id: Option<String>,
+    build_id: Option<String>,
 }
 
-fn read_linux_os_release_version() -> Option<String> {
-    ["/etc/os-release", "/usr/lib/os-release"]
-        .into_iter()
-        .find_map(|path| {
-            fs::read_to_string(path)
-                .ok()
-                .and_then(|contents| parse_os_release_version(&contents))
-        })
-}
-
-fn parse_os_release_version(contents: &str) -> Option<String> {
-    os_release_value(contents, "VERSION_ID").or_else(|| os_release_value(contents, "BUILD_ID"))
-}
-
-fn os_release_value(contents: &str, key: &str) -> Option<String> {
-    contents.lines().find_map(|line| {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            return None;
-        }
-
-        let (candidate, value) = line.split_once('=')?;
-        if candidate.trim() != key {
-            return None;
-        }
-
-        Some(unquote_os_release_value(value.trim()).to_string())
-    })
-}
-
-fn unquote_os_release_value(value: &str) -> &str {
-    if let Some(value) = value
-        .strip_prefix('"')
-        .and_then(|value| value.strip_suffix('"'))
-    {
-        return value;
+impl OsRelease {
+    fn read() -> Option<Self> {
+        ["/etc/os-release", "/usr/lib/os-release"]
+            .into_iter()
+            .filter_map(|path| fs::read_to_string(path).ok())
+            .map(|contents| Self::parse(&contents))
+            .find(|release| release.version().is_some())
     }
 
-    if let Some(value) = value
-        .strip_prefix('\'')
-        .and_then(|value| value.strip_suffix('\''))
-    {
-        return value;
+    fn parse(contents: &str) -> Self {
+        let mut release = Self {
+            version_id: None,
+            build_id: None,
+        };
+
+        for line in contents.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+
+            let Some((key, value)) = line.split_once('=') else {
+                continue;
+            };
+            let value = Self::unquote_value(value.trim()).to_string();
+
+            match key.trim() {
+                "VERSION_ID" => release.version_id = Some(value),
+                "BUILD_ID" => release.build_id = Some(value),
+                _ => {}
+            }
+        }
+
+        release
     }
 
-    value
+    fn version(&self) -> Option<&str> {
+        self.version_id.as_deref().or(self.build_id.as_deref())
+    }
+
+    fn unquote_value(value: &str) -> &str {
+        if let Some(value) = value
+            .strip_prefix('"')
+            .and_then(|value| value.strip_suffix('"'))
+        {
+            return value;
+        }
+
+        if let Some(value) = value
+            .strip_prefix('\'')
+            .and_then(|value| value.strip_suffix('\''))
+        {
+            return value;
+        }
+
+        value
+    }
 }
 
 impl Display for SupportedOs {
@@ -202,44 +219,53 @@ mod tests {
     }
 
     #[test]
-    fn parse_os_release_version_prefers_version_id() {
+    fn os_release_version_prefers_version_id() {
         let contents = r#"
             ID=ubuntu
             VERSION_ID="24.04"
             BUILD_ID=rolling
         "#;
+        let release = OsRelease::parse(contents);
 
-        assert_eq!(parse_os_release_version(contents).as_deref(), Some("24.04"));
+        assert_eq!(release.version(), Some("24.04"));
     }
 
     #[test]
-    fn parse_os_release_version_falls_back_to_build_id() {
+    fn os_release_version_falls_back_to_build_id() {
         let contents = r#"
             NAME="Arch Linux"
             ID=arch
             BUILD_ID=rolling
         "#;
+        let release = OsRelease::parse(contents);
 
-        assert_eq!(
-            parse_os_release_version(contents).as_deref(),
-            Some("rolling")
-        );
+        assert_eq!(release.version(), Some("rolling"));
     }
 
     #[test]
-    fn parse_os_release_version_handles_single_quoted_values() {
+    fn os_release_parse_handles_single_quoted_values() {
         let contents = "ID=example\nVERSION_ID='1.2'\n";
+        let release = OsRelease::parse(contents);
 
-        assert_eq!(parse_os_release_version(contents).as_deref(), Some("1.2"));
+        assert_eq!(release.version(), Some("1.2"));
     }
 
     #[test]
-    fn parse_os_release_version_returns_none_without_version_fields() {
+    fn os_release_parse_allows_whitespace_around_key() {
+        let contents = "VERSION_ID = \"24.04\"\n";
+        let release = OsRelease::parse(contents);
+
+        assert_eq!(release.version(), Some("24.04"));
+    }
+
+    #[test]
+    fn os_release_version_returns_none_without_version_fields() {
         let contents = r#"
             NAME="Unknown Linux"
             ID=unknown
         "#;
+        let release = OsRelease::parse(contents);
 
-        assert_eq!(parse_os_release_version(contents), None);
+        assert_eq!(release.version(), None);
     }
 }
