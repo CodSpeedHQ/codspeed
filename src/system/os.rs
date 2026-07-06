@@ -33,9 +33,9 @@ impl SupportedOs {
                     .or_else(|| {
                         OsRelease::read().and_then(|release| release.version().map(str::to_owned))
                     })
-                    .ok_or(anyhow!(
-                        "Failed to get Linux OS version from sysinfo or os-release"
-                    ))?;
+                    .ok_or_else(|| {
+                        anyhow!("Failed to get Linux OS version from sysinfo or os-release")
+                    })?;
 
                 Ok(Self::Linux(LinuxDistribution::from_id(&os_id, &os_version)))
             }
