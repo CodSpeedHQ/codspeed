@@ -66,7 +66,6 @@ impl SupportedOs {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
 struct OsRelease {
     version_id: Option<String>,
     build_id: Option<String>,
@@ -96,7 +95,17 @@ impl OsRelease {
             let Some((key, value)) = line.split_once('=') else {
                 continue;
             };
-            let value = Self::unquote_value(value.trim()).to_string();
+            let value = value.trim();
+            let value = value
+                .strip_prefix('"')
+                .and_then(|value| value.strip_suffix('"'))
+                .or_else(|| {
+                    value
+                        .strip_prefix('\'')
+                        .and_then(|value| value.strip_suffix('\''))
+                })
+                .unwrap_or(value)
+                .to_string();
 
             match key.trim() {
                 "VERSION_ID" => release.version_id = Some(value),
@@ -110,24 +119,6 @@ impl OsRelease {
 
     fn version(&self) -> Option<&str> {
         self.version_id.as_deref().or(self.build_id.as_deref())
-    }
-
-    fn unquote_value(value: &str) -> &str {
-        if let Some(value) = value
-            .strip_prefix('"')
-            .and_then(|value| value.strip_suffix('"'))
-        {
-            return value;
-        }
-
-        if let Some(value) = value
-            .strip_prefix('\'')
-            .and_then(|value| value.strip_suffix('\''))
-        {
-            return value;
-        }
-
-        value
     }
 }
 
