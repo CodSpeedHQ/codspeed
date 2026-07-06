@@ -1,4 +1,7 @@
-use std::fmt::{self, Display};
+use std::{
+    fmt::{self, Display},
+    fs,
+};
 
 use serde::{Deserialize, Serialize};
 use sysinfo::System;
@@ -20,17 +23,21 @@ impl SupportedOs {
     /// Expects `std::env::consts::OS` as input
     ///
     /// For Linux, the distribution is identified via `sysinfo::System::distribution_id()`.
-    /// The OS version is read from `sysinfo::System::os_version()`.
+    /// The OS version is read from `sysinfo::System::os_version()`, falling back to
+    /// `VERSION_ID` or `BUILD_ID` from os-release.
     pub fn from_os(os: &str) -> Result<Self> {
-        let os_version = System::os_version().ok_or(anyhow!("Failed to get OS version"))?;
         match os {
             "linux" => {
                 let os_id = System::distribution_id();
+                let os_version = linux_os_version()?;
                 Ok(Self::Linux(LinuxDistribution::from_id(&os_id, &os_version)))
             }
-            "macos" => Ok(Self::Macos {
-                version: os_version,
-            }),
+            "macos" => {
+                let os_version = System::os_version().ok_or(anyhow!("Failed to get OS version"))?;
+                Ok(Self::Macos {
+                    version: os_version,
+                })
+            }
             unsupported => bail!("Unsupported operating system: {unsupported}"),
         }
     }
@@ -49,6 +56,62 @@ impl SupportedOs {
             Self::Macos { version } => version,
         }
     }
+}
+
+fn linux_os_version() -> Result<String> {
+    System::os_version()
+        .or_else(read_linux_os_release_version)
+        .ok_or(anyhow!(
+            "Failed to get Linux OS version from sysinfo or os-release"
+        ))
+}
+
+fn read_linux_os_release_version() -> Option<String> {
+    ["/etc/os-release", "/usr/lib/os-release"]
+        .into_iter()
+        .find_map(|path| {
+            fs::read_to_string(path)
+                .ok()
+                .and_then(|contents| parse_os_release_version(&contents))
+        })
+}
+
+fn parse_os_release_version(contents: &str) -> Option<String> {
+    os_release_value(contents, "VERSION_ID").or_else(|| os_release_value(contents, "BUILD_ID"))
+}
+
+fn os_release_value(contents: &str, key: &str) -> Option<String> {
+    contents.lines().find_map(|line| {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            return None;
+        }
+
+        let (candidate, value) = line.split_once('=')?;
+        if candidate.trim() != key {
+            return None;
+        }
+
+        Some(unquote_os_release_value(value.trim()).to_string())
+    })
+}
+
+fn unquote_os_release_value(value: &str) -> &str {
+    if let Some(value) = value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+    {
+        return value;
+    }
+
+    if let Some(value) = value
+        .strip_prefix('\'')
+        .and_then(|value| value.strip_suffix('\''))
+    {
+        return value;
+    }
+
+    value
 }
 
 impl Display for SupportedOs {
@@ -136,5 +199,47 @@ mod tests {
     fn from_os_bails_on_unsupported() {
         let err = SupportedOs::from_os("windows").unwrap_err();
         assert_eq!(err.to_string(), "Unsupported operating system: windows");
+    }
+
+    #[test]
+    fn parse_os_release_version_prefers_version_id() {
+        let contents = r#"
+            ID=ubuntu
+            VERSION_ID="24.04"
+            BUILD_ID=rolling
+        "#;
+
+        assert_eq!(parse_os_release_version(contents).as_deref(), Some("24.04"));
+    }
+
+    #[test]
+    fn parse_os_release_version_falls_back_to_build_id() {
+        let contents = r#"
+            NAME="Arch Linux"
+            ID=arch
+            BUILD_ID=rolling
+        "#;
+
+        assert_eq!(
+            parse_os_release_version(contents).as_deref(),
+            Some("rolling")
+        );
+    }
+
+    #[test]
+    fn parse_os_release_version_handles_single_quoted_values() {
+        let contents = "ID=example\nVERSION_ID='1.2'\n";
+
+        assert_eq!(parse_os_release_version(contents).as_deref(), Some("1.2"));
+    }
+
+    #[test]
+    fn parse_os_release_version_returns_none_without_version_fields() {
+        let contents = r#"
+            NAME="Unknown Linux"
+            ID=unknown
+        "#;
+
+        assert_eq!(parse_os_release_version(contents), None);
     }
 }
