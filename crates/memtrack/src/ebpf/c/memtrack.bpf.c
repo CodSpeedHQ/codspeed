@@ -92,6 +92,11 @@ int tracepoint_sched_fork(struct trace_event_raw_sched_process_fork* ctx) {
     return 0;
 }
 
+/* Included as source, not a header: build.rs compiles this file as one
+ * translation unit into a single skeleton. Must follow is_tracked() and the
+ * BPF_*_MAP macros it uses. */
+#include "attach.bpf.h"
+
 /* == Helper functions for the allocation tracking == */
 
 /* Wake the consumer only once this much unconsumed data has accumulated.
@@ -111,9 +116,9 @@ static __always_inline int is_enabled(void) {
     __u32 key = 0;
     __u8* enabled = bpf_map_lookup_elem(&tracking_enabled, &key);
 
-    /* Default to enabled if map not initialized */
+    /* ARRAY-map lookups can't fail for a valid index; fail closed if one ever does. */
     if (!enabled) {
-        return 1;
+        return 0;
     }
 
     return *enabled;

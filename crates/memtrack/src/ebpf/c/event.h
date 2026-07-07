@@ -48,4 +48,11 @@ struct event {
     } data;
 };
 
+/* Request from the exec-mapping watcher to the userspace attach worker */
+struct attach_request {
+    uint32_t pid;
+    uint64_t dev; /* kernel s_dev encoding: (major << 20) | minor */
+    uint64_t ino;
+};
+
 #endif /* __EVENT_H__ */
