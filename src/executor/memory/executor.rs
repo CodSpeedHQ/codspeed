@@ -6,7 +6,7 @@ use crate::executor::helpers::command::CommandBuilder;
 use crate::executor::helpers::env::{build_path_env, get_base_injected_env};
 use crate::executor::helpers::get_bench_command::get_bench_command;
 use crate::executor::helpers::run_command_with_log_pipe::run_command_with_log_pipe_and_callback;
-use crate::executor::helpers::run_with_env::wrap_with_env;
+use crate::executor::helpers::run_with_env::prefix_command_with_env;
 use crate::executor::helpers::run_with_sudo::is_root_user;
 use crate::executor::shared::fifo::RunnerFifo;
 use crate::executor::{ExecutionContext, Executor};
@@ -53,6 +53,14 @@ impl MemoryExecutor {
         // Setup memtrack IPC server
         let (ipc_server, server_name) = ipc::IpcOneShotServer::new()?;
 
+        // memtrack runs its command argument through `bash -c`, so the environment
+        // must be sourced there rather than around memtrack itself: memtrack holds
+        // file capabilities and runs in glibc secure-execution mode, which strips
+        // LD_* variables. Sourcing inside the benchmark shell restores them below
+        // that boundary.
+        let bench_command = get_bench_command(&execution_context.config)?;
+        let (bench_command, env_file) = prefix_command_with_env(&bench_command, &extra_env)?;
+
         // Build the memtrack command
         let mut cmd_builder = CommandBuilder::new(MEMTRACK_COMMAND);
         cmd_builder.arg("track");
@@ -60,15 +68,13 @@ impl MemoryExecutor {
         cmd_builder.arg(execution_context.profile_folder.join("results"));
         cmd_builder.arg("--ipc-server");
         cmd_builder.arg(server_name);
-        cmd_builder.arg(get_bench_command(&execution_context.config)?);
+        cmd_builder.arg(bench_command);
 
         // Set working directory if specified
         if let Some(cwd) = &execution_context.config.working_directory {
             let abs_cwd = canonicalize(cwd)?;
             cmd_builder.current_dir(abs_cwd);
         }
-
-        let (cmd_builder, env_file) = wrap_with_env(cmd_builder, &extra_env)?;
 
         Ok((ipc_server, cmd_builder, env_file))
     }

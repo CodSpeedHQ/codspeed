@@ -476,4 +476,39 @@ fi
         })
         .await;
     }
+
+    // codspeed-memtrack holds file capabilities, so a non-root user executing it
+    // enters glibc secure-execution mode (AT_SECURE=1), which strips LD_* variables
+    // from the environment before main(). Forwarding the environment *around*
+    // memtrack instead of *into* the benchmark it spawns therefore loses
+    // LD_LIBRARY_PATH, and the benchmark loads the wrong shared libraries (e.g. neqo
+    // picking up system NSS over a locally built newer one, panicking with
+    // UnsupportedVersion). PATH survives this because it is not an LD_* variable.
+    #[test_log::test(tokio::test)]
+    async fn test_memory_executor_forwards_ld_library_path() {
+        let custom_lib = "/custom/test/lib";
+        let current = std::env::var("LD_LIBRARY_PATH").unwrap_or_default();
+        let modified = match current.is_empty() {
+            true => custom_lib.to_string(),
+            false => format!("{custom_lib}:{current}"),
+        };
+
+        let cmd = format!(
+            r#"
+if ! echo "$LD_LIBRARY_PATH" | grep -q "{custom_lib}"; then
+  echo "FAIL: LD_LIBRARY_PATH does not contain {custom_lib}"
+  echo "Got LD_LIBRARY_PATH: $LD_LIBRARY_PATH"
+  exit 1
+fi
+"#
+        );
+        let config = memory_config(&cmd);
+        let (execution_context, _temp_dir) = create_test_setup(config).await;
+        let (_permit, _lock, mut executor) = get_memory_executor().await;
+
+        temp_env::async_with_vars(&[("LD_LIBRARY_PATH", Some(&modified))], async {
+            executor.run(&execution_context, &None).await.unwrap();
+        })
+        .await;
+    }
 }
