@@ -1,0 +1,26 @@
+---
+source: crates/memtrack/tests/flavor_equivalence_tests.rs
+expression: perf
+---
+{
+    "AlignedAlloc": (
+        1,
+        2048,
+    ),
+    "Calloc": (
+        1,
+        4096,
+    ),
+    "Free": (
+        5,
+        0,
+    ),
+    "Malloc": (
+        3,
+        5453,
+    ),
+    "Realloc": (
+        1,
+        8192,
+    ),
+}

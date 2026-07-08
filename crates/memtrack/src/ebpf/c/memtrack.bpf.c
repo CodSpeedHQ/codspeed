@@ -12,6 +12,19 @@
 
 char LICENSE[] SEC("license") = "GPL";
 
+/* Attach mechanism, selected at build time. With a delegated BPF token
+ * (MEMTRACK_BPF_LINKS) the uprobes attach as uprobe_multi links and the fork
+ * hook as tp_btf, both authorized through bpf(). Without it they use the classic
+ * perf-based uprobe/tracepoint paths, which work on kernels predating
+ * uprobe_multi (< 6.6) but cannot be delegated into the sandbox. */
+#ifdef MEMTRACK_BPF_LINKS
+#define UPROBE_SEC "uprobe.multi"
+#define URETPROBE_SEC "uretprobe.multi"
+#else
+#define UPROBE_SEC "uprobe"
+#define URETPROBE_SEC "uretprobe"
+#endif
+
 /* Macros for common map definitions */
 #define BPF_HASH_MAP(name, key_type, value_type, max_ents) \
     struct {                                               \
@@ -34,6 +47,50 @@ char LICENSE[] SEC("license") = "GPL";
         __uint(type, BPF_MAP_TYPE_RINGBUF); \
         __uint(max_entries, size);          \
     } name SEC(".maps")
+
+/* PID namespace the userspace tracker resolves PIDs in. When set (ino != 0),
+ * PIDs are read relative to this namespace so tracking works when the tracker
+ * runs inside a PID namespace (e.g. the macro-agent sandbox) while eBPF sees
+ * global PIDs. Zero means "use global PIDs" — the default outside a sandbox. */
+const volatile __u64 target_pidns_dev = 0;
+const volatile __u64 target_pidns_ino = 0;
+
+/* Current task's PID in the configured namespace (or global when unset). */
+static __always_inline __u32 current_pid(void) {
+    if (target_pidns_ino == 0) {
+        return bpf_get_current_pid_tgid() >> 32;
+    }
+    struct bpf_pidns_info nsinfo = {};
+    if (bpf_get_ns_current_pid_tgid(target_pidns_dev, target_pidns_ino, &nsinfo, sizeof(nsinfo)) !=
+        0) {
+        return 0;
+    }
+    return nsinfo.tgid;
+}
+
+/* A task's PID as seen in the configured namespace (or global when unset).
+ * Walks the task's pid struct: numbers[level].nr holds the PID at that namespace
+ * depth, and numbers[level].ns identifies which namespace it is. */
+static __always_inline __u32 task_ns_pid(struct task_struct* task) {
+    if (target_pidns_ino == 0) {
+        return BPF_CORE_READ(task, pid);
+    }
+    struct pid* thread_pid = BPF_CORE_READ(task, thread_pid);
+    if (!thread_pid) {
+        return 0;
+    }
+    unsigned int level = BPF_CORE_READ(thread_pid, level);
+    /* Bound the level to satisfy the verifier and match the pid array. */
+    if (level >= 4) {
+        return 0;
+    }
+    struct upid* up = &thread_pid->numbers[level];
+    __u64 ino = BPF_CORE_READ(up, ns, ns.inum);
+    if (ino != target_pidns_ino) {
+        return 0;
+    }
+    return BPF_CORE_READ(up, nr);
+}
 
 /* Map to store PIDs we're tracking */
 BPF_HASH_MAP(tracked_pids, __u32, __u8, 10000);
@@ -71,26 +128,37 @@ static __always_inline int is_tracked(__u32 pid) {
     return 0;
 }
 
-SEC("tracepoint/sched/sched_process_fork")
-int tracepoint_sched_fork(struct trace_event_raw_sched_process_fork* ctx) {
-    __u32 parent_pid = ctx->parent_pid;
-    __u32 child_pid = ctx->child_pid;
-
-    /* Print process fork with PIDs */
-    // bpf_printk("sched_fork: parent_pid=%u child_pid=%u", parent_pid, child_pid);
-
-    /* Check if parent is being tracked */
+/* Record a parent→child fork so the child inherits the parent's tracked state. */
+static __always_inline void follow_fork(__u32 parent_pid, __u32 child_pid) {
+    if (parent_pid == 0 || child_pid == 0) {
+        return;
+    }
     if (is_tracked(parent_pid)) {
-        /* Auto-track this child */
         __u8 marker = 1;
         bpf_map_update_elem(&tracked_pids, &child_pid, &marker, BPF_ANY);
         bpf_map_update_elem(&pids_ppid, &child_pid, &parent_pid, BPF_ANY);
-
-        // bpf_printk("auto-tracking child process: child_pid=%u", child_pid);
     }
+}
 
+#ifdef MEMTRACK_BPF_LINKS
+/* tp_btf attaches via bpf(), so a delegated BPF token can authorize it inside
+ * the sandbox. Reads task_struct pointers, resolving PIDs in the tracker's
+ * namespace. */
+SEC("tp_btf/sched_process_fork")
+int BPF_PROG(tracepoint_sched_fork, struct task_struct* parent, struct task_struct* child) {
+    follow_fork(task_ns_pid(parent), task_ns_pid(child));
     return 0;
 }
+#else
+/* Classic perf tracepoint for kernels without (or runs without) a BPF token.
+ * The raw tracepoint context carries global PIDs directly; without a token we
+ * never run in a PID namespace, so global PIDs are correct. */
+SEC("tracepoint/sched/sched_process_fork")
+int tracepoint_sched_fork(struct trace_event_raw_sched_process_fork* ctx) {
+    follow_fork(ctx->parent_pid, ctx->child_pid);
+    return 0;
+}
+#endif
 
 /* == Helper functions for the allocation tracking == */
 
@@ -110,9 +178,10 @@ static __always_inline int is_enabled(void) {
 /* Helper to store parameter value in map for tracking between entry and return
  */
 static __always_inline int store_param(void* map, __u64 value) {
+    /* Key by the global tid (stable, unique per thread across the entry/exit
+     * pair); gate on the namespace-relative PID that the tracker registered. */
     __u64 tid = bpf_get_current_pid_tgid();
-    __u32 pid = tid >> 32;
-    if (is_tracked(pid)) {
+    if (is_tracked(current_pid())) {
         bpf_map_update_elem(map, &tid, &value, BPF_ANY);
     }
     return 0;
@@ -134,7 +203,7 @@ static __always_inline __u64* take_param(void* map) {
 #define SUBMIT_EVENT(evt_type, fill_data)                               \
     {                                                                   \
         __u64 tid = bpf_get_current_pid_tgid();                         \
-        __u32 pid = tid >> 32;                                          \
+        __u32 pid = current_pid();                                      \
                                                                         \
         if (!is_tracked(pid) || !is_enabled()) {                        \
             return 0;                                                   \
@@ -210,9 +279,9 @@ static __always_inline int submit_mmap_event(__u64 addr, __u64 size, __u8 event_
 /* Macro to generate uprobe/uretprobe pairs for allocation functions with 1 argument */
 #define UPROBE_ARG_RET(name, arg_expr, submit_block)                                      \
     BPF_HASH_MAP(name##_arg, __u64, __u64, 10000);                                        \
-    SEC("uprobe")                                                                         \
+    SEC(UPROBE_SEC)                                                                       \
     int uprobe_##name(struct pt_regs* ctx) { return store_param(&name##_arg, arg_expr); } \
-    SEC("uretprobe")                                                                      \
+    SEC(URETPROBE_SEC)                                                                    \
     int uretprobe_##name(struct pt_regs* ctx) {                                           \
         __u64* arg_ptr = take_param(&name##_arg);                                         \
         if (!arg_ptr) {                                                                   \
@@ -228,7 +297,7 @@ static __always_inline int submit_mmap_event(__u64 addr, __u64 size, __u8 event_
 
 /* Macro for simple return value only functions like free */
 #define UPROBE_RET(name, arg_expr, submit_block) \
-    SEC("uprobe")                                \
+    SEC(UPROBE_SEC)                              \
     int uprobe_##name(struct pt_regs* ctx) {     \
         __u64 arg0 = arg_expr;                   \
         if (arg0 == 0) {                         \
@@ -244,7 +313,7 @@ static __always_inline int submit_mmap_event(__u64 addr, __u64 size, __u8 event_
         __u64 arg1;                                                           \
     };                                                                        \
     BPF_HASH_MAP(name##_args, __u64, struct name##_args_t, 10000);            \
-    SEC("uprobe")                                                             \
+    SEC(UPROBE_SEC)                                                           \
     int uprobe_##name(struct pt_regs* ctx) {                                  \
         __u64 tid = bpf_get_current_pid_tgid();                               \
         __u32 pid = tid >> 32;                                                \
@@ -258,7 +327,7 @@ static __always_inline int submit_mmap_event(__u64 addr, __u64 size, __u8 event_
         bpf_map_update_elem(&name##_args, &tid, &args, BPF_ANY);              \
         return 0;                                                             \
     }                                                                         \
-    SEC("uretprobe")                                                          \
+    SEC(URETPROBE_SEC)                                                        \
     int uretprobe_##name(struct pt_regs* ctx) {                               \
         __u64 tid = bpf_get_current_pid_tgid();                               \
         struct name##_args_t* args = bpf_map_lookup_elem(&name##_args, &tid); \

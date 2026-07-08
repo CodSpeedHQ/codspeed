@@ -2,7 +2,7 @@
 
 use anyhow::Context;
 use memtrack::prelude::*;
-use memtrack::{AllocatorLib, Tracker};
+use memtrack::{AllocatorLib, Flavor, Tracker};
 use runner_shared::artifacts::{MemtrackEvent as Event, MemtrackEventKind};
 use std::path::Path;
 use std::process::Command;
@@ -71,33 +71,32 @@ macro_rules! assert_events_snapshot {
 /// ```
 macro_rules! assert_events_with_marker {
     ($name:expr, $events:expr) => {{
-        use itertools::Itertools;
-        use runner_shared::artifacts::MemtrackEventKind;
-        use std::mem::discriminant;
-
-        // Remove events outside our 0xC0D59EED marker allocations
-        let filtered_events = $events
-            .iter()
-            .sorted_by_key(|e| e.timestamp)
-            .dedup_by(|a, b| a.addr == b.addr && discriminant(&a.kind) == discriminant(&b.kind))
-            .skip_while(|e| {
-                let MemtrackEventKind::Malloc { size } = e.kind else {
-                    return true;
-                };
-                size != 0xC0D59EED
-            })
-            .skip(2) // Skip the marker allocation and free
-            .take_while(|e| {
-                let MemtrackEventKind::Malloc { size } = e.kind else {
-                    return true;
-                };
-                size != 0xC0D59EED
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-
-        assert_events_snapshot!($name, filtered_events);
+        let filtered_events = shared::between_markers($events);
+        assert_events_snapshot!($name, &filtered_events);
     }};
+}
+
+/// Keep only the deterministic allocations the workload brackets with
+/// `0xC0D59EED` marker mallocs, dropping libc/runtime noise. Sorts by
+/// timestamp and dedups by `(addr, kind)` first, so ordering and duplicate
+/// tracking don't leak into the result.
+pub fn between_markers(events: &[Event]) -> Vec<Event> {
+    use itertools::Itertools;
+    use std::mem::discriminant;
+
+    const MARKER: u64 = 0xC0D5_9EED;
+    let is_marker =
+        |e: &&Event| matches!(e.kind, MemtrackEventKind::Malloc { size } if size == MARKER);
+
+    events
+        .iter()
+        .sorted_by_key(|e| e.timestamp)
+        .dedup_by(|a, b| a.addr == b.addr && discriminant(&a.kind) == discriminant(&b.kind))
+        .skip_while(|e| !is_marker(e))
+        .skip(2) // the opening marker malloc and its free
+        .take_while(|e| !is_marker(e))
+        .cloned()
+        .collect()
 }
 
 /// Compile a Rust binary from a test crate directory.
@@ -129,17 +128,37 @@ pub fn compile_rust_binary(
 /// When `discover_system_allocators` is true, the tracker will scan for all
 /// allocators on the system (slower). When false, only `extra_allocators` are used.
 pub fn track_command(
-    mut command: Command,
+    command: Command,
     extra_allocators: &[AllocatorLib],
     discover_system_allocators: bool,
 ) -> TrackResult {
     // IMPORTANT: Always initialize the tracker BEFORE spawning the binary, as it can take some time to
     // attach to all the allocator libraries (especially when using NixOS).
-    let mut tracker = if discover_system_allocators {
+    let tracker = if discover_system_allocators {
         memtrack::Tracker::new()?
     } else {
         memtrack::Tracker::new_without_allocators()?
     };
+    track_command_with_tracker(command, extra_allocators, tracker)
+}
+
+/// Like [`track_command`], but pins the tracker to a specific attach flavor
+/// (perf vs. bpf-token links) instead of the environment-selected default.
+/// Discovers system allocators, matching [`track_binary`].
+pub fn track_command_with_flavor(
+    command: Command,
+    extra_allocators: &[AllocatorLib],
+    flavor: Flavor,
+) -> TrackResult {
+    let tracker = memtrack::Tracker::with_flavor(flavor)?;
+    track_command_with_tracker(command, extra_allocators, tracker)
+}
+
+fn track_command_with_tracker(
+    mut command: Command,
+    extra_allocators: &[AllocatorLib],
+    mut tracker: Tracker,
+) -> TrackResult {
     tracker.attach_allocators(extra_allocators)?;
 
     let child = command.spawn().context("Failed to spawn command")?;

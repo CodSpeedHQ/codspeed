@@ -3,5 +3,5 @@ mod memtrack;
 mod poller;
 mod tracker;
 
-pub use memtrack::MemtrackBpf;
+pub use memtrack::{Flavor, MemtrackBpf};
 pub use tracker::Tracker;

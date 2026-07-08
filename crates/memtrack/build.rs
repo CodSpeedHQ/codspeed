@@ -12,18 +12,29 @@ fn build_ebpf() {
 
     println!("cargo:rerun-if-changed=src/ebpf/c");
 
-    // Build the BPF program
+    // Build the BPF program. The same shared source (memtrack.bpf.c) is compiled
+    // into two skeletons via thin wrappers: memtrack_token.bpf.c defines
+    // MEMTRACK_BPF_LINKS to attach through bpf() links (uprobe_multi/tp_btf) so a
+    // delegated token authorizes them, while memtrack_perf.bpf.c uses the classic
+    // perf-based paths for kernels without uprobe_multi. The runtime picks the
+    // matching skeleton based on whether a BPF token is available.
     let arch = env::var("CARGO_CFG_TARGET_ARCH")
         .expect("CARGO_CFG_TARGET_ARCH must be set in build script");
-    let memtrack_out = PathBuf::from(env::var("OUT_DIR").unwrap()).join("memtrack.skel.rs");
-    SkeletonBuilder::new()
-        .source("src/ebpf/c/memtrack.bpf.c")
-        .clang_args([
-            "-I",
-            &vmlinux::include_path_root().join(arch).to_string_lossy(),
-        ])
-        .build_and_generate(&memtrack_out)
-        .unwrap();
+    let vmlinux_inc = vmlinux::include_path_root()
+        .join(arch)
+        .to_string_lossy()
+        .into_owned();
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    for (source, skel) in [
+        ("src/ebpf/c/memtrack_token.bpf.c", "memtrack_token.skel.rs"),
+        ("src/ebpf/c/memtrack_perf.bpf.c", "memtrack_perf.skel.rs"),
+    ] {
+        SkeletonBuilder::new()
+            .source(source)
+            .clang_args(["-I", &vmlinux_inc])
+            .build_and_generate(out_dir.join(skel))
+            .unwrap();
+    }
 
     // Generate bindings for event.h
     let bindings = bindgen::Builder::default()

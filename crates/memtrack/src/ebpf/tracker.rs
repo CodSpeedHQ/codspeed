@@ -1,3 +1,4 @@
+use crate::ebpf::Flavor;
 use crate::prelude::*;
 use crate::{AllocatorLib, ebpf::MemtrackBpf};
 use runner_shared::artifacts::MemtrackEvent as Event;
@@ -16,7 +17,17 @@ impl Tracker {
     /// - Attach uprobes to all libc instances
     /// - Attach tracepoints for fork tracking
     pub fn new() -> Result<Self> {
-        let mut instance = Self::new_without_allocators()?;
+        Self::with_bpf(MemtrackBpf::new()?)
+    }
+
+    /// Like [`Tracker::new`], but pinned to a specific attach flavor instead of
+    /// the environment-selected one. Used by tests to exercise either path.
+    pub fn with_flavor(flavor: Flavor) -> Result<Self> {
+        Self::with_bpf(MemtrackBpf::with_flavor(flavor)?)
+    }
+
+    fn with_bpf(bpf: MemtrackBpf) -> Result<Self> {
+        let mut instance = Self::from_bpf_without_allocators(bpf)?;
 
         let allocators = AllocatorLib::find_all()?;
         debug!("Found {} allocator instance(s)", allocators.len());
@@ -26,10 +37,13 @@ impl Tracker {
     }
 
     pub fn new_without_allocators() -> Result<Self> {
+        Self::from_bpf_without_allocators(MemtrackBpf::new()?)
+    }
+
+    fn from_bpf_without_allocators(mut bpf: MemtrackBpf) -> Result<Self> {
         // Bump memlock limits
         Self::bump_memlock_rlimit()?;
 
-        let mut bpf = MemtrackBpf::new()?;
         bpf.attach_tracepoints()?;
 
         Ok(Self { bpf })
