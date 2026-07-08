@@ -3,6 +3,8 @@ mod allocators;
 mod ebpf;
 mod ipc;
 pub mod prelude;
+#[cfg(feature = "ebpf")]
+mod session;
 
 pub use allocators::{AllocatorKind, AllocatorLib};
 pub use ipc::{
@@ -12,6 +14,8 @@ pub use ipc::{
 
 #[cfg(feature = "ebpf")]
 pub use ebpf::*;
+#[cfg(feature = "ebpf")]
+pub use session::Session;
 
 #[cfg(feature = "ebpf")]
 pub use ipc::handle_ipc_message;

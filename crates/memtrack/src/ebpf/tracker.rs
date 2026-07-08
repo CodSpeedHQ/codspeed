@@ -1,69 +1,102 @@
-use crate::ebpf::poller::RingBufferPoller;
+use crate::ebpf::MemtrackBpf;
+use crate::ebpf::attach_worker::AttachWorker;
+use crate::ebpf::spawn::{resume, spawn_stopped, wrap_stopped};
 use crate::prelude::*;
-use crate::{AllocatorLib, ebpf::MemtrackBpf};
-use crossbeam_channel::Receiver;
-use runner_shared::artifacts::MemtrackEvent as Event;
+use crate::session::Session;
+use parking_lot::Mutex;
+use std::os::unix::process::CommandExt;
+use std::process::Command;
+use std::sync::Arc;
+use std::sync::mpsc;
 
 pub struct Tracker {
-    bpf: MemtrackBpf,
-    poller: Option<RingBufferPoller>,
+    bpf: Arc<Mutex<MemtrackBpf>>,
+    worker: Mutex<Option<AttachWorker>>,
 }
 
 impl Tracker {
-    /// Create a new tracker instance
-    ///
-    /// This will:
-    /// - Initialize the BPF subsystem
-    /// - Bump memlock limits
-    /// - Attach uprobes to all libc instances
-    /// - Attach tracepoints for fork tracking
+    /// Create a new tracker. The exec-mapping watcher discovers and attaches
+    /// allocator probes as the tracked process tree maps executable files.
     pub fn new() -> Result<Self> {
-        let mut instance = Self::new_without_allocators()?;
-
-        let allocators = AllocatorLib::find_all()?;
-        debug!("Found {} allocator instance(s)", allocators.len());
-        instance.attach_allocators(&allocators)?;
-
-        Ok(instance)
-    }
-
-    pub fn new_without_allocators() -> Result<Self> {
-        // Bump memlock limits
         Self::bump_memlock_rlimit()?;
 
         let mut bpf = MemtrackBpf::new()?;
         bpf.attach_tracepoints()?;
+        bpf.attach_exec_watcher()?;
 
-        Ok(Self { bpf, poller: None })
+        let bpf = Arc::new(Mutex::new(bpf));
+        let worker = AttachWorker::start(bpf.clone())?;
+
+        Ok(Self {
+            bpf,
+            worker: Mutex::new(Some(worker)),
+        })
     }
 
-    pub fn attach_allocators(&mut self, libs: &[AllocatorLib]) -> Result<()> {
-        self.bpf.attach_allocators(libs)
-    }
-
-    pub fn attach_allocator(&mut self, lib: &AllocatorLib) -> Result<()> {
-        self.bpf.attach_allocator_probes(lib.kind, &lib.path)
-    }
-
-    /// Start tracking allocations for a specific PID.
+    /// Spawn `cmd` under tracking: the target is wrapped so it stops itself
+    /// before exec'ing, its pid is armed while stopped, then it is resumed.
+    /// The watcher observes the target's own `execve` mappings — no allocation
+    /// escapes untracked.
     ///
-    /// Returns a receiver of allocation events. The poller is owned by the tracker
-    /// and keeps running until [`Tracker::stop_polling`] is called or the tracker
-    /// is dropped.
-    pub fn track(&mut self, pid: i32) -> Result<Receiver<Event>> {
-        self.bpf.add_tracked_pid(pid)?;
-        debug!("Tracking PID {pid}");
+    /// `uid_gid` drops the child's privileges (a `Command`'s uid/gid cannot be
+    /// read back, so it cannot be preserved through the wrap).
+    pub fn spawn(&self, cmd: &Command, uid_gid: Option<(u32, u32)>) -> Result<Session> {
+        let mut wrapped = wrap_stopped(cmd);
+        if let Some((uid, gid)) = uid_gid {
+            wrapped.uid(uid).gid(gid);
+        }
 
-        let (poller, event_rx) = self.bpf.start_polling_with_channel(10)?;
-        self.poller = Some(poller);
+        let child = spawn_stopped(&mut wrapped)?;
+        let pid = child.id() as i32;
+        self.worker
+            .lock()
+            .as_ref()
+            .context("tracker already finished")?
+            .set_root_pid(pid);
 
-        Ok(event_rx)
+        let (tx, rx) = mpsc::channel();
+        let poller = {
+            let mut bpf = self.bpf.lock();
+            bpf.add_tracked_pid(pid)?;
+            bpf.poll_events_with_channel(10, tx)?
+        };
+        resume(pid)?;
+
+        Ok(Session::new(child, rx, poller))
     }
 
-    /// Stop the poll thread, draining ring-buffer stragglers. This closes the
-    /// event channel returned by [`track`].
-    pub fn stop_polling(&mut self) {
-        self.poller.take();
+    /// Enable event tracking in the BPF program
+    pub fn enable_tracking(&self) -> Result<()> {
+        self.bpf.lock().enable_tracking()
+    }
+
+    /// Disable event tracking in the BPF program
+    pub fn disable_tracking(&self) -> Result<()> {
+        self.bpf.lock().disable_tracking()
+    }
+
+    /// Number of events the kernel dropped because the ring buffer was full.
+    /// A non-zero value means the resulting trace is incomplete.
+    pub fn dropped_events_count(&self) -> Result<u64> {
+        self.bpf.lock().dropped_events_count()
+    }
+
+    /// Stop the attach worker and surface any fatal error it recorded,
+    /// including missed exec mappings (incomplete allocator coverage).
+    pub fn finish(&self) -> Result<()> {
+        let worker = self
+            .worker
+            .lock()
+            .take()
+            .context("tracker already finished")?;
+        worker.finish()
+    }
+
+    /// Detach all attached probes. Called explicitly at teardown because the
+    /// process may exit without ever dropping the tracker (the IPC thread holds
+    /// an Arc clone), in which case the kernel would close each link fd serially.
+    pub fn detach(&self) {
+        self.bpf.lock().detach_probes();
     }
 
     /// Bump RLIMIT_MEMLOCK for kernels older than 5.11. Newer kernels account BPF
@@ -83,28 +116,5 @@ impl Tracker {
         }
 
         Ok(())
-    }
-
-    /// Enable event tracking in the BPF program
-    pub fn enable(&mut self) -> anyhow::Result<()> {
-        self.bpf.enable_tracking()
-    }
-
-    /// Disable event tracking in the BPF program
-    pub fn disable(&mut self) -> anyhow::Result<()> {
-        self.bpf.disable_tracking()
-    }
-
-    /// Detach all attached probes. Called explicitly at teardown because the
-    /// process may exit without ever dropping the tracker, in which case the
-    /// kernel would close each link fd serially at exit.
-    pub fn detach(&mut self) {
-        self.bpf.detach_probes();
-    }
-
-    /// Number of events the kernel dropped because the ring buffer was full.
-    /// A non-zero value means the resulting trace is incomplete.
-    pub fn dropped_events_count(&self) -> anyhow::Result<u64> {
-        self.bpf.dropped_events_count()
     }
 }

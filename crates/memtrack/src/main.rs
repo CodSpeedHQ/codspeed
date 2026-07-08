@@ -3,10 +3,9 @@ use ipc_channel::ipc;
 use memtrack::prelude::*;
 use memtrack::{MemtrackIpcMessage, Tracker, handle_ipc_message};
 use runner_shared::artifacts::{ArtifactExt, MemtrackArtifact, encode_events};
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
 
 #[derive(Parser)]
@@ -85,41 +84,38 @@ fn track_command(
         None
     };
 
-    let tracker = Tracker::new()?;
-    let tracker_arc = Arc::new(Mutex::new(tracker));
+    let tracker = Arc::new(Tracker::new()?);
 
     // Spawn IPC handler thread with the now-available tracker
     let ipc_handle = if let Some(rx) = ipc_channel {
-        let tracker_clone = tracker_arc.clone();
+        let tracker = tracker.clone();
         Some(thread::spawn(move || {
             while let Ok(msg) = rx.recv() {
-                handle_ipc_message(msg, &tracker_clone);
+                handle_ipc_message(msg, &tracker);
             }
         }))
     } else {
         // Without IPC, nothing toggles the tracking_enabled map, so events would
         // be dropped by the eBPF is_enabled() check. Enable it up front.
-        tracker_arc.lock().unwrap().enable()?;
+        tracker.enable_tracking()?;
         None
     };
 
-    // Start the target command using bash to handle shell syntax
+    // Run the target command through bash to handle shell syntax. Drop
+    // privileges if running under sudo to avoid permission issues when the
+    // target accesses files owned by the original user.
     let mut cmd = Command::new("bash");
     cmd.arg("-c").arg(cmd_string);
-
-    // Drop privileges if running under sudo. This is required to avoid permission issues
-    // when the target command tries to access files or directories that the current user
-    // does not have permission to access.
-    if let Some((uid, gid)) = get_user_uid_gid() {
+    let uid_gid = get_user_uid_gid();
+    if let Some((uid, gid)) = uid_gid {
         debug!("Running under sudo, dropping privileges to uid={uid}, gid={gid}");
-        cmd.uid(uid).gid(gid);
     }
 
-    let mut child = cmd
-        .spawn()
+    let mut session = tracker
+        .spawn(&cmd, uid_gid)
         .map_err(|e| anyhow!("Failed to spawn child process: {e}"))?;
-    let root_pid = child.id() as i32;
-    let event_rx = { tracker_arc.lock().unwrap().track(root_pid)? };
+    let root_pid = session.pid();
+    let event_rx = session.take_events()?;
     debug!("Spawned child with pid {root_pid}");
 
     // Generate output file name and create file for streaming events
@@ -136,26 +132,20 @@ fn track_command(
     let pipeline_thread = thread::spawn(move || encode_events(event_rx, out_file, n_workers));
 
     // Wait for the command to complete
-    let status = child.wait().context("Failed to wait for command")?;
+    let status = session.wait().context("Failed to wait for command")?;
     debug!("Command exited with status: {status}");
 
     // Stop event production before draining: the child has exited, so anything
     // still arriving is already in the ring buffer.
-    let disable_result = tracker_arc
-        .lock()
-        .map_err(|_| anyhow!("tracker mutex poisoned"))?
-        .disable();
-    if let Err(e) = disable_result {
+    if let Err(e) = tracker.disable_tracking() {
         warn!("Failed to disable tracking: {e:#}");
     }
 
-    // Stopping the poller closes the event channel; without this the pipeline
-    // join below would block forever.
+    // Dropping the session drops the event poller, which does a final drain of
+    // the ring buffer and then closes the event channel. Without this the
+    // encode pipeline join below would block forever.
     debug!("Stopping the ring buffer poller");
-    tracker_arc
-        .lock()
-        .map_err(|_| anyhow!("tracker mutex poisoned"))?
-        .stop_polling();
+    drop(session);
 
     debug!("Waiting for the encode pipeline to finish");
     let total = pipeline_thread
@@ -164,20 +154,19 @@ fn track_command(
 
     info!("Wrote {total} memtrack events to disk");
 
+    // Stop the attach worker and surface any fatal error it recorded (missed
+    // exec mappings mean incomplete allocator coverage).
+    tracker.finish()?;
+
     // Detach probes explicitly: the IPC thread still holds an Arc clone, so the
     // tracker would otherwise never be dropped before process::exit and the
     // kernel would close every link fd serially during exit.
-    tracker_arc
-        .lock()
-        .map_err(|_| anyhow!("tracker mutex poisoned"))?
-        .detach();
+    tracker.detach();
 
     // Read the eBPF dropped-event counter after the run is complete.
     // A non-zero value means the ring buffer overflowed and the trace is
     // incomplete.
-    let dropped_events = tracker_arc
-        .lock()
-        .map_err(|_| anyhow!("tracker mutex poisoned"))?
+    let dropped_events = tracker
         .dropped_events_count()
         .context("Failed to read memtrack dropped-event counter")?;
     if dropped_events > 0 {

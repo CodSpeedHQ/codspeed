@@ -575,16 +575,90 @@ impl MemtrackBpf {
         Ok(())
     }
 
-    /// Start polling, forwarding each event over the returned channel.
-    pub fn start_polling_with_channel(
+    /// Poll the allocation-event ring buffer into `tx`. The returned poller
+    /// keeps the pipeline alive; events stop flowing when it is dropped.
+    pub fn poll_events_with_channel(
         &self,
-        poll_timeout_ms: u64,
-    ) -> Result<(
-        RingBufferPoller,
-        crossbeam_channel::Receiver<runner_shared::artifacts::MemtrackEvent>,
-    )> {
-        // Use the syscalls skeleton's ring buffer (both programs share the same one)
-        RingBufferPoller::with_channel(&self.skel.maps.events, poll_timeout_ms)
+        poll_interval_ms: u64,
+        tx: std::sync::mpsc::Sender<runner_shared::artifacts::MemtrackEvent>,
+    ) -> Result<RingBufferPoller> {
+        RingBufferPoller::new(
+            &self.skel.maps.events,
+            crate::ebpf::events::parse_event,
+            tx,
+            poll_interval_ms,
+        )
+    }
+}
+
+// =========================================================================
+// On-demand exec-mapping watcher
+// =========================================================================
+
+impl MemtrackBpf {
+    /// Attach the exec-mapping watcher (fentry/security_mmap_file). Only used in
+    /// on-demand mode; the program is loaded and verified in all modes.
+    pub fn attach_exec_watcher(&mut self) -> Result<()> {
+        let link = self
+            .skel
+            .progs
+            .watch_exec_mmap
+            .attach()
+            .context("Failed to attach exec-mapping watcher")?;
+        self.probes.push(link);
+        Ok(())
+    }
+
+    /// Mark a (dev, ino) as classified so the watcher stops re-signalling for it.
+    /// The 16-byte key matches `struct inode_key { __u64 dev; __u64 ino; }` (no padding).
+    pub fn insert_known_inode(&self, dev: u64, ino: u64) -> Result<()> {
+        let mut key = [0u8; 16];
+        key[..8].copy_from_slice(&dev.to_le_bytes());
+        key[8..].copy_from_slice(&ino.to_le_bytes());
+        self.skel
+            .maps
+            .known_inodes
+            .update(&key, &1u8.to_le_bytes(), libbpf_rs::MapFlags::ANY)
+            .context("Failed to insert known inode")?;
+        Ok(())
+    }
+
+    /// Number of exec-mapping requests dropped because the request ring buffer was full.
+    pub fn attach_request_dropped_count(&self) -> Result<u64> {
+        let key = 0u32;
+        let value = self
+            .skel
+            .maps
+            .attach_request_dropped
+            .lookup(&key.to_le_bytes(), libbpf_rs::MapFlags::ANY)
+            .context("Failed to read attach_request_dropped counter")?
+            .ok_or_else(|| anyhow!("attach_request_dropped slot 0 missing"))?;
+
+        let bytes: [u8; 8] = value
+            .as_slice()
+            .try_into()
+            .map_err(|_| anyhow!("attach_request_dropped value has unexpected size"))?;
+        Ok(u64::from_le_bytes(bytes))
+    }
+
+    /// Number of currently-attached probes/links.
+    pub fn probe_count(&self) -> usize {
+        self.probes.len()
+    }
+
+    /// Poll the exec-mapping request ring buffer into `tx`. Same contract as
+    /// [`Self::poll_events_with_channel`].
+    pub(crate) fn poll_attach_with_channel(
+        &self,
+        poll_interval_ms: u64,
+        tx: std::sync::mpsc::Sender<crate::ebpf::events::AttachRequest>,
+    ) -> Result<RingBufferPoller> {
+        RingBufferPoller::new(
+            &self.skel.maps.attach_requests,
+            crate::ebpf::events::AttachRequest::parse,
+            tx,
+            poll_interval_ms,
+        )
     }
 }
 
