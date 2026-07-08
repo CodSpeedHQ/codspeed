@@ -5,7 +5,6 @@
 
 use std::path::PathBuf;
 
-mod dynamic;
 mod static_linked;
 
 /// Represents the different allocator types we support.
@@ -66,64 +65,4 @@ impl AllocatorKind {
 pub struct AllocatorLib {
     pub kind: AllocatorKind,
     pub path: PathBuf,
-}
-
-impl AllocatorLib {
-    pub fn find_all() -> anyhow::Result<Vec<AllocatorLib>> {
-        let mut allocators = static_linked::find_all()?;
-        allocators.extend(Self::find_from_env());
-        allocators.extend(dynamic::find_all()?);
-        Ok(allocators)
-    }
-
-    /// Discover allocators from binaries listed in the `CODSPEED_MEMTRACK_BINARIES` env var.
-    ///
-    /// The variable is a platform path-list. Each path is checked for
-    /// a statically linked allocator via [`AllocatorLib::from_path_static`].
-    /// Invalid or missing paths are silently skipped (with a debug log).
-    fn find_from_env() -> Vec<AllocatorLib> {
-        let Some(raw) = std::env::var_os("CODSPEED_MEMTRACK_BINARIES") else {
-            return vec![];
-        };
-
-        std::env::split_paths(&raw)
-            .filter(|p| !p.as_os_str().is_empty())
-            .filter_map(|p| {
-                let path = p.as_path();
-                match Self::from_path_static(path) {
-                    Ok(alloc) => {
-                        log::debug!(
-                            "Found {} allocator in env-specified binary: {}",
-                            alloc.kind.name(),
-                            path.display()
-                        );
-                        Some(alloc)
-                    }
-                    Err(e) => {
-                        log::debug!("Skipping env-specified binary {}: {e}", path.display());
-                        None
-                    }
-                }
-            })
-            .collect()
-    }
-}
-
-/// Check if a file is an ELF binary by reading its magic bytes.
-fn is_elf(path: &std::path::Path) -> bool {
-    use std::fs;
-    use std::io::Read;
-
-    let mut file = match fs::File::open(path) {
-        Ok(f) => f,
-        Err(_) => return false,
-    };
-
-    let mut magic = [0u8; 4];
-    if file.read_exact(&mut magic).is_err() {
-        return false;
-    }
-
-    // ELF magic: 0x7F 'E' 'L' 'F'
-    magic == [0x7F, b'E', b'L', b'F']
 }
