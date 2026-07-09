@@ -1,7 +1,6 @@
 #[macro_use]
 mod shared;
 
-use memtrack::AllocatorLib;
 use rstest::rstest;
 use std::path::Path;
 
@@ -18,13 +17,8 @@ fn test_rust_alloc_tracking(
     let crate_path = Path::new("testdata/alloc_rust");
     let binary = shared::compile_rust_binary(crate_path, "alloc_rust", features)?;
 
-    // Try to find a static allocator in the binary, then attach to it as well
-    // This is needed because the CWD is different, which breaks the heuristics.
-    let allocators = AllocatorLib::from_path_static(&binary)
-        .map(|a| vec![a])
-        .unwrap_or_default();
-
-    let (events, thread_handle) = shared::track_binary_with_opts(&binary, &allocators)?;
+    // No extra allocators: the watcher must discover the static allocator itself.
+    let (events, thread_handle) = shared::track_binary(&binary)?;
     assert_events_with_marker!(name, &events);
 
     thread_handle.join().unwrap();

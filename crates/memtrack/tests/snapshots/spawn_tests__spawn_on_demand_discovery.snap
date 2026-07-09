@@ -1,6 +1,5 @@
 ---
 source: crates/memtrack/tests/spawn_tests.rs
-assertion_line: 90
 expression: formatted_events
 ---
 [

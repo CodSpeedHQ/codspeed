@@ -1,12 +1,10 @@
 #![allow(dead_code, unused)]
 
-use anyhow::Context;
+use memtrack::Tracker;
 use memtrack::prelude::*;
-use memtrack::{AllocatorLib, Tracker};
 use runner_shared::artifacts::{MemtrackEvent as Event, MemtrackEventKind};
 use std::path::Path;
 use std::process::Command;
-use std::time::Duration;
 
 type TrackResult = anyhow::Result<(Vec<Event>, std::thread::JoinHandle<()>)>;
 
@@ -101,14 +99,28 @@ macro_rules! assert_events_with_marker {
 }
 
 /// Compile a Rust binary from a test crate directory.
+///
+/// Each feature set builds into its own target dir: parallel test cases would
+/// otherwise overwrite the same output binary and race against each other.
 pub fn compile_rust_binary(
     crate_dir: &Path,
     name: &str,
     features: &[&str],
 ) -> anyhow::Result<std::path::PathBuf> {
+    let target_dir = match features {
+        [] => "target/default".to_string(),
+        _ => format!("target/{}", features.join("-")),
+    };
+
     let mut cmd = Command::new("cargo");
-    cmd.current_dir(crate_dir)
-        .args(["build", "--release", "--bin", name]);
+    cmd.current_dir(crate_dir).args([
+        "build",
+        "--release",
+        "--bin",
+        name,
+        "--target-dir",
+        &target_dir,
+    ]);
 
     if !features.is_empty() {
         cmd.arg("--features").arg(features.join(","));
@@ -121,51 +133,38 @@ pub fn compile_rust_binary(
         return Err(anyhow::anyhow!("Failed to compile Rust crate"));
     }
 
-    Ok(crate_dir.join(format!("target/release/{name}")))
+    Ok(crate_dir.join(format!("{target_dir}/release/{name}")))
 }
 
-/// Track a spawned command, collecting all memory events.
+/// Track a binary, collecting all memory events.
+pub fn track_binary(binary: &Path) -> TrackResult {
+    track_command(Command::new(binary))
+}
+
+/// Track a command, collecting all memory events.
 ///
-/// When `discover_system_allocators` is true, the tracker will scan for all
-/// allocators on the system (slower). When false, only `extra_allocators` are used.
-pub fn track_command(
-    mut command: Command,
-    extra_allocators: &[AllocatorLib],
-    discover_system_allocators: bool,
-) -> TrackResult {
-    // IMPORTANT: Always initialize the tracker BEFORE spawning the binary, as it can take some time to
-    // attach to all the allocator libraries (especially when using NixOS).
-    let mut tracker = if discover_system_allocators {
-        memtrack::Tracker::new()?
-    } else {
-        memtrack::Tracker::new_without_allocators()?
-    };
-    tracker.attach_allocators(extra_allocators)?;
+/// No allocators are pre-attached: the exec-mapping watcher discovers and
+/// attaches them as the tracked tree maps executable files.
+pub fn track_command(command: Command) -> TrackResult {
+    let tracker = Tracker::new()?;
+    tracker.enable_tracking()?;
 
-    let child = command.spawn().context("Failed to spawn command")?;
-    let root_pid = child.id() as i32;
+    let mut session = tracker.spawn(&command, None)?;
+    let rx = session.take_events()?;
 
-    tracker.enable()?;
-    let rx = tracker.track(root_pid)?;
+    session.wait()?;
+    // Dropping the session does a final ring buffer drain and closes the
+    // channel, so collecting terminates without a silence timeout.
+    drop(session);
+    let events: Vec<Event> = rx.iter().collect();
 
-    let mut events = Vec::new();
-    while let Ok(event) = rx.recv_timeout(Duration::from_secs(10)) {
-        events.push(event);
-    }
+    tracker.finish()?;
 
-    // Drop the tracker in a new thread to not block the test
-    let thread_handle = std::thread::spawn(move || core::mem::drop(tracker));
+    // Drop the tracker in a new thread to not block the test.
+    let thread_handle = std::thread::spawn(move || drop(tracker));
 
     info!("Tracked {} events", events.len());
     trace!("Events: {events:#?}");
 
     Ok((events, thread_handle))
-}
-
-pub fn track_binary_with_opts(binary: &Path, extra_allocators: &[AllocatorLib]) -> TrackResult {
-    track_command(Command::new(binary), extra_allocators, true)
-}
-
-pub fn track_binary(binary: &Path) -> TrackResult {
-    track_binary_with_opts(binary, &[])
 }

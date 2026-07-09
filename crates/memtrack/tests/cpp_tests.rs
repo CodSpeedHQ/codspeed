@@ -1,12 +1,30 @@
 #[macro_use]
 mod shared;
 
-use memtrack::AllocatorLib;
 use rstest::rstest;
 use std::path::Path;
 use std::process::Command;
 
+/// A cached cmake configure pins absolute library paths from a previous
+/// environment (e.g. garbage-collected nix store entries). On failure, wipe
+/// the build dir and retry once from a fresh configure.
+///
+/// Builds are serialized: parallel test cases share the build dir, and the
+/// retry path deletes it.
 fn compile_cpp_project(project_dir: &Path, target: &str) -> anyhow::Result<std::path::PathBuf> {
+    static BUILD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = BUILD_LOCK.lock().unwrap();
+
+    match build_cpp_target(project_dir, target) {
+        Ok(path) => Ok(path),
+        Err(_) => {
+            std::fs::remove_dir_all(project_dir.join("build"))?;
+            build_cpp_target(project_dir, target)
+        }
+    }
+}
+
+fn build_cpp_target(project_dir: &Path, target: &str) -> anyhow::Result<std::path::PathBuf> {
     let build_exists = project_dir.join("build").exists();
     if !build_exists {
         // Configure with cmake -B build
@@ -57,13 +75,7 @@ fn test_cpp_alloc_tracking(#[case] target: &str) -> Result<(), Box<dyn std::erro
     let project_path = Path::new("testdata/alloc_cpp");
     let binary = compile_cpp_project(project_path, target)?;
 
-    // Try to find a static allocator in the binary, then attach to it as well
-    // This is needed because the CWD is different, which breaks the heuristics.
-    let allocators = AllocatorLib::from_path_static(&binary)
-        .map(|a| vec![a])
-        .unwrap_or_default();
-
-    let (events, thread_handle) = shared::track_binary_with_opts(&binary, &allocators)?;
+    let (events, thread_handle) = shared::track_binary(&binary)?;
     assert_events_with_marker!(target, &events);
 
     thread_handle.join().unwrap();

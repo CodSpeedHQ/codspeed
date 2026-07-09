@@ -95,7 +95,7 @@ jobs:
         # Each memtrack integration test binary runs its cases serially
         # (eBPF tracker can't overlap with itself in one process), so we
         # shard at the test-binary level to parallelize across jobs.
-        test: [c_tests, cpp_tests, rust_tests, spawn_tests]
+        test: [c_tests, cpp_tests, rust_tests, spawn_tests, dlopen_tests]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
