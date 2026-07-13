@@ -74,6 +74,13 @@ pub fn parse_event(data: &[u8]) -> Option<MemtrackEvent> {
                     size: event.data.mmap.size,
                 },
             ),
+            EVENT_TYPE_RSS => (
+                0,
+                MemtrackEventKind::Rss {
+                    member: event.data.rss.member,
+                    size: event.data.rss.size,
+                },
+            ),
             unknown => {
                 panic!("Unknown event type: {unknown}");
             }
@@ -183,6 +190,36 @@ mod tests {
                 assert_eq!(size, 128);
             }
             _ => panic!("Expected Malloc event kind"),
+        }
+    }
+
+    #[test]
+    fn test_parse_rss_event() {
+        let mut event: bindings::event = unsafe { std::mem::zeroed() };
+        event.header.event_type = bindings::EVENT_TYPE_RSS as u8;
+        event.header.timestamp = 12345678;
+        event.header.pid = 1000;
+        event.header.tid = 2000;
+        event.data.rss.member = 1;
+        event.data.rss.size = 4096 * 10;
+
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                &event as *const _ as *const u8,
+                std::mem::size_of_val(&event),
+            )
+        };
+
+        let parsed = parse_event(bytes).unwrap();
+        assert_eq!(parsed.pid, 1000);
+        assert_eq!(parsed.addr, 0);
+
+        match parsed.kind {
+            MemtrackEventKind::Rss { member, size } => {
+                assert_eq!(member, 1);
+                assert_eq!(size, 4096 * 10);
+            }
+            _ => panic!("Expected Rss event kind"),
         }
     }
 }

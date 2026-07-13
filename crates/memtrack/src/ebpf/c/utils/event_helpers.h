@@ -40,11 +40,11 @@ static __always_inline __u64* take_param(void* map) {
     return value;
 }
 
-#define SUBMIT_EVENT(evt_type, fill_data)                               \
+#define SUBMIT_EVENT_AS(owner_pid, evt_type, fill_data)                 \
     {                                                                   \
         struct task_ids ids = current_task_ids();                       \
                                                                         \
-        if (!is_tracked(ids.tgid) || !is_enabled()) {                   \
+        if (!is_enabled()) {                                            \
             return 0;                                                   \
         }                                                               \
                                                                         \
@@ -59,7 +59,7 @@ static __always_inline __u64* take_param(void* map) {
         }                                                               \
                                                                         \
         e->header.timestamp = bpf_ktime_get_ns();                       \
-        e->header.pid = ids.tgid;                                       \
+        e->header.pid = owner_pid;                                      \
         e->header.tid = ids.tid;                                        \
         e->header.event_type = evt_type;                                \
                                                                         \
@@ -67,6 +67,17 @@ static __always_inline __u64* take_param(void* map) {
                                                                         \
         bpf_ringbuf_submit(e, wake_flags());                            \
         return 0;                                                       \
+    }
+
+#define SUBMIT_EVENT(evt_type, fill_data)                 \
+    {                                                     \
+        struct task_ids owner = current_task_ids();       \
+                                                          \
+        if (!is_tracked(owner.tgid)) {                    \
+            return 0;                                     \
+        }                                                 \
+                                                          \
+        SUBMIT_EVENT_AS(owner.tgid, evt_type, fill_data); \
     }
 
 static __always_inline int submit_alloc_event(__u64 size, __u64 addr) {

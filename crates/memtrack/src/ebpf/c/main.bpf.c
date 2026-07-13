@@ -8,6 +8,7 @@
 #include "allocator.h"
 #include "attach.h"
 #include "event.h"
+#include "rss.bpf.h"
 #include "utils/event_helpers.h"
 #include "utils/map_helpers.h"
 #include "utils/process_tracking.h"

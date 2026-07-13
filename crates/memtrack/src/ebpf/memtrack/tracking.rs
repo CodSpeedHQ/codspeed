@@ -4,9 +4,13 @@ use paste::paste;
 
 impl MemtrackBpf {
     attach_tracepoint!(sched_fork);
+    attach_tracepoint!(rss_stat);
 
     pub fn attach_tracepoints(&mut self) -> Result<()> {
         self.attach_sched_fork()?;
+        if let Err(e) = self.attach_rss_stat() {
+            warn!("Failed to attach rss_stat tracepoint, RSS collection disabled: {e:#}");
+        }
         Ok(())
     }
 

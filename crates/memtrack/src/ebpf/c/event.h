@@ -9,6 +9,7 @@
 #define EVENT_TYPE_MMAP 6
 #define EVENT_TYPE_MUNMAP 7
 #define EVENT_TYPE_BRK 8
+#define EVENT_TYPE_RSS 9
 
 /* Common header shared by all event types */
 struct event_header {
@@ -45,6 +46,11 @@ struct event {
             uint64_t addr; /* address of mapping */
             uint64_t size; /* size of mapping */
         } mmap;
+
+        struct {
+            int32_t member;
+            uint64_t size;
+        } rss;
     } data;
 };
 

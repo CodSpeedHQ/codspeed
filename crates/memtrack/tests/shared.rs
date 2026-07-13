@@ -166,6 +166,19 @@ type EventProfile = std::collections::BTreeMap<String, usize>;
 fn event_profile(events: &[Event]) -> EventProfile {
     let mut profile = EventProfile::new();
     for event in events {
+        // Only allocator events are comparable: the variants differ solely in
+        // how uprobes attach, while RSS and lifecycle events carry per-run
+        // values (resident sizes, pids) that legitimately differ.
+        if !matches!(
+            event.kind,
+            MemtrackEventKind::Malloc { .. }
+                | MemtrackEventKind::Free
+                | MemtrackEventKind::Calloc { .. }
+                | MemtrackEventKind::Realloc { .. }
+                | MemtrackEventKind::AlignedAlloc { .. }
+        ) {
+            continue;
+        }
         *profile.entry(describe_kind(&event.kind)).or_default() += 1;
     }
     profile
