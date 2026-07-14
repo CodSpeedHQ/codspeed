@@ -86,6 +86,11 @@ pub enum MemtrackEventKind {
         member: i32,
         delta: i64,
     },
+    Fork {
+        parent_pid: pid_t,
+    },
+    Exec,
+    Exit,
 }
 
 pub struct MemtrackEventStream<R: Read> {

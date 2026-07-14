@@ -5,6 +5,9 @@ use paste::paste;
 impl MemtrackBpf {
     attach_tracepoint!(sched_fork);
     attach_tracepoint!(rss_stat);
+    attach_tracepoint!(task_newtask);
+    attach_tracepoint!(sched_process_exec);
+    attach_tracepoint!(sched_process_exit);
 
     fn rmap_target_enabled(&self, target: &str) -> bool {
         !self.btf_disabled_rmap_targets.contains(&target)
@@ -12,6 +15,9 @@ impl MemtrackBpf {
 
     pub fn attach_tracepoints(&mut self) -> Result<()> {
         self.attach_sched_fork()?;
+        self.attach_task_newtask()?;
+        self.attach_sched_process_exec()?;
+        self.attach_sched_process_exit()?;
         if let Err(e) = self.attach_rss_stat() {
             warn!("Failed to attach rss_stat tracepoint, RSS collection disabled: {e:#}");
         }

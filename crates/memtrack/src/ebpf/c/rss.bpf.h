@@ -220,4 +220,47 @@ int BPF_PROG(fentry_folio_remove_rmap_pud, struct folio* folio, struct page* pag
     return submit_file_rmap(folio, page, vma, -(__s64)folio_nr_pages_est(folio));
 }
 
+/* == Process lifecycle events ==
+ *
+ * FORK lets userland seed a child's RSS from its parent at fork time: the
+ * kernel copies the mm counters during dup_mmap, but those updates fire
+ * rss_stat out of the child's context and anon COW faults are
+ * counter-neutral, so a child that only touches inherited memory never
+ * reports its RSS on its own. EXEC and EXIT mark the points where the
+ * address space is replaced or torn down, so userland resets to zero.
+ */
+
+#define CLONE_THREAD 0x00010000
+
+SEC("tracepoint/task/task_newtask")
+int tracepoint_task_newtask(struct trace_event_raw_task_newtask* ctx) {
+    if (ctx->clone_flags & CLONE_THREAD) {
+        return 0;
+    }
+
+    __u64 tid = bpf_get_current_pid_tgid();
+    __u32 parent_pid = tid >> 32;
+    if (!is_tracked(parent_pid)) {
+        return 0;
+    }
+
+    __u32 child_pid = ctx->pid;
+    SUBMIT_EVENT_AS(child_pid, EVENT_TYPE_FORK, { e->data.fork.parent_pid = parent_pid; });
+}
+
+SEC("tracepoint/sched/sched_process_exec")
+int tracepoint_sched_process_exec(void* ctx) {
+    SUBMIT_EVENT(EVENT_TYPE_EXEC, {});
+}
+
+SEC("tracepoint/sched/sched_process_exit")
+int tracepoint_sched_process_exit(void* ctx) {
+    __u64 tid = bpf_get_current_pid_tgid();
+    if ((tid >> 32) != (tid & 0xFFFFFFFF)) {
+        return 0;
+    }
+
+    SUBMIT_EVENT(EVENT_TYPE_EXIT, {});
+}
+
 #endif /* __RSS_BPF_H__ */
