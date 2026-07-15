@@ -39,8 +39,11 @@ char LICENSE[] SEC("license") = "GPL";
 BPF_HASH_MAP(tracked_pids, __u32, __u8, 10000);
 /* Map to store parent-child relationships to detect hierarchy */
 BPF_HASH_MAP(pids_ppid, __u32, __u32, 10000);
-/* Ring buffer for sending events to userspace */
-BPF_RINGBUF(events, 16 * 1024 * 1024);
+/* Ring buffer for sending events to userspace. Sized to absorb consumer
+ * scheduling stalls at multi-M events/s burst rates: 256 MiB holds ~4.8M
+ * records (~1s of worst-case burst). Pages are memcg-charged and vmap'd,
+ * so no physically contiguous allocation is needed. */
+BPF_RINGBUF(events, 256 * 1024 * 1024);
 /* Map to control whether tracking is enabled (0 = disabled, 1 = enabled) */
 BPF_ARRAY_MAP(tracking_enabled, __u8, 1);
 /*  Counter for events that couldn't be added to the ring buffer */
