@@ -11,16 +11,24 @@ pub mod bindings {
 }
 use bindings::*;
 
-/// Parse an event from raw bytes into MemtrackEvent
+/// Parse a batch record from raw bytes, emitting each valid event.
 ///
-/// SAFETY: The data must be a valid `bindings::event`
-pub fn parse_event(data: &[u8]) -> Option<MemtrackEvent> {
-    if data.len() < std::mem::size_of::<bindings::event>() {
-        return None;
+/// SAFETY: The data must be a valid `bindings::event_batch`
+pub fn parse_batch(data: &[u8], mut emit: impl FnMut(MemtrackEvent)) {
+    if data.len() < std::mem::size_of::<bindings::event_batch>() {
+        return;
     }
 
-    let event = unsafe { &*(data.as_ptr() as *const bindings::event) };
+    // The bytes may come from a buffer without the struct's alignment
+    // (e.g. a per-CPU map lookup), so copy the batch out before reading fields.
+    let batch = unsafe { std::ptr::read_unaligned(data.as_ptr() as *const bindings::event_batch) };
+    let count = (batch.count as usize).min(batch.events.len());
+    for event in &batch.events[..count] {
+        emit(parse_one(event));
+    }
+}
 
+fn parse_one(event: &bindings::event) -> MemtrackEvent {
     // Common fields from header
     let pid = event.header.pid as i32;
     let tid = event.header.tid as i32;
@@ -80,18 +88,36 @@ pub fn parse_event(data: &[u8]) -> Option<MemtrackEvent> {
         }
     };
 
-    Some(MemtrackEvent {
+    MemtrackEvent {
         pid,
         tid,
         timestamp,
         addr,
         kind,
-    })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn parse_single(event: bindings::event) -> MemtrackEvent {
+        let mut batch: bindings::event_batch = unsafe { std::mem::zeroed() };
+        batch.count = 1;
+        batch.events[0] = event;
+
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                &batch as *const _ as *const u8,
+                std::mem::size_of_val(&batch),
+            )
+        };
+
+        let mut parsed = Vec::new();
+        parse_batch(bytes, |event| parsed.push(event));
+        assert_eq!(parsed.len(), 1);
+        parsed.pop().unwrap()
+    }
 
     #[test]
     fn test_parse_realloc_event() {
@@ -105,15 +131,7 @@ mod tests {
         event.data.realloc.new_addr = 0x2000;
         event.data.realloc.size = 256;
 
-        let bytes = unsafe {
-            std::slice::from_raw_parts(
-                &event as *const _ as *const u8,
-                std::mem::size_of_val(&event),
-            )
-        };
-
-        // Parse and validate:
-        let parsed = parse_event(bytes).unwrap();
+        let parsed = parse_single(event);
         assert_eq!(parsed.pid, 1000);
         assert_eq!(parsed.tid, 2000);
         assert_eq!(parsed.timestamp, 12345678);
@@ -139,15 +157,7 @@ mod tests {
         event.data.alloc.addr = 0x1000;
         event.data.alloc.size = 128;
 
-        let bytes = unsafe {
-            std::slice::from_raw_parts(
-                &event as *const _ as *const u8,
-                std::mem::size_of_val(&event),
-            )
-        };
-
-        // Parse and validate:
-        let parsed = parse_event(bytes).unwrap();
+        let parsed = parse_single(event);
         assert_eq!(parsed.pid, 1000);
         assert_eq!(parsed.tid, 2000);
         assert_eq!(parsed.timestamp, 12345678);

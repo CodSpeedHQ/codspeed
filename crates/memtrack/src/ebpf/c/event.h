@@ -48,4 +48,14 @@ struct event {
     } data;
 };
 
+/* Events staged per CPU before being flushed to the ring buffer as one
+ * record, amortizing reservation and wakeup cost across the batch. Only the
+ * first `count` entries are valid. */
+#define EVENT_BATCH_SIZE 64
+
+struct event_batch {
+    uint32_t count;
+    struct event events[EVENT_BATCH_SIZE];
+};
+
 #endif /* __EVENT_H__ */

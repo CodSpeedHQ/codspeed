@@ -1,12 +1,13 @@
 use crate::ebpf::poller::RingBufferPoller;
 use crate::prelude::*;
 use crate::{AllocatorLib, ebpf::MemtrackBpf};
-use crossbeam_channel::Receiver;
+use crossbeam_channel::{Receiver, Sender};
 use runner_shared::artifacts::MemtrackEvent as Event;
 
 pub struct Tracker {
     bpf: MemtrackBpf,
     poller: Option<RingBufferPoller>,
+    event_tx: Option<Sender<Event>>,
 }
 
 impl Tracker {
@@ -34,7 +35,11 @@ impl Tracker {
         let mut bpf = MemtrackBpf::new()?;
         bpf.attach_tracepoints()?;
 
-        Ok(Self { bpf, poller: None })
+        Ok(Self {
+            bpf,
+            poller: None,
+            event_tx: None,
+        })
     }
 
     pub fn attach_allocators(&mut self, libs: &[AllocatorLib]) -> Result<()> {
@@ -54,16 +59,28 @@ impl Tracker {
         self.bpf.add_tracked_pid(pid)?;
         debug!("Tracking PID {pid}");
 
-        let (poller, event_rx) = self.bpf.start_polling_with_channel(10)?;
+        let (poller, event_tx, event_rx) = self.bpf.start_polling_with_channel(10)?;
         self.poller = Some(poller);
+        self.event_tx = Some(event_tx);
 
         Ok(event_rx)
     }
 
-    /// Stop the poll thread, draining ring-buffer stragglers. This closes the
-    /// event channel returned by [`track`].
+    /// Stop the poll thread, draining ring-buffer stragglers and the events
+    /// still staged in the per-CPU batches. This closes the event channel
+    /// returned by [`track`], so tracking must be disabled first.
     pub fn stop_polling(&mut self) {
         self.poller.take();
+
+        let Some(tx) = self.event_tx.take() else {
+            return;
+        };
+        let drained = self.bpf.drain_partial_batches(|event| {
+            let _ = tx.send(event);
+        });
+        if let Err(e) = drained {
+            warn!("Failed to drain staged event batches: {e:#}");
+        }
     }
 
     /// Bump RLIMIT_MEMLOCK for kernels older than 5.11. Newer kernels account BPF
