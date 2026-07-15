@@ -39,6 +39,12 @@ impl RingBufferPoller {
             move || {
                 while !shutdown.load(Ordering::Relaxed) {
                     let _ = ringbuf.poll(timeout);
+
+                    // Records produced while poll() was draining are consumed
+                    // directly (no epoll_wait syscall) until the buffer reads
+                    // empty, so bursts are drained at full speed instead of
+                    // paying a wakeup round-trip per poll cycle.
+                    while ringbuf.consume_raw() > 0 {}
                 }
 
                 // Events may still be sitting in the ring buffer after the last

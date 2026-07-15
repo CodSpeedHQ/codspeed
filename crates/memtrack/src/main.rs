@@ -126,8 +126,11 @@ fn track_command(
     let file_name = MemtrackArtifact::file_name(Some(root_pid));
     let out_file = std::fs::File::create(out_dir.join(file_name))?;
 
+    // Leave headroom for the ring buffer poll thread and the tracked
+    // command: encode workers on every core starve the poller during
+    // allocation bursts, which overflows the kernel ring buffer.
     let n_workers = thread::available_parallelism()
-        .map(|n| n.get())
+        .map(|n| n.get().saturating_sub(2).max(1))
         .unwrap_or(4);
 
     let pipeline_thread = thread::spawn(move || encode_events(event_rx, out_file, n_workers));
