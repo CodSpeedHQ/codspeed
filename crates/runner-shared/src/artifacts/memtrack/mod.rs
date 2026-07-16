@@ -78,6 +78,12 @@ pub enum MemtrackEventKind {
     Brk {
         size: u64,
     },
+    /// A tracked process spawned a child. `pid` is the child, `ppid` the parent.
+    /// Carries no allocation; lets the parser rebuild the process tree and scope
+    /// allocations to a benchmark process plus its descendants.
+    Fork {
+        ppid: pid_t,
+    },
 }
 
 pub struct MemtrackEventStream<R: Read> {
@@ -159,6 +165,7 @@ mod tests {
             MemtrackEventKind::Mmap { size: 9 },
             MemtrackEventKind::Munmap { size: 9 },
             MemtrackEventKind::Brk { size: 9 },
+            MemtrackEventKind::Fork { ppid: 1234 },
         ];
 
         for kind in kinds {

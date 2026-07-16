@@ -9,6 +9,7 @@
 #define EVENT_TYPE_MMAP 6
 #define EVENT_TYPE_MUNMAP 7
 #define EVENT_TYPE_BRK 8
+#define EVENT_TYPE_FORK 9
 
 /* Common header shared by all event types */
 struct event_header {
@@ -45,6 +46,13 @@ struct event {
             uint64_t addr; /* address of mapping */
             uint64_t size; /* size of mapping */
         } mmap;
+
+        /* Process fork event - header.pid is the child, ppid the parent.
+         * Lets the parser rebuild the process tree and scope allocations to a
+         * benchmark process and its descendants. */
+        struct {
+            uint32_t ppid; /* parent pid that spawned header.pid */
+        } fork;
     } data;
 };
 
