@@ -49,15 +49,6 @@ BPF_ARRAY_MAP(tracking_enabled, __u8, 1);
 /*  Counter for events that couldn't be added to the ring buffer */
 BPF_ARRAY_MAP(dropped_events, __u64, 1);
 
-/* Per-CPU staging buffer: events are collected here and flushed to the ring
- * buffer as one batch record, amortizing reservation and wakeup cost. */
-struct {
-    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-    __uint(max_entries, 1);
-    __type(key, __u32);
-    __type(value, struct event_batch);
-} event_batches SEC(".maps");
-
 /* == Code that tracks process forks and execs == */
 
 /* Helper to check if a PID or any of its ancestors should be tracked */
@@ -118,27 +109,6 @@ static __always_inline long wake_flags(void) {
     return avail >= WAKEUP_DATA_SIZE ? BPF_RB_FORCE_WAKEUP : BPF_RB_NO_WAKEUP;
 }
 
-/* Flush a partial batch once its oldest event is this stale, so events from
- * CPUs with a low event rate don't linger in the staging buffer. */
-#define BATCH_MAX_AGE_NS (5 * 1000 * 1000)
-
-/* Emit the staged batch as a single ring buffer record. The verifier requires
- * a compile-time constant size, so partial batches are sent at full record
- * size and `count` marks how many entries are valid. */
-static __always_inline void flush_batch(struct event_batch* batch) {
-    if (batch->count == 0) {
-        return;
-    }
-    if (bpf_ringbuf_output(&events, batch, sizeof(*batch), wake_flags()) < 0) {
-        __u32 zero = 0;
-        __u64* drops = bpf_map_lookup_elem(&dropped_events, &zero);
-        if (drops) {
-            __sync_fetch_and_add(drops, batch->count);
-        }
-    }
-    batch->count = 0;
-}
-
 /* Helper to check if tracking is currently enabled */
 static __always_inline int is_enabled(void) {
     __u32 key = 0;
@@ -176,41 +146,34 @@ static __always_inline __u64* take_param(void* map) {
 /* Macro to handle common event submission boilerplate
  * Usage: SUBMIT_EVENT(event_type, { e->data.foo = bar; })
  */
-#define SUBMIT_EVENT(evt_type, fill_data)                                 \
-    {                                                                     \
-        __u64 tid = bpf_get_current_pid_tgid();                          \
-        __u32 pid = tid >> 32;                                            \
-                                                                          \
-        if (!is_tracked(pid) || !is_enabled()) {                          \
-            return 0;                                                     \
-        }                                                                 \
-                                                                          \
-        __u32 zero = 0;                                                   \
-        struct event_batch* batch =                                       \
-            bpf_map_lookup_elem(&event_batches, &zero);                   \
-        if (!batch) {                                                     \
-            return 0;                                                     \
-        }                                                                 \
-                                                                          \
-        __u32 idx = batch->count;                                         \
-        if (idx >= EVENT_BATCH_SIZE) {                                    \
-            idx = 0;                                                      \
-        }                                                                 \
-        struct event* e = &batch->events[idx];                            \
-        e->header.timestamp = bpf_ktime_get_ns();                         \
-        e->header.pid = pid;                                              \
-        e->header.tid = tid & 0xFFFFFFFF;                                 \
-        e->header.event_type = evt_type;                                  \
-                                                                          \
-        fill_data;                                                        \
-                                                                          \
-        batch->count = idx + 1;                                           \
-        if (batch->count == EVENT_BATCH_SIZE ||                           \
-            e->header.timestamp - batch->events[0].header.timestamp >     \
-                BATCH_MAX_AGE_NS) {                                       \
-            flush_batch(batch);                                           \
-        }                                                                 \
-        return 0;                                                         \
+#define SUBMIT_EVENT(evt_type, fill_data)                               \
+    {                                                                   \
+        __u64 tid = bpf_get_current_pid_tgid();                         \
+        __u32 pid = tid >> 32;                                          \
+                                                                        \
+        if (!is_tracked(pid) || !is_enabled()) {                        \
+            return 0;                                                   \
+        }                                                               \
+                                                                        \
+        struct event* e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);  \
+        if (!e) {                                                       \
+            __u32 zero = 0;                                             \
+            __u64* drops = bpf_map_lookup_elem(&dropped_events, &zero); \
+            if (drops) {                                                \
+                __sync_fetch_and_add(drops, 1);                         \
+            }                                                           \
+            return 0;                                                   \
+        }                                                               \
+                                                                        \
+        e->header.timestamp = bpf_ktime_get_ns();                       \
+        e->header.pid = pid;                                            \
+        e->header.tid = tid & 0xFFFFFFFF;                               \
+        e->header.event_type = evt_type;                                \
+                                                                        \
+        fill_data;                                                      \
+                                                                        \
+        bpf_ringbuf_submit(e, wake_flags());                            \
+        return 0;                                                       \
     }
 
 /* Helper to submit an allocation event (malloc, calloc) */

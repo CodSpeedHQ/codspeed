@@ -142,20 +142,16 @@ pub fn track_command(
     };
     tracker.attach_allocators(extra_allocators)?;
 
-    let mut child = command.spawn().context("Failed to spawn command")?;
+    let child = command.spawn().context("Failed to spawn command")?;
     let root_pid = child.id() as i32;
 
     tracker.enable()?;
     let rx = tracker.track(root_pid)?;
 
-    child.wait().context("Failed to wait for command")?;
-
-    // Stop event production, then drain: stop_polling flushes the ring
-    // buffer and the staged partial batches before closing the channel.
-    tracker.disable()?;
-    tracker.stop_polling();
-
-    let events: Vec<Event> = rx.iter().collect();
+    let mut events = Vec::new();
+    while let Ok(event) = rx.recv_timeout(Duration::from_secs(10)) {
+        events.push(event);
+    }
 
     // Drop the tracker in a new thread to not block the test
     let thread_handle = std::thread::spawn(move || core::mem::drop(tracker));

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use crossbeam_channel::{Receiver, Sender, unbounded};
+use crossbeam_channel::{Receiver, unbounded};
 use libbpf_rs::{MapCore, RingBufferBuilder};
 use runner_shared::artifacts::MemtrackEvent as Event;
 use std::sync::Arc;
@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use super::events::parse_batch;
+use super::events::parse_event;
 
 /// Polls a BPF ring buffer on a background thread and forwards events over a channel.
 pub struct RingBufferPoller {
@@ -17,21 +17,17 @@ pub struct RingBufferPoller {
 
 impl RingBufferPoller {
     /// Poll `rb_map` and forward each parsed event over the returned channel.
-    ///
-    /// Also returns a sender for the same channel so callers can inject
-    /// events drained outside the poll loop (e.g. staged partial batches).
     pub fn with_channel<M: MapCore + 'static>(
         rb_map: &M,
         poll_timeout_ms: u64,
-    ) -> Result<(Self, Sender<Event>, Receiver<Event>)> {
+    ) -> Result<(Self, Receiver<Event>)> {
         let (tx, rx) = unbounded::<Event>();
 
         let mut builder = RingBufferBuilder::new();
-        let batch_tx = tx.clone();
         builder.add(rb_map, move |data| {
-            parse_batch(data, |event| {
-                let _ = batch_tx.send(event);
-            });
+            if let Some(event) = parse_event(data) {
+                let _ = tx.send(event);
+            }
             0
         })?;
         let ringbuf = builder.build()?;
@@ -62,7 +58,6 @@ impl RingBufferPoller {
                 shutdown,
                 poll_thread: Some(poll_thread),
             },
-            tx,
             rx,
         ))
     }

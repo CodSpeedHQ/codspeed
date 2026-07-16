@@ -581,37 +581,10 @@ impl MemtrackBpf {
         poll_timeout_ms: u64,
     ) -> Result<(
         RingBufferPoller,
-        crossbeam_channel::Sender<runner_shared::artifacts::MemtrackEvent>,
         crossbeam_channel::Receiver<runner_shared::artifacts::MemtrackEvent>,
     )> {
         // Use the syscalls skeleton's ring buffer (both programs share the same one)
         RingBufferPoller::with_channel(&self.skel.maps.events, poll_timeout_ms)
-    }
-
-    /// Emit events still sitting in the per-CPU staging batches.
-    ///
-    /// Only safe to call once tracking is disabled and the poller has
-    /// stopped: a concurrently appending producer would race the read.
-    /// The drained events join the stream at its end regardless of their
-    /// timestamp; volume is bounded by `nr_cpus * EVENT_BATCH_SIZE`.
-    pub fn drain_partial_batches(
-        &self,
-        mut emit: impl FnMut(runner_shared::artifacts::MemtrackEvent),
-    ) -> Result<()> {
-        let key = 0u32;
-        let values = self
-            .skel
-            .maps
-            .event_batches
-            .lookup_percpu(&key.to_le_bytes(), libbpf_rs::MapFlags::ANY)
-            .context("Failed to read event_batches staging map")?
-            .ok_or_else(|| anyhow!("event_batches slot 0 missing"))?;
-
-        for value in values {
-            crate::ebpf::events::parse_batch(&value, &mut emit);
-        }
-
-        Ok(())
     }
 }
 
