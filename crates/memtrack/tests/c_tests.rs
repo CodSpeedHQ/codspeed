@@ -2,34 +2,8 @@
 mod shared;
 
 use rstest::rstest;
-use std::fs;
-use std::path::Path;
 use std::process::Command;
 use tempfile::TempDir;
-
-/// Compiles C source code and returns the binary path
-fn compile_c_source(
-    source_code: &str,
-    name: &str,
-    output_dir: &Path,
-) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
-    let source_path = output_dir.join(format!("{name}.c"));
-    let binary_path = output_dir.join(name);
-
-    fs::write(&source_path, source_code)?;
-
-    let output = Command::new("gcc")
-        .args(["-o", binary_path.to_str().unwrap()])
-        .arg(&source_path)
-        .output()?;
-
-    if !output.status.success() {
-        eprintln!("gcc stderr: {}", String::from_utf8_lossy(&output.stderr));
-        return Err("Failed to compile C fixture".into());
-    }
-
-    Ok(binary_path)
-}
 
 struct AllocationTestCase {
     name: &'static str,
@@ -96,7 +70,7 @@ fn test_allocation_tracking(
     #[case] test_case: &AllocationTestCase,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let temp_dir = TempDir::new()?;
-    let binary = compile_c_source(test_case.source, test_case.name, temp_dir.path())?;
+    let binary = shared::compile_c_source(test_case.source, test_case.name, temp_dir.path())?;
 
     assert_events_snapshot_for_each_variant!(test_case.name, || Command::new(&binary))?;
 

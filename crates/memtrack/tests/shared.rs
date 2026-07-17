@@ -6,7 +6,7 @@ use runner_shared::artifacts::{MemtrackEvent as Event, MemtrackEventKind};
 use std::path::Path;
 use std::process::Command;
 
-type TrackResult = anyhow::Result<(Vec<Event>, std::thread::JoinHandle<()>)>;
+pub type TrackResult = anyhow::Result<(Vec<Event>, std::thread::JoinHandle<()>)>;
 
 /// Snapshot every tracked event, ordered by timestamp and deduplicated by
 /// `(addr, kind)` so repeated tracking of one allocation counts once.
@@ -18,10 +18,22 @@ type TrackResult = anyhow::Result<(Vec<Event>, std::thread::JoinHandle<()>)>;
 macro_rules! assert_events_snapshot {
     ($name:expr, $events:expr) => {{
         use itertools::Itertools;
+        use runner_shared::artifacts::MemtrackEventKind;
         use std::mem::discriminant;
 
         let formatted_events: Vec<String> = $events
             .iter()
+            .filter(|e| {
+                // Allocation snapshots track only allocator events; RSS and
+                // process-lifecycle events are asserted by dedicated tests.
+                !matches!(
+                    e.kind,
+                    MemtrackEventKind::Rss { .. }
+                        | MemtrackEventKind::Fork { .. }
+                        | MemtrackEventKind::Exec
+                        | MemtrackEventKind::Exit
+                )
+            })
             .sorted_by_key(|e| e.timestamp)
             .dedup_by(|a, b| a.addr == b.addr && discriminant(&a.kind) == discriminant(&b.kind))
             .map(|e| shared::describe_kind(&e.kind))
@@ -97,6 +109,10 @@ pub fn between_markers(events: &[Event]) -> Vec<Event> {
 
     events
         .iter()
+        // Drop Rss before slicing: the marker window's skip(2) is positional
+        // (it drops [marker-malloc, marker-free]), so a stray rss_stat event
+        // sorting between the pair would displace it and leak the marker free.
+        .filter(|e| !matches!(e.kind, MemtrackEventKind::Rss { .. }))
         .sorted_by_key(|e| e.timestamp)
         .dedup_by(|a, b| a.addr == b.addr && discriminant(&a.kind) == discriminant(&b.kind))
         .skip_while(|e| !is_marker(e))
@@ -147,6 +163,27 @@ pub fn track_binary(binary: &Path) -> TrackResult {
     track_command(Command::new(binary))
 }
 
+pub fn compile_c_source(
+    source_code: &str,
+    name: &str,
+    output_dir: &Path,
+) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
+    let source_path = output_dir.join(format!("{name}.c"));
+    let binary_path = output_dir.join(name);
+    std::fs::write(&source_path, source_code)?;
+
+    let output = Command::new("gcc")
+        .args(["-O0", "-o", binary_path.to_str().unwrap()])
+        .arg(&source_path)
+        .output()?;
+    if !output.status.success() {
+        error!("gcc stderr: {}", String::from_utf8_lossy(&output.stderr));
+        return Err("Failed to compile C fixture".into());
+    }
+
+    Ok(binary_path)
+}
+
 /// Track a command, collecting all memory events. No allocators are pre-attached:
 /// the exec-mapping watcher discovers them as the tracked tree maps executables.
 pub fn track_command(command: Command) -> TrackResult {
@@ -156,6 +193,11 @@ pub fn track_command(command: Command) -> TrackResult {
 /// Track a command under a specific BPF variant rather than the detected one.
 pub fn track_command_with_variant(command: Command, variant: BpfVariant) -> TrackResult {
     track_command_with_tracker(command, Tracker::with_variant(variant)?)
+}
+
+/// Track a command with folio rmap hooks enabled, reconstructing per-process RSS.
+pub fn track_command_with_rmap(command: Command) -> TrackResult {
+    track_command_with_tracker(command, Tracker::new_without_allocators_with_rmap(true)?)
 }
 
 /// How many events of each kind-and-size a run saw. Addresses, timestamps, pids
@@ -246,5 +288,52 @@ fn track_command_with_tracker(command: Command, tracker: Tracker) -> TrackResult
     info!("Tracked {} events", events.len());
     trace!("Events: {events:#?}");
 
+    Ok((events, thread_handle))
+}
+
+/// Track a command with rmap, enabling tracking only after the target creates
+/// `ready_path`. The target is spawned and resumed first, so any memory it
+/// faults before signalling `ready` is already resident when tracking turns on.
+/// The caller enables tracking, then creates `go_path` to release the target.
+pub fn track_command_with_rmap_late_enable(
+    command: Command,
+    ready_path: &Path,
+    go_path: &Path,
+) -> TrackResult {
+    let tracker = Tracker::new_without_allocators_with_rmap(true)?;
+
+    let mut session = tracker.spawn(&command, None)?;
+    let rx = session.take_events()?;
+
+    let handshake = (|| -> anyhow::Result<()> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !ready_path.exists() {
+            if std::time::Instant::now() > deadline {
+                anyhow::bail!("target never signalled baseline-ready");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        tracker.enable_tracking()?;
+        std::fs::write(go_path, b"go")?;
+        Ok(())
+    })();
+
+    // A failed handshake leaves the target blocked on `go_path`; Session has no
+    // Drop kill, so reap it explicitly before propagating or the test hangs.
+    if let Err(e) = handshake {
+        unsafe { libc::kill(session.pid(), libc::SIGKILL) };
+        let _ = session.wait();
+        let _ = tracker.finish();
+        return Err(e);
+    }
+
+    session.wait()?;
+    drop(session);
+    let events: Vec<Event> = rx.iter().collect();
+
+    tracker.finish()?;
+    let thread_handle = std::thread::spawn(move || drop(tracker));
+
+    info!("Tracked {} events (late enable)", events.len());
     Ok((events, thread_handle))
 }
