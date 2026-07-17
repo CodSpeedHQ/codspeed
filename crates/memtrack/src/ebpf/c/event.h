@@ -10,6 +10,7 @@
 #define EVENT_TYPE_MUNMAP 7
 #define EVENT_TYPE_BRK 8
 #define EVENT_TYPE_RSS 9
+#define EVENT_TYPE_RMAP 10
 
 /* Common header shared by all event types */
 struct event_header {
@@ -51,6 +52,12 @@ struct event {
             int32_t member;
             uint64_t size;
         } rss;
+
+        struct {
+            int32_t member; /* MM_* counter index */
+            int64_t delta;
+            uint64_t addr;
+        } rmap;
     } data;
 };
 

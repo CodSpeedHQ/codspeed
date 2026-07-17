@@ -6,10 +6,34 @@ impl MemtrackBpf {
     attach_tracepoint!(sched_fork);
     attach_tracepoint!(rss_stat);
 
+    fn rmap_target_enabled(&self, target: &str) -> bool {
+        !self.btf_disabled_rmap_targets.contains(&target)
+    }
+
     pub fn attach_tracepoints(&mut self) -> Result<()> {
         self.attach_sched_fork()?;
         if let Err(e) = self.attach_rss_stat() {
             warn!("Failed to attach rss_stat tracepoint, RSS collection disabled: {e:#}");
+        }
+        if self.track_rmap {
+            macro_rules! attach_rmap_prog {
+                ($name:ident) => {
+                    paste! {
+                        if self.rmap_target_enabled(stringify!($name)) {
+                            let link = with_skel!(
+                                mut self,
+                                skel => skel.progs.[<fentry_ $name>].attach()
+                            )
+                            .context(format!(
+                                "Failed to attach {} fentry",
+                                stringify!([<fentry_ $name>])
+                            ))?;
+                            self.probes.push(link);
+                        }
+                    }
+                };
+            }
+            for_each_rmap_prog!(attach_rmap_prog);
         }
         Ok(())
     }

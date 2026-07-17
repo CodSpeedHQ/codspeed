@@ -82,6 +82,10 @@ pub enum MemtrackEventKind {
         member: i32,
         size: u64,
     },
+    Rmap {
+        member: i32,
+        delta: i64,
+    },
 }
 
 pub struct MemtrackEventStream<R: Read> {
