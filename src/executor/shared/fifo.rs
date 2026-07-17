@@ -170,6 +170,7 @@ impl RunnerFifo {
         std::process::ExitStatus,
     )> {
         let mut bench_order_by_timestamp = Vec::<(u64, String)>::new();
+        let mut bench_pid_by_ts = Vec::<(u64, pid_t)>::new();
         let mut bench_pids = HashSet::<pid_t>::new();
         let mut markers = Vec::<MarkerType>::new();
 
@@ -206,7 +207,9 @@ impl RunnerFifo {
                 // Fall through to shared implementation for standard commands
                 match &cmd {
                     FifoCommand::CurrentBenchmark { pid, uri } => {
-                        bench_order_by_timestamp.push((get_current_time(), uri.to_string()));
+                        let ts = get_current_time();
+                        bench_order_by_timestamp.push((ts, uri.to_string()));
+                        bench_pid_by_ts.push((ts, *pid));
                         bench_pids.insert(*pid);
                         self.send_cmd(FifoCommand::Ack).await?;
                     }
@@ -273,8 +276,11 @@ impl RunnerFifo {
                     debug!(
                         "Process terminated with status: {exit_status}, stopping the command handler"
                     );
-                    let marker_result =
-                        ExecutionTimestamps::new(&bench_order_by_timestamp, &markers);
+                    let marker_result = ExecutionTimestamps::new(
+                        &bench_order_by_timestamp,
+                        &markers,
+                        &bench_pid_by_ts,
+                    );
                     let fifo_data = FifoBenchmarkData {
                         integration,
                         bench_pids,

@@ -46,6 +46,31 @@ BPF_ARRAY_MAP(tracking_enabled, __u8, 1);
 /*  Counter for events that couldn't be added to the ring buffer */
 BPF_ARRAY_MAP(dropped_events, __u64, 1);
 
+/* Wake the consumer only once this much unconsumed data has accumulated.
+ * Per-event wakeups dominate submission cost at high event rates; batching
+ * them behind a data watermark amortizes the wakeup to ~1 per thousand
+ * events. The userspace poller's poll timeout flushes the tail that never
+ * reaches the watermark. */
+#define WAKEUP_DATA_SIZE (64 * 1024)
+
+static __always_inline long wake_flags(void) {
+    long avail = bpf_ringbuf_query(&events, BPF_RB_AVAIL_DATA);
+    return avail >= WAKEUP_DATA_SIZE ? BPF_RB_FORCE_WAKEUP : BPF_RB_NO_WAKEUP;
+}
+
+/* Helper to check if tracking is currently enabled */
+static __always_inline int is_enabled(void) {
+    __u32 key = 0;
+    __u8* enabled = bpf_map_lookup_elem(&tracking_enabled, &key);
+
+    /* ARRAY-map lookups can't fail for a valid index; fail closed if one ever does. */
+    if (!enabled) {
+        return 0;
+    }
+
+    return *enabled;
+}
+
 /* == Code that tracks process forks and execs == */
 
 /* Helper to check if a PID or any of its ancestors should be tracked */
@@ -87,6 +112,29 @@ int tracepoint_sched_fork(struct trace_event_raw_sched_process_fork* ctx) {
         bpf_map_update_elem(&pids_ppid, &child_pid, &parent_pid, BPF_ANY);
 
         // bpf_printk("auto-tracking child process: child_pid=%u", child_pid);
+
+        /* Emit a fork event so userspace can rebuild the process tree and scope
+         * allocations to a process plus its descendants. Gated on is_enabled()
+         * like allocation events, so only forks inside a measured region reach
+         * the ring buffer. header.pid carries the child: current here is the
+         * parent, so we cannot use the SUBMIT_EVENT macro. */
+        if (is_enabled()) {
+            struct event* e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+            if (!e) {
+                __u32 zero = 0;
+                __u64* drops = bpf_map_lookup_elem(&dropped_events, &zero);
+                if (drops) {
+                    __sync_fetch_and_add(drops, 1);
+                }
+                return 0;
+            }
+            e->header.timestamp = bpf_ktime_get_ns();
+            e->header.pid = child_pid;
+            e->header.tid = child_pid;
+            e->header.event_type = EVENT_TYPE_FORK;
+            e->data.fork.ppid = parent_pid;
+            bpf_ringbuf_submit(e, wake_flags());
+        }
     }
 
     return 0;
@@ -98,31 +146,6 @@ int tracepoint_sched_fork(struct trace_event_raw_sched_process_fork* ctx) {
 #include "attach.bpf.h"
 
 /* == Helper functions for the allocation tracking == */
-
-/* Wake the consumer only once this much unconsumed data has accumulated.
- * Per-event wakeups dominate submission cost at high event rates; batching
- * them behind a data watermark amortizes the wakeup to ~1 per thousand
- * events. The userspace poller's poll timeout flushes the tail that never
- * reaches the watermark. */
-#define WAKEUP_DATA_SIZE (64 * 1024)
-
-static __always_inline long wake_flags(void) {
-    long avail = bpf_ringbuf_query(&events, BPF_RB_AVAIL_DATA);
-    return avail >= WAKEUP_DATA_SIZE ? BPF_RB_FORCE_WAKEUP : BPF_RB_NO_WAKEUP;
-}
-
-/* Helper to check if tracking is currently enabled */
-static __always_inline int is_enabled(void) {
-    __u32 key = 0;
-    __u8* enabled = bpf_map_lookup_elem(&tracking_enabled, &key);
-
-    /* ARRAY-map lookups can't fail for a valid index; fail closed if one ever does. */
-    if (!enabled) {
-        return 0;
-    }
-
-    return *enabled;
-}
 
 /* Helper to store parameter value in map for tracking between entry and return
  */
