@@ -43,19 +43,21 @@ pub fn can_elevate_without_prompt() -> bool {
     is_root_user() || (is_sudo_available() && sudo_runs_without_password())
 }
 
-fn should_prompt_for_sudo_password(
-    stdin_is_terminal: bool,
-    sudo_runs_without_password: bool,
-) -> bool {
-    stdin_is_terminal && !sudo_runs_without_password
+#[cfg(unix)]
+fn has_controlling_terminal() -> bool {
+    std::fs::File::open("/dev/tty")
+        .map(|tty| tty.is_terminal())
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn has_controlling_terminal() -> bool {
+    false
 }
 
 /// Validate sudo access, prompting the user for their password if necessary
 fn validate_sudo_access() -> Result<()> {
-    let needs_password = should_prompt_for_sudo_password(
-        IsTerminal::is_terminal(&std::io::stdin()),
-        sudo_runs_without_password(),
-    );
+    let needs_password = has_controlling_terminal() && !sudo_runs_without_password();
 
     if needs_password {
         suspend_progress_bar(|| {
@@ -127,24 +129,4 @@ where
     }
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::should_prompt_for_sudo_password;
-
-    #[test]
-    fn prompts_with_interactive_stdin_when_sudo_requires_password() {
-        assert!(should_prompt_for_sudo_password(true, false));
-    }
-
-    #[test]
-    fn skips_prompt_without_interactive_stdin() {
-        assert!(!should_prompt_for_sudo_password(false, false));
-    }
-
-    #[test]
-    fn skips_prompt_when_sudo_does_not_need_password() {
-        assert!(!should_prompt_for_sudo_password(true, true));
-    }
 }
