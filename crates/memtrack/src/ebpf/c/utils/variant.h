@@ -77,9 +77,13 @@ static __always_inline struct task_ids current_task_ids(void) {
     return ids;
 }
 
-static __always_inline __u32 current_tgid(void) { return current_task_ids().tgid; }
+static __always_inline __u32 current_tgid(void) {
+    return current_task_ids().tgid;
+}
 
-static __always_inline __u32 current_tid(void) { return current_task_ids().tid; }
+static __always_inline __u32 current_tid(void) {
+    return current_task_ids().tid;
+}
 
 /* Thread-group id of an arbitrary task in the configured namespace.
  *
