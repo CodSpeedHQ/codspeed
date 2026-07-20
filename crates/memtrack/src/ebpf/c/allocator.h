@@ -5,22 +5,24 @@
 #include "utils/map_helpers.h"
 #include "utils/process_tracking.h"
 
-#define UPROBE_ARG_RET(name, arg_expr, submit_block)                                      \
-    BPF_HASH_MAP(name##_arg, __u64, __u64, 10000);                                        \
-    SEC(UPROBE_SEC)                                                                       \
-    int uprobe_##name(struct pt_regs* ctx) { return store_param(&name##_arg, arg_expr); } \
-    SEC(URETPROBE_SEC)                                                                    \
-    int uretprobe_##name(struct pt_regs* ctx) {                                           \
-        __u64* arg_ptr = take_param(&name##_arg);                                         \
-        if (!arg_ptr) {                                                                   \
-            return 0;                                                                     \
-        }                                                                                 \
-        __u64 ret_val = PT_REGS_RC(ctx);                                                  \
-        if (ret_val == 0) {                                                               \
-            return 0;                                                                     \
-        }                                                                                 \
-        __u64 arg0 = *arg_ptr;                                                            \
-        submit_block;                                                                     \
+#define UPROBE_ARG_RET(name, arg_expr, submit_block) \
+    BPF_HASH_MAP(name##_arg, __u64, __u64, 10000);   \
+    SEC(UPROBE_SEC)                                  \
+    int uprobe_##name(struct pt_regs* ctx) {         \
+        return store_param(&name##_arg, arg_expr);   \
+    }                                                \
+    SEC(URETPROBE_SEC)                               \
+    int uretprobe_##name(struct pt_regs* ctx) {      \
+        __u64* arg_ptr = take_param(&name##_arg);    \
+        if (!arg_ptr) {                              \
+            return 0;                                \
+        }                                            \
+        __u64 ret_val = PT_REGS_RC(ctx);             \
+        if (ret_val == 0) {                          \
+            return 0;                                \
+        }                                            \
+        __u64 arg0 = *arg_ptr;                       \
+        submit_block;                                \
     }
 
 #define UPROBE_RET(name, arg_expr, submit_block) \
