@@ -235,8 +235,8 @@ impl OrchestratorConfig {
             poll_results_options: PollResultsOptions::new(false, None),
             extra_env: HashMap::new(),
             fair_sched: false,
-            cycle_estimation: false,
-            exclude_allocations: false,
+            cycle_estimation: true,
+            exclude_allocations: true,
         }
     }
 }

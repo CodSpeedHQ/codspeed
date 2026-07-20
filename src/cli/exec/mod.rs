@@ -90,8 +90,8 @@ fn build_orchestrator_config(
         poll_results_options,
         extra_env: HashMap::new(),
         fair_sched: args.shared.experimental.experimental_fair_sched,
-        cycle_estimation: args.shared.experimental.experimental_cycle_estimation,
-        exclude_allocations: args.shared.experimental.experimental_exclude_allocations,
+        cycle_estimation: args.shared.cycle_estimation,
+        exclude_allocations: args.shared.exclude_allocations,
     })
 }
 

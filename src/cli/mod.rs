@@ -171,6 +171,7 @@ pub async fn run() -> Result<()> {
                 .upload_url
                 .get_or_insert_with(|| codspeed_config.upload_url.clone());
             args.shared.experimental.warn_if_active();
+            args.shared.experimental.warn_if_deprecated();
             run::run(
                 args,
                 &mut api_client,
@@ -185,6 +186,7 @@ pub async fn run() -> Result<()> {
                 .upload_url
                 .get_or_insert_with(|| codspeed_config.upload_url.clone());
             args.shared.experimental.warn_if_active();
+            args.shared.experimental.warn_if_deprecated();
             exec::run(
                 args,
                 &mut api_client,
