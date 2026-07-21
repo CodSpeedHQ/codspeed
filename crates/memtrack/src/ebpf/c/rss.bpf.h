@@ -22,6 +22,30 @@ struct {
     __type(value, struct rss_owner);
 } mm_to_pid SEC(".maps");
 
+/* Foreign-actor rmap attribution: rmap events run by a task other than the mm's
+ * owner (kswapd reclaim, another process's process_madvise, khugepaged, KSM,
+ * uffd) carry no owning-pid context, so mm_owner recovers it from the mm_struct
+ * pointer. pid_mm is the inverse, letting the exec and exit hooks remove an entry
+ * by value.
+ *
+ * Lifecycle invariant: every mm_owner entry is removed when its process execs
+ * (the old mm is freed mid-life) or when its thread group dies, whichever comes
+ * first; LRU eviction is only a backstop. A stale entry surviving mm-pointer
+ * reuse would misattribute another process's events, so ownership is only ever
+ * registered from an in-context (task->mm == mm) event.
+ *
+ * pid_mm is a plain hash on purpose: an LRU inverse could be evicted while its
+ * forward twin stays lookup-hot, leaving exec/exit unable to remove the live
+ * mm_owner entry. Like tracked_pids, its entries are bound to the process
+ * lifecycle and removed at group death. */
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 10240);
+    __type(key, __u64);
+    __type(value, __u32);
+} mm_owner SEC(".maps");
+BPF_HASH_MAP(pid_mm, __u32, __u64, 10240);
+
 #define FOLIO_MAPPING_ANON 0x1UL
 
 const volatile __u32 page_shift = 12;
@@ -144,17 +168,45 @@ static __always_inline int submit_rmap(struct vm_area_struct* vma, __s32 member,
                                        __u64 addr) {
     __u64 mm = (__u64)BPF_CORE_READ(vma, vm_mm);
     struct task_struct* task = bpf_get_current_task_btf();
-    if ((__u64)BPF_CORE_READ(task, mm) != mm) {
-        return 0;
+    __u32 pid = bpf_get_current_pid_tgid() >> 32;
+    __u32 owner;
+
+    if ((__u64)BPF_CORE_READ(task, mm) == mm) {
+        if (!is_tracked(pid)) {
+            return 0;
+        }
+
+        /* Register ownership so foreign actors can later attribute to this pid.
+         * Both maps are validated (not just written) on every in-context event:
+         * the lookups keep the hot path cheap AND keep both entries LRU-fresh,
+         * since pid_mm is otherwise never read until exec/exit and could be
+         * evicted independently of its still-hot mm_owner twin. */
+        __u32* reg = bpf_map_lookup_elem(&mm_owner, &mm);
+        if (!reg || *reg != pid) {
+            bpf_map_update_elem(&mm_owner, &mm, &pid, BPF_ANY);
+        }
+        __u64* cur_mm = bpf_map_lookup_elem(&pid_mm, &pid);
+        if (!cur_mm || *cur_mm != mm) {
+            bpf_map_update_elem(&pid_mm, &pid, &mm, BPF_ANY);
+        }
+        owner = pid;
+    } else {
+        /* Foreign actor (task->mm != mm, including kthreads whose task->mm is NULL):
+         * recover the owner from the in-context registration. Fail toward dropping
+         * the event on any uncertainty about ownership. */
+        __u32* found = bpf_map_lookup_elem(&mm_owner, &mm);
+        if (!found) {
+            return 0;
+        }
+        owner = *found;
+        if (!is_tracked(owner)) {
+            return 0;
+        }
     }
 
-    __u64 tid = bpf_get_current_pid_tgid();
-    __u32 pid = tid >> 32;
-    if (!is_tracked(pid)) {
-        return 0;
-    }
-
-    SUBMIT_EVENT_AS(pid, EVENT_TYPE_RMAP, {
+    /* header.tid is stamped from the current task; for a foreign actor it
+     * identifies the performer, not the owning pid. */
+    SUBMIT_EVENT_AS(owner, EVENT_TYPE_RMAP, {
         e->data.rmap.member = member;
         e->data.rmap.delta = delta;
         e->data.rmap.addr = addr;
@@ -244,23 +296,87 @@ int tracepoint_task_newtask(struct trace_event_raw_task_newtask* ctx) {
         return 0;
     }
 
+    /* Register the child here rather than on sched_process_fork: that
+     * tracepoint fires for CLONE_THREAD too and carries only raw task pids,
+     * which would fill the tracking maps with thread tids that no exit path
+     * removes (group death deletes only the tgid). task_newtask fires before
+     * wake_up_new_task, so registration precedes any event from the child. */
     __u32 child_pid = ctx->pid;
+    track_child(child_pid, parent_pid);
+
     SUBMIT_EVENT_AS(child_pid, EVENT_TYPE_FORK, { e->data.fork.parent_pid = parent_pid; });
+}
+
+/* Remove pid's ownership registration. The mm_owner value is verified against
+ * pid before deleting: a stale pid_mm entry (LRU eviction skew) could otherwise
+ * point at an mm since re-registered by another process, and deleting that
+ * would silence a live owner's foreign attribution. */
+static __always_inline void drop_mm_ownership(__u32 pid) {
+    __u64* mm = bpf_map_lookup_elem(&pid_mm, &pid);
+    if (mm) {
+        __u32* owner = bpf_map_lookup_elem(&mm_owner, mm);
+        if (owner && *owner == pid) {
+            bpf_map_delete_elem(&mm_owner, mm);
+        }
+    }
+    bpf_map_delete_elem(&pid_mm, &pid);
 }
 
 SEC("tracepoint/sched/sched_process_exec")
 int tracepoint_sched_process_exec(void* ctx) {
-    SUBMIT_EVENT(EVENT_TYPE_EXEC, {});
+    __u32 pid = bpf_get_current_pid_tgid() >> 32;
+    if (!is_tracked(pid)) {
+        return 0;
+    }
+
+    /* Maintain ownership before submitting (SUBMIT_EVENT_AS returns from the
+     * function). Exec frees the old mm long before group death, so the stale
+     * pointer must be dropped here or a reused mm_struct would be misattributed. */
+    drop_mm_ownership(pid);
+
+    struct task_struct* task = bpf_get_current_task_btf();
+    __u64 new_mm = (__u64)BPF_CORE_READ(task, mm);
+    if (new_mm) {
+        bpf_map_update_elem(&mm_owner, &new_mm, &pid, BPF_ANY);
+        bpf_map_update_elem(&pid_mm, &pid, &new_mm, BPF_ANY);
+    }
+
+    SUBMIT_EVENT_AS(pid, EVENT_TYPE_EXEC, {});
 }
 
 SEC("tracepoint/sched/sched_process_exit")
 int tracepoint_sched_process_exit(void* ctx) {
-    __u64 tid = bpf_get_current_pid_tgid();
-    if ((tid >> 32) != (tid & 0xFFFFFFFF)) {
+    __u32 pid = bpf_get_current_pid_tgid() >> 32;
+    if (!is_tracked(pid)) {
         return 0;
     }
 
-    SUBMIT_EVENT(EVENT_TYPE_EXIT, {});
+    /* EXIT marks the death of the whole thread group, not of one thread: the
+     * leader can pthread_exit while workers keep running, and the last thread
+     * to exit need not be the leader. do_exit decrements signal->live before
+     * this tracepoint fires, so live == 0 identifies the dying thread group's
+     * final exit — but concurrently exiting threads can BOTH read 0, so the
+     * tracked_pids delete below arbitrates: only the task that wins it emits. */
+    struct task_struct* task = bpf_get_current_task_btf();
+    if (BPF_CORE_READ(task, signal, live.counter) != 0) {
+        return 0;
+    }
+
+    /* Untrack the pid before submitting: lifetime events are gated only on
+     * is_tracked, so a stale entry would keep streaming events if the kernel
+     * reuses the pid for an unrelated process. Untracking here also keeps the
+     * fixed-size tracking maps from filling up over long sessions. The delete
+     * doubles as the exactly-once claim on EXIT. */
+    if (bpf_map_delete_elem(&tracked_pids, &pid) != 0) {
+        return 0;
+    }
+    bpf_map_delete_elem(&pids_ppid, &pid);
+
+    /* Drop the ownership mapping so foreign actors stop attributing to a pid
+     * the kernel may reuse. */
+    drop_mm_ownership(pid);
+
+    SUBMIT_EVENT_AS(pid, EVENT_TYPE_EXIT, {});
 }
 
 #endif /* __RSS_BPF_H__ */

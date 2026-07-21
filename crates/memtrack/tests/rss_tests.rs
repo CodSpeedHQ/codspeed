@@ -203,6 +203,11 @@ fn first_fork_pair(events: &[MemtrackEvent]) -> Option<(i32, i32)> {
 /// Pins reconstructed rmap addresses to the exact punched range: hole pages are
 /// the only ones removed and later re-added; every other page in the region is
 /// added first and only removed afterwards.
+///
+/// Only own-context events (tid == pid; the fixture is single-threaded) are
+/// considered: foreign actors like kcompactd migrating a page produce a
+/// remove-then-add on arbitrary pages, which the attribution of foreign rmap
+/// events makes visible here.
 fn assert_rmap_hole_addresses(
     events: &[MemtrackEvent],
     base: u64,
@@ -220,6 +225,9 @@ fn assert_rmap_hole_addresses(
         let MemtrackEventKind::Rmap { delta, .. } = event.kind else {
             continue;
         };
+        if event.tid != event.pid {
+            continue;
+        }
         if event.addr < base || event.addr >= base + len {
             continue;
         }
@@ -368,6 +376,68 @@ fn test_rss_external_reclaim() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[test_with::env(GITHUB_ACTIONS)]
+#[test]
+fn test_rss_rmap_external_reclaim() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = TempDir::new()?;
+    let binary = shared::compile_c_source(
+        include_str!("../testdata/rss/madvise_extern.c"),
+        "madvise_extern",
+        temp_dir.path(),
+    )?;
+    let (events, handle) = shared::track_command_with_rmap(Command::new(&binary))?;
+    handle.join().unwrap();
+
+    // Single fork: parent_pid == A (owner that faulted the file region), event.pid == B
+    // (external caller of process_madvise(MADV_PAGEOUT) against A from its own context).
+    let (a, b) = events
+        .iter()
+        .find_map(|e| match e.kind {
+            MemtrackEventKind::Fork { parent_pid } => Some((parent_pid, e.pid)),
+            _ => None,
+        })
+        .expect("expected a fork event");
+
+    // Sanity: A's own in-context file-page faults are reconstructed by rmap.
+    let in_context_add: i64 = events
+        .iter()
+        .filter_map(|e| match e.kind {
+            MemtrackEventKind::Rmap { member: 0, delta } if e.pid == a && delta > 0 => Some(delta),
+            _ => None,
+        })
+        .sum();
+    let in_context_bytes = in_context_add as u64 * 4096;
+    assert!(
+        in_context_bytes >= 32 * MIB,
+        "in-context file rmap adds too small: {in_context_bytes}"
+    );
+
+    // The point of the test: a file-page remove owned by A but emitted from B's
+    // context (tid == B), only present when the foreign reclaim's rmap events are
+    // attributed to the owning process via the mm_owner map.
+    let external_removed: i64 = events
+        .iter()
+        .filter_map(|e| match e.kind {
+            MemtrackEventKind::Rmap { member: 0, delta }
+                if e.pid == a && e.tid == b && delta < 0 =>
+            {
+                Some(-delta)
+            }
+            _ => None,
+        })
+        .sum();
+    assert!(
+        external_removed > 0,
+        "external MADV_PAGEOUT remove not attributed to the owner (pid=A, tid=B)"
+    );
+    let external_bytes = external_removed as u64 * 4096;
+    assert!(
+        external_bytes >= 8 * MIB,
+        "external MADV_PAGEOUT remove not attributed to the owner: only {external_bytes} bytes"
+    );
+    Ok(())
+}
+
 /// TEMPORARY diagnostic: track a real-world workload (`ls /nix/store`, ~50 MiB
 /// peak on a populated store) and cross-check the reconstructed rss_stat and
 /// rmap peaks against the kernel's own accounting (`wait4` ru_maxrss) from an
@@ -447,18 +517,18 @@ fn test_rss_ls_nix_store() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// rss_stat is an absolute kernel counter; the rmap estimate is reconstructed
-/// from zero by summing folio add/remove deltas. When tracking is enabled only
-/// after a process has already faulted a resident region, rss_stat's first
-/// reading includes that region but the rmap accumulator never saw its adds, so
-/// rmap sits a fixed offset (the pre-enable resident set) below rss_stat.
+/// from zero by summing folio add/remove deltas. Both are emitted for the
+/// whole lifetime of a tracked pid, independent of the enable toggle (which
+/// only gates allocator events): a delta stream that starts mid-life could
+/// never recover the resident baseline faulted before enable.
 ///
 /// The fixture faults a 64 MiB anon baseline before `enable_tracking`, then a
 /// 64 MiB anon region after. Reduced with the same Exec-reset lifecycle the
-/// production parser uses, rss_stat peaks at ~128 MiB (absolute) while rmap
-/// peaks at ~64 MiB (post-enable growth only).
+/// production parser uses, both series peak at ~128 MiB: the pre-enable
+/// baseline is visible to rmap because the pid is tracked from spawn.
 #[test_with::env(GITHUB_ACTIONS)]
 #[test]
-fn test_rss_rmap_late_enable_baseline_loss() -> Result<(), Box<dyn std::error::Error>> {
+fn test_rss_rmap_late_enable_covers_baseline() -> Result<(), Box<dyn std::error::Error>> {
     const REGION_MIB: u64 = 64;
 
     let temp_dir = TempDir::new()?;
@@ -497,20 +567,113 @@ fn test_rss_rmap_late_enable_baseline_loss() -> Result<(), Box<dyn std::error::E
         rss.anon_mib,
         2 * REGION_MIB
     );
-    // Post-enable growth is visible to rmap.
+    // The rmap accumulator covers the pre-enable baseline too: lifetime
+    // events are gated on is_tracked, not is_enabled.
     assert!(
-        rmap.anon_mib >= REGION_MIB - 16,
-        "rmap anon peak {} MiB too small; post-enable growth should be tracked",
-        rmap.anon_mib
+        rmap.anon_mib >= 2 * REGION_MIB - 16,
+        "rmap anon peak {} MiB misses the pre-enable baseline; expected ~{} MiB",
+        rmap.anon_mib,
+        2 * REGION_MIB
     );
-    // The reproduction: rmap misses the pre-enable baseline, undercounting
-    // rss_stat by roughly one region.
-    let gap = rss.anon_mib.saturating_sub(rmap.anon_mib);
+    let gap = rss.anon_mib.abs_diff(rmap.anon_mib);
     assert!(
-        gap >= REGION_MIB - 16,
-        "expected rmap to undercount rss_stat by ~{} MiB (pre-enable baseline loss); gap was {} MiB",
-        REGION_MIB,
+        gap <= 16,
+        "rss_stat ({} MiB) and rmap ({} MiB) diverged by {} MiB despite lifetime tracking",
+        rss.anon_mib,
+        rmap.anon_mib,
         gap
+    );
+    Ok(())
+}
+
+/// The leader thread can pthread_exit while worker threads keep the process
+/// alive; EXIT must mark thread-group death, not leader exit. The fixture's
+/// worker faults a 64 MiB anon region only after the leader is a zombie, so
+/// an exit path keyed on the leader would untrack the pid before the region
+/// is faulted and emit EXIT ahead of the worker's rmap events.
+#[test_with::env(GITHUB_ACTIONS)]
+#[test]
+fn test_rss_rmap_leader_exit_keeps_tracking() -> Result<(), Box<dyn std::error::Error>> {
+    const REGION_MIB: u64 = 64;
+
+    let (_raw_report, events) = track_fixture(
+        include_str!("../testdata/rss/rmap_leader_exit.c"),
+        "rmap_leader_exit",
+        shared::track_command_with_rmap,
+    )?;
+
+    // The fixture process is the pid with the largest anon rmap peak.
+    let (_rss_stat, rmap) = per_pid_peaks(&events);
+    let rmap_peak = rmap
+        .iter()
+        .max_by_key(|p| p.anon_mib)
+        .ok_or("no rmap pid observed")?;
+    assert!(
+        rmap_peak.anon_mib >= REGION_MIB - 16,
+        "rmap anon peak {} MiB misses the worker's post-leader-exit region (~{} MiB)",
+        rmap_peak.anon_mib,
+        REGION_MIB
+    );
+
+    let pid = rmap_peak.pid;
+    let exits: Vec<&MemtrackEvent> = events
+        .iter()
+        .filter(|e| e.pid == pid && matches!(e.kind, MemtrackEventKind::Exit))
+        .collect();
+    assert_eq!(exits.len(), 1, "expected exactly one EXIT for pid {pid}");
+
+    let last_rmap_ts = events
+        .iter()
+        .filter(|e| e.pid == pid && matches!(e.kind, MemtrackEventKind::Rmap { .. }))
+        .map(|e| e.timestamp)
+        .max()
+        .ok_or("no rmap events for fixture pid")?;
+    assert!(
+        exits[0].timestamp > last_rmap_ts,
+        "EXIT fired before the worker's rmap events: leader exit was treated as process death"
+    );
+    Ok(())
+}
+
+/// A fork issued by a worker thread must still track the child: registration
+/// keys on the parent's tgid (task_newtask fires in the cloning task, whose
+/// pid_tgid upper half is the tgid), not on the raw creator tid.
+#[test_with::env(GITHUB_ACTIONS)]
+#[test]
+fn test_rss_rmap_thread_fork_tracks_child() -> Result<(), Box<dyn std::error::Error>> {
+    const REGION_MIB: u64 = 64;
+
+    let (_raw_report, events) = track_fixture(
+        include_str!("../testdata/rss/rmap_thread_fork.c"),
+        "rmap_thread_fork",
+        shared::track_command_with_rmap,
+    )?;
+
+    // Single fork in the fixture: parent = the fixture process (tgid), child =
+    // the region-faulting process.
+    let (parent, child) = events
+        .iter()
+        .find_map(|e| match e.kind {
+            MemtrackEventKind::Fork { parent_pid } => Some((parent_pid, e.pid)),
+            _ => None,
+        })
+        .ok_or("no fork event: worker-thread fork was not tracked")?;
+    assert_ne!(parent, child);
+
+    let child_anon: i64 = events
+        .iter()
+        .filter_map(|e| match e.kind {
+            MemtrackEventKind::Rmap { member: 1, delta } if e.pid == child && delta > 0 => {
+                Some(delta)
+            }
+            _ => None,
+        })
+        .sum();
+    assert!(
+        child_anon * 4096 >= ((REGION_MIB - 16) * MIB) as i64,
+        "child of a worker-thread fork missed rmap tracking: anon adds {} bytes, expected ~{} MiB",
+        child_anon * 4096,
+        REGION_MIB
     );
     Ok(())
 }
