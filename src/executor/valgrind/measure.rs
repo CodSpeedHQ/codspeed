@@ -26,13 +26,18 @@ fn get_valgrind_args(tool: &SimulationTool, config: &ExecutorConfig) -> Vec<Stri
         "--I1=32768,8,64",
         "--D1=32768,8,64",
         "--LL=8388608,16,64",
-        "--instr-atstart=no",
         "--collect-systime=nsec",
         "--read-inline-info=yes",
     ]
     .iter()
     .map(|x| x.to_string())
     .collect();
+
+    args.push(if config.simulation_track_subprocess {
+        "--instr-atstart=inherit".to_string()
+    } else {
+        "--instr-atstart=no".to_string()
+    });
 
     match tool {
         SimulationTool::Callgrind => {
@@ -44,6 +49,11 @@ fn get_valgrind_args(tool: &SimulationTool, config: &ExecutorConfig) -> Vec<Stri
             args.push("--compress-strings=no".to_string());
             args.push("--combine-dumps=yes".to_string());
             args.push("--dump-line=no".to_string());
+            if std::env::var("CALLGRIND_SEPARATE_THREADS").is_ok() {
+                args.push("--separate-threads=yes".to_string());
+            } else {
+                args.push("--separate-threads=no".to_string());
+            }
         }
         SimulationTool::Tracegrind => {
             args.push("--tool=tracegrind".to_string());

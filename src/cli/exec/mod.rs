@@ -92,6 +92,7 @@ fn build_orchestrator_config(
         fair_sched: args.shared.experimental.experimental_fair_sched,
         cycle_estimation: args.shared.cycle_estimation,
         exclude_allocations: args.shared.exclude_allocations,
+        simulation_track_subprocess: args.shared.simulation_track_subprocess,
     })
 }
 

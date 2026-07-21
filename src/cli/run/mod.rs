@@ -71,6 +71,7 @@ impl RunArgs {
                 base: None,
                 cycle_estimation: true,
                 exclude_allocations: false,
+                simulation_track_subprocess: false,
                 profiler_run_args: ProfilerRunArgs {
                     enable_profiler: false,
                     enable_perf: None,
@@ -133,6 +134,7 @@ fn build_orchestrator_config(
         fair_sched: args.shared.experimental.experimental_fair_sched,
         cycle_estimation: args.shared.cycle_estimation,
         exclude_allocations: args.shared.exclude_allocations,
+        simulation_track_subprocess: args.shared.simulation_track_subprocess,
     })
 }
 
