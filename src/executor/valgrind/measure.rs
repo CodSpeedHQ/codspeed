@@ -26,7 +26,6 @@ fn get_valgrind_args(tool: &SimulationTool, config: &ExecutorConfig) -> Vec<Stri
         "--I1=32768,8,64",
         "--D1=32768,8,64",
         "--LL=8388608,16,64",
-        "--instr-atstart=no",
         "--collect-systime=nsec",
         "--read-inline-info=yes",
     ]
@@ -34,10 +33,19 @@ fn get_valgrind_args(tool: &SimulationTool, config: &ExecutorConfig) -> Vec<Stri
     .map(|x| x.to_string())
     .collect();
 
+    args.push(if config.simulation_track_subprocess {
+        "--instr-atstart=inherit".to_string()
+    } else {
+        "--instr-atstart=no".to_string()
+    });
+
     match tool {
         SimulationTool::Callgrind => {
             if config.cycle_estimation {
                 args.push("--cycle-estimation=yes".to_string());
+                args.push("--separate-threads=yes".to_string());
+            } else {
+                args.push("--separate-threads=no".to_string());
             }
 
             args.push("--tool=callgrind".to_string());

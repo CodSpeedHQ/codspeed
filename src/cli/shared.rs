@@ -135,6 +135,15 @@ pub struct ExecAndRunSharedArgs {
     )]
     pub exclude_allocations: bool,
 
+    /// Measure the subprocesses spawned by the benchmarked process in simulation mode.
+    #[arg(
+        long,
+        env = "CODSPEED_SIMULATION_TRACK_SUBPROCESS",
+        default_value_t = false,
+        action = clap::ArgAction::Set
+    )]
+    pub simulation_track_subprocess: bool,
+
     #[command(flatten)]
     pub profiler_run_args: ProfilerRunArgs,
 
