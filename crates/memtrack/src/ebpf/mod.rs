@@ -9,4 +9,4 @@ mod tracker;
 pub use memtrack::{
     BpfVariant, MemtrackBpf, OwnershipMaps, ResolvedSymbols, RmapSupport, resolve_symbol_offsets,
 };
-pub use tracker::Tracker;
+pub use tracker::{Tracker, TrackerOptions};

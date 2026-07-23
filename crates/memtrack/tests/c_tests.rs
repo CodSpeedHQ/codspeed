@@ -76,3 +76,52 @@ fn test_allocation_tracking(
 
     Ok(())
 }
+
+#[test_with::env(GITHUB_ACTIONS)]
+#[test_log::test]
+fn test_track_allocators_disabled_skips_allocations() -> Result<(), Box<dyn std::error::Error>> {
+    use runner_shared::artifacts::MemtrackEventKind;
+
+    let temp_dir = TempDir::new()?;
+    let binary = shared::compile_c_source(
+        include_str!("../testdata/malloc_mmap.c"),
+        "malloc_mmap",
+        temp_dir.path(),
+    )?;
+
+    let (events, thread_handle) = shared::track_command_with_opts(
+        std::process::Command::new(&binary),
+        memtrack::TrackerOptions::builder()
+            .allocators(false)
+            .build(),
+    )?;
+
+    let has_mmap = events
+        .iter()
+        .any(|e| matches!(e.kind, MemtrackEventKind::Mmap { .. }));
+    assert!(
+        has_mmap,
+        "expected at least one Mmap event with allocators disabled"
+    );
+
+    let alloc_events: Vec<_> = events
+        .iter()
+        .filter(|e| {
+            matches!(
+                e.kind,
+                MemtrackEventKind::Malloc { .. }
+                    | MemtrackEventKind::Free
+                    | MemtrackEventKind::Calloc { .. }
+                    | MemtrackEventKind::Realloc { .. }
+                    | MemtrackEventKind::AlignedAlloc { .. }
+            )
+        })
+        .collect();
+    assert!(
+        alloc_events.is_empty(),
+        "expected no allocation events with allocators disabled, got {alloc_events:?}"
+    );
+
+    thread_handle.join().unwrap();
+    Ok(())
+}

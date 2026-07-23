@@ -2,7 +2,7 @@
 
 pub use memtrack::OwnershipMaps;
 use memtrack::prelude::*;
-use memtrack::{BpfVariant, Tracker};
+use memtrack::{BpfVariant, Tracker, TrackerOptions};
 use runner_shared::artifacts::{MemtrackEvent as Event, MemtrackEventKind};
 use std::path::Path;
 use std::process::Command;
@@ -22,17 +22,19 @@ macro_rules! assert_events_snapshot {
         use runner_shared::artifacts::MemtrackEventKind;
         use std::mem::discriminant;
 
+        // Keep only allocator events. mmap/munmap/brk sizes reflect allocator
+        // arena reservations that vary per run, so including them here would
+        // make these snapshots nondeterministic.
         let formatted_events: Vec<String> = $events
             .iter()
             .filter(|e| {
-                // RSS and lifecycle events are asserted by dedicated tests, not snapshots.
-                !matches!(
+                matches!(
                     e.kind,
-                    MemtrackEventKind::Rss { .. }
-                        | MemtrackEventKind::Rmap { .. }
-                        | MemtrackEventKind::Fork { .. }
-                        | MemtrackEventKind::Exec
-                        | MemtrackEventKind::Exit
+                    MemtrackEventKind::Malloc { .. }
+                        | MemtrackEventKind::Free
+                        | MemtrackEventKind::Calloc { .. }
+                        | MemtrackEventKind::Realloc { .. }
+                        | MemtrackEventKind::AlignedAlloc { .. }
                 )
             })
             .sorted_by_key(|e| e.timestamp)
@@ -195,10 +197,10 @@ pub fn compile_c_source(
     Ok(binary_path)
 }
 
-/// Track a command, collecting all memory events. No allocators are pre-attached:
-/// the exec-mapping watcher discovers them as the tracked tree maps executables.
+/// Track a command with the default probes: no rmap, and allocators discovered
+/// by the exec-mapping watcher as the tracked tree maps executables.
 pub fn track_command(command: Command) -> TrackResult {
-    track_command_with_tracker(command, Tracker::new()?)
+    track_command_with_opts(command, TrackerOptions::builder().build())
 }
 
 /// Track a command under a specific BPF variant rather than the detected one.
@@ -206,9 +208,22 @@ pub fn track_command_with_variant(command: Command, variant: BpfVariant) -> Trac
     track_command_with_tracker(command, Tracker::with_variant(variant)?)
 }
 
+/// RSS reconstruction from the folio rmap hooks, without allocator probes.
+fn rmap_only_options() -> TrackerOptions {
+    TrackerOptions::builder()
+        .allocators(false)
+        .rmap(true)
+        .build()
+}
+
 /// Track a command with folio rmap hooks enabled, reconstructing per-process RSS.
 pub fn track_command_with_rmap(command: Command) -> TrackResult {
-    track_command_with_tracker(command, Tracker::new_without_allocators_with_rmap(true)?)
+    track_command_with_opts(command, rmap_only_options())
+}
+
+/// Track a command with an explicit probe selection rather than the environment's.
+pub fn track_command_with_opts(command: Command, options: TrackerOptions) -> TrackResult {
+    track_command_with_tracker(command, Tracker::with_options(options)?)
 }
 
 /// Track a command with rmap hooks and snapshot its ownership maps after the
@@ -216,7 +231,7 @@ pub fn track_command_with_rmap(command: Command) -> TrackResult {
 pub fn track_command_with_rmap_maps(
     command: Command,
 ) -> anyhow::Result<(Vec<Event>, OwnershipMaps, std::thread::JoinHandle<()>)> {
-    let tracker = Tracker::new_without_allocators_with_rmap(true)?;
+    let tracker = Tracker::with_options(rmap_only_options())?;
     let (tracker, events, ()) = run_tracked(command, tracker, |_, _| Ok(()))?;
     let maps = tracker.ownership_maps()?;
     Ok((events, maps, std::thread::spawn(move || drop(tracker))))
@@ -232,7 +247,7 @@ pub fn track_command_with_rmap_checkpoint(
     ready: &Path,
     release: &Path,
 ) -> anyhow::Result<(Vec<Event>, OwnershipMaps, i32, std::thread::JoinHandle<()>)> {
-    let tracker = Tracker::new_without_allocators_with_rmap(true)?;
+    let tracker = Tracker::with_options(rmap_only_options())?;
     let (tracker, events, (maps, root_pid)) = run_tracked(command, tracker, |tracker, pid| {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
         while !ready.exists() && std::time::Instant::now() < deadline {

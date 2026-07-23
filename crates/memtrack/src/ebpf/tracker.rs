@@ -8,6 +8,30 @@ use std::os::unix::process::CommandExt;
 use std::process::Command;
 use std::sync::Arc;
 use std::sync::mpsc;
+use typed_builder::TypedBuilder;
+
+#[derive(Debug, Clone, Copy, TypedBuilder)]
+pub struct TrackerOptions {
+    /// Attach allocator uprobes (malloc/free/calloc/...) through the
+    /// exec-mapping watcher.
+    #[builder(default = true)]
+    pub allocators: bool,
+    /// Reconstruct per-process RSS from the folio rmap fentry hooks.
+    #[builder(default = false)]
+    pub rmap: bool,
+}
+
+impl TrackerOptions {
+    fn from_env() -> Self {
+        Self::builder()
+            .allocators(!matches!(
+                std::env::var("CODSPEED_MEMTRACK_TRACK_ALLOCATORS").as_deref(),
+                Ok("0") | Ok("false")
+            ))
+            .rmap(std::env::var("CODSPEED_MEMTRACK_TRACK_RMAP").is_ok_and(|v| v == "1"))
+            .build()
+    }
+}
 
 pub struct Tracker {
     bpf: Arc<Mutex<MemtrackBpf>>,
@@ -19,28 +43,27 @@ impl Tracker {
     /// Create a new tracker. The exec-mapping watcher discovers and attaches
     /// allocator probes as the tracked process tree maps executable files.
     pub fn new() -> Result<Self> {
-        let track_rmap = Self::track_rmap_from_env();
-        Self::build(MemtrackBpf::new_with_rmap(track_rmap)?, true)
+        Self::with_options(TrackerOptions::from_env())
+    }
+
+    /// Create a tracker from an explicit probe selection rather than the environment.
+    pub fn with_options(options: TrackerOptions) -> Result<Self> {
+        Self::build(
+            MemtrackBpf::new_with_rmap(options.rmap)?,
+            options.allocators,
+        )
     }
 
     /// Like [`Tracker::new`], but pinned to a specific BPF variant instead of
     /// the detected one.
     pub fn with_variant(variant: BpfVariant) -> Result<Self> {
-        let track_rmap = Self::track_rmap_from_env();
+        let track_rmap = TrackerOptions::from_env().rmap;
         Self::build(MemtrackBpf::with_variant(variant, track_rmap)?, true)
     }
 
-    fn track_rmap_from_env() -> bool {
-        std::env::var("CODSPEED_MEMTRACK_TRACK_RMAP").is_ok_and(|v| v == "1")
-    }
-
-    /// Track per-process RSS (rss_stat tracepoint and, when `track_rmap`, folio
-    /// rmap fentries) without allocator probes; no exec-mapping watcher or
-    /// attach worker runs.
-    pub fn new_without_allocators_with_rmap(track_rmap: bool) -> Result<Self> {
-        Self::build(MemtrackBpf::new_with_rmap(track_rmap)?, false)
-    }
-
+    /// Build a tracker: attach lifetime tracepoints (and rmap fentries when the
+    /// skeleton was opened for them), plus, when `allocators` is set, the
+    /// exec-mapping watcher and the on-demand allocator-attach worker.
     fn build(mut bpf: MemtrackBpf, allocators: bool) -> Result<Self> {
         Self::bump_memlock_rlimit()?;
 
