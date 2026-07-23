@@ -1,7 +1,7 @@
 #![allow(dead_code, unused)]
 
 use memtrack::prelude::*;
-use memtrack::{BpfVariant, Tracker};
+use memtrack::{BpfVariant, Tracker, TrackerOptions};
 use runner_shared::artifacts::{MemtrackEvent as Event, MemtrackEventKind};
 use std::path::Path;
 use std::process::Command;
@@ -21,17 +21,19 @@ macro_rules! assert_events_snapshot {
         use runner_shared::artifacts::MemtrackEventKind;
         use std::mem::discriminant;
 
+        // Keep only allocator events. mmap/munmap/brk sizes reflect allocator
+        // arena reservations that vary per run, so including them here would
+        // make these snapshots nondeterministic.
         let formatted_events: Vec<String> = $events
             .iter()
             .filter(|e| {
-                // Allocation snapshots track only allocator events; RSS and
-                // process-lifecycle events are asserted by dedicated tests.
-                !matches!(
+                matches!(
                     e.kind,
-                    MemtrackEventKind::Rss { .. }
-                        | MemtrackEventKind::Fork { .. }
-                        | MemtrackEventKind::Exec
-                        | MemtrackEventKind::Exit
+                    MemtrackEventKind::Malloc { .. }
+                        | MemtrackEventKind::Free
+                        | MemtrackEventKind::Calloc { .. }
+                        | MemtrackEventKind::Realloc { .. }
+                        | MemtrackEventKind::AlignedAlloc { .. }
                 )
             })
             .sorted_by_key(|e| e.timestamp)
@@ -184,10 +186,10 @@ pub fn compile_c_source(
     Ok(binary_path)
 }
 
-/// Track a command, collecting all memory events. No allocators are pre-attached:
-/// the exec-mapping watcher discovers them as the tracked tree maps executables.
+/// Track a command with the default probes: no rmap, and allocators discovered
+/// by the exec-mapping watcher as the tracked tree maps executables.
 pub fn track_command(command: Command) -> TrackResult {
-    track_command_with_tracker(command, Tracker::new()?)
+    track_command_with_opts(command, TrackerOptions::builder().build())
 }
 
 /// Track a command under a specific BPF variant rather than the detected one.
@@ -197,7 +199,18 @@ pub fn track_command_with_variant(command: Command, variant: BpfVariant) -> Trac
 
 /// Track a command with folio rmap hooks enabled, reconstructing per-process RSS.
 pub fn track_command_with_rmap(command: Command) -> TrackResult {
-    track_command_with_tracker(command, Tracker::new_without_allocators_with_rmap(true)?)
+    track_command_with_opts(
+        command,
+        TrackerOptions::builder()
+            .allocators(false)
+            .rmap(true)
+            .build(),
+    )
+}
+
+/// Track a command with an explicit probe selection rather than the environment's.
+pub fn track_command_with_opts(command: Command, options: TrackerOptions) -> TrackResult {
+    track_command_with_tracker(command, Tracker::with_options(options)?)
 }
 
 /// How many events of each kind-and-size a run saw. Addresses, timestamps, pids

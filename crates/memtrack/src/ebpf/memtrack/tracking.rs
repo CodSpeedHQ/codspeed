@@ -7,6 +7,11 @@ impl MemtrackBpf {
     attach_tracepoint!(task_newtask);
     attach_tracepoint!(sched_process_exec);
     attach_tracepoint!(sched_process_exit);
+    attach_tracepoint!(sys_enter_mmap);
+    attach_tracepoint!(sys_exit_mmap);
+    attach_tracepoint!(sys_enter_munmap);
+    attach_tracepoint!(sys_enter_brk);
+    attach_tracepoint!(sys_exit_brk);
 
     fn rmap_target_enabled(&self, target: &str) -> bool {
         !self.btf_disabled_rmap_targets.contains(&target)
@@ -16,6 +21,11 @@ impl MemtrackBpf {
         self.attach_task_newtask()?;
         self.attach_sched_process_exec()?;
         self.attach_sched_process_exit()?;
+        self.attach_sys_enter_mmap()?;
+        self.attach_sys_exit_mmap()?;
+        self.attach_sys_enter_munmap()?;
+        self.attach_sys_enter_brk()?;
+        self.attach_sys_exit_brk()?;
         if let Err(e) = self.attach_rss_stat() {
             warn!("Failed to attach rss_stat tracepoint, RSS collection disabled: {e:#}");
         }
