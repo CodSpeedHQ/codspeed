@@ -16,6 +16,11 @@ impl MemtrackBpf {
         uretprobe_aligned_alloc
     );
     attach_uprobe_uretprobe!(attach_memalign, uprobe_memalign, uretprobe_memalign);
+    attach_uprobe_uretprobe!(
+        attach_posix_memalign,
+        uprobe_posix_memalign,
+        uretprobe_posix_memalign
+    );
     attach_uprobe!(attach_free, uprobe_free);
 
     /// Attach probes for every discovered allocator library.
@@ -151,7 +156,7 @@ impl MemtrackBpf {
                     &format!("{prefix}memalign{suffix}"),
                     offsets,
                 )?;
-                self.attach_memalign_if_found(
+                self.attach_posix_memalign_if_found(
                     lib_path,
                     &format!("{prefix}posix_memalign{suffix}"),
                     offsets,

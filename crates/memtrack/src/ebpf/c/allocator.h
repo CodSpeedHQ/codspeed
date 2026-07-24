@@ -90,6 +90,57 @@ UPROBE_ARG_RET(aligned_alloc, PT_REGS_PARM2(ctx),
 
 UPROBE_ARG_RET(memalign, PT_REGS_PARM2(ctx), { return submit_aligned_alloc_event(arg0, ret_val); })
 
+/*
+ * posix_memalign(void** memptr, size_t alignment, size_t size)
+ *
+ * Unlike memalign/aligned_alloc, it returns int 0 on SUCCESS (nonzero errno on
+ * failure) and delivers the pointer through the memptr out-parameter rather
+ * than the return register. So the size lives in PARM3 (not PARM2), success is
+ * ret == 0 (not a non-NULL return), and the address must be read back from
+ * *memptr once the call returns.
+ */
+struct posix_memalign_args_t {
+    __u64 memptr;
+    __u64 size;
+};
+BPF_HASH_MAP(posix_memalign_args, __u64, struct posix_memalign_args_t, 10000);
+
+SEC("uprobe")
+int uprobe_posix_memalign(struct pt_regs* ctx) {
+    __u64 tid = bpf_get_current_pid_tgid();
+    __u32 pid = tid >> 32;
+    if (!is_tracked(pid)) {
+        return 0;
+    }
+
+    struct posix_memalign_args_t args = {.memptr = PT_REGS_PARM1(ctx), .size = PT_REGS_PARM3(ctx)};
+    bpf_map_update_elem(&posix_memalign_args, &tid, &args, BPF_ANY);
+    return 0;
+}
+
+SEC("uretprobe")
+int uretprobe_posix_memalign(struct pt_regs* ctx) {
+    __u64 tid = bpf_get_current_pid_tgid();
+    struct posix_memalign_args_t* args = bpf_map_lookup_elem(&posix_memalign_args, &tid);
+    if (!args) {
+        return 0;
+    }
+
+    struct posix_memalign_args_t a = *args;
+    bpf_map_delete_elem(&posix_memalign_args, &tid);
+
+    if (PT_REGS_RC(ctx) != 0) {
+        return 0;
+    }
+
+    __u64 addr = 0;
+    if (bpf_probe_read_user(&addr, sizeof(addr), (void*)a.memptr) != 0 || addr == 0) {
+        return 0;
+    }
+
+    return submit_aligned_alloc_event(a.size, addr);
+}
+
 struct mmap_args {
     __u64 addr;
     __u64 len;
