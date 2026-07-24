@@ -141,8 +141,8 @@ pub async fn execute_config(
     Ok(())
 }
 
-/// Rejects exec targets whose executable (first token) is missing or empty before
-/// the orchestrator does any setup. An empty executable otherwise surfaces only as an
+/// Rejects exec targets whose executable (first token) is missing or blank before
+/// the orchestrator does any setup. A blank executable otherwise surfaces only as an
 /// opaque failure deep inside exec-harness. Empty *arguments* after a real executable
 /// stay valid.
 fn ensure_exec_commands_runnable(targets: &[executor::BenchmarkTarget]) -> Result<()> {
@@ -150,7 +150,7 @@ fn ensure_exec_commands_runnable(targets: &[executor::BenchmarkTarget]) -> Resul
         let executor::BenchmarkTarget::Exec { command, name, .. } = target else {
             continue;
         };
-        if command.first().is_none_or(|exe| exe.is_empty()) {
+        if command.first().is_none_or(|exe| exe.trim().is_empty()) {
             let label = name.as_deref().unwrap_or("<unnamed>");
             bail!(
                 "Empty command for exec benchmark target `{label}`. Provide a program to run \
@@ -189,9 +189,10 @@ mod tests {
 
     #[test]
     fn rejects_missing_or_empty_executable() {
-        // Empty vec (`exec: ""` / whitespace) and an empty first token
-        // (`codspeed exec ''` / `exec: "''"`) are both invalid.
+        // Empty vec (`exec: ""`), an empty first token (`codspeed exec ''` / `exec: "''"`),
+        // and a whitespace-only token (`codspeed exec "   "`) are all invalid.
         assert!(super::ensure_exec_commands_runnable(&[exec_target(&[], Some("a"))]).is_err());
+        assert!(super::ensure_exec_commands_runnable(&[exec_target(&["   "], Some("a"))]).is_err());
         let err = super::ensure_exec_commands_runnable(&[exec_target(&[""], Some("bench"))])
             .unwrap_err()
             .to_string();
