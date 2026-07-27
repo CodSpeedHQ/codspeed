@@ -155,6 +155,7 @@ async fn retrieve_upload_data(
                         RunEnvironment::GitlabCi => {
                             "Check that the CI job is correctly authenticated. View more at https://codspeed.io/docs/integrations/ci/gitlab-ci/configuration#authentication"
                         }
+                        // TODO: support OIDC for CircleCI
                         RunEnvironment::Buildkite | RunEnvironment::Circleci => {
                             "Check that CODSPEED_TOKEN is set and has the correct value"
                         }

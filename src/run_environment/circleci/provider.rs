@@ -1,6 +1,8 @@
+use std::collections::BTreeMap;
 use std::env;
 
 use async_trait::async_trait;
+use serde_json::Value;
 use simplelog::SharedLogger;
 
 use crate::api_client::CodSpeedAPIClient;
@@ -23,6 +25,12 @@ pub struct CircleCIProvider {
     head_ref: Option<String>,
     event: RunEvent,
     repository_root_path: String,
+    workflow_id: String,
+    job_name: String,
+    /// Index of this container within a job running with `parallelism`, `0` when unset.
+    node_index: u32,
+    /// Number of containers the job runs on, `1` when unset.
+    node_total: u32,
 }
 
 /// Returns the number of the pull request the build runs on, if any.
@@ -47,6 +55,13 @@ fn get_ref(pr_number: Option<u64>) -> Result<String> {
         Some(pr_number) => Ok(format!("refs/pull/{pr_number}/merge")),
         None => Ok(format!("refs/heads/{}", get_env_variable("CIRCLE_BRANCH")?)),
     }
+}
+
+fn get_env_number(name: &str, default: u32) -> u32 {
+    env::var(name)
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(default)
 }
 
 impl TryFrom<&OrchestratorConfig> for CircleCIProvider {
@@ -101,6 +116,10 @@ impl TryFrom<&OrchestratorConfig> for CircleCIProvider {
                 RunEvent::Push
             },
             repository_root_path,
+            workflow_id: get_env_variable("CIRCLE_WORKFLOW_ID")?,
+            job_name: get_env_variable("CIRCLE_JOB")?,
+            node_index: get_env_number("CIRCLE_NODE_INDEX", 0),
+            node_total: get_env_number("CIRCLE_NODE_TOTAL", 1),
         })
     }
 }
@@ -142,9 +161,23 @@ impl RunEnvironmentProvider for CircleCIProvider {
         })
     }
 
-    /// For CircleCI, we don't support multipart uploads
+    /// `CIRCLE_WORKFLOW_ID` is shared by every job and every parallel container of a
+    /// workflow, which makes it the key that groups run parts together. The per-job
+    /// `CIRCLE_WORKFLOW_JOB_ID` would instead split one workflow into unrelated runs.
+    ///
+    /// A workflow fans out along two axes, so the part id has to cover both: its jobs
+    /// (`CIRCLE_JOB`) and, within a job declaring `parallelism`, its containers
+    /// (`CIRCLE_NODE_INDEX`).
     fn get_run_provider_run_part(&self) -> Option<RunPart> {
-        None
+        Some(RunPart {
+            run_id: self.workflow_id.clone(),
+            run_part_id: format!("{}-{}", self.job_name, self.node_index),
+            job_name: self.job_name.clone(),
+            metadata: BTreeMap::from([
+                ("node-index".to_string(), Value::from(self.node_index)),
+                ("node-total".to_string(), Value::from(self.node_total)),
+            ]),
+        })
     }
 
     /// CircleCI requires a static `CODSPEED_TOKEN`. We don't yet support OIDC
@@ -184,6 +217,11 @@ mod tests {
                     Some("git@github.com:my-org/adrien-python-test.git"),
                 ),
                 ("CIRCLE_WORKING_DIRECTORY", Some("/home/circleci/project")),
+                (
+                    "CIRCLE_WORKFLOW_ID",
+                    Some("8d8f0b2a-1f3e-4b6a-9c2d-0f1e2a3b4c5d"),
+                ),
+                ("CIRCLE_JOB", Some("benchmarks")),
             ],
             || {
                 let config = OrchestratorConfig {
@@ -216,6 +254,11 @@ mod tests {
                     Some("https://github.com/my-org/adrien-python-test"),
                 ),
                 ("CIRCLE_WORKING_DIRECTORY", Some("/home/circleci/project")),
+                (
+                    "CIRCLE_WORKFLOW_ID",
+                    Some("8d8f0b2a-1f3e-4b6a-9c2d-0f1e2a3b4c5d"),
+                ),
+                ("CIRCLE_JOB", Some("benchmarks")),
             ],
             || {
                 let config = OrchestratorConfig {
@@ -246,6 +289,11 @@ mod tests {
                     Some("git@github.com:my-org/adrien-python-test.git"),
                 ),
                 ("CIRCLE_WORKING_DIRECTORY", Some("/home/circleci/project")),
+                (
+                    "CIRCLE_WORKFLOW_ID",
+                    Some("8d8f0b2a-1f3e-4b6a-9c2d-0f1e2a3b4c5d"),
+                ),
+                ("CIRCLE_JOB", Some("benchmarks")),
             ],
             || {
                 let config = OrchestratorConfig {
@@ -270,6 +318,11 @@ mod tests {
                     Some("git@bitbucket.org:my-org/adrien-python-test.git"),
                 ),
                 ("CIRCLE_WORKING_DIRECTORY", Some("/home/circleci/project")),
+                (
+                    "CIRCLE_WORKFLOW_ID",
+                    Some("8d8f0b2a-1f3e-4b6a-9c2d-0f1e2a3b4c5d"),
+                ),
+                ("CIRCLE_JOB", Some("benchmarks")),
             ],
             || {
                 let config = OrchestratorConfig {
@@ -295,6 +348,11 @@ mod tests {
                     Some("git@github.com:my-org/adrien-python-test.git"),
                 ),
                 ("CIRCLE_WORKING_DIRECTORY", Some("/home/circleci/project")),
+                (
+                    "CIRCLE_WORKFLOW_ID",
+                    Some("8d8f0b2a-1f3e-4b6a-9c2d-0f1e2a3b4c5d"),
+                ),
+                ("CIRCLE_JOB", Some("benchmarks")),
             ],
             || {
                 let config = OrchestratorConfig {
@@ -302,8 +360,51 @@ mod tests {
                 };
                 let provider = CircleCIProvider::try_from(&config).unwrap();
                 let run_environment_metadata = provider.get_run_environment_metadata().unwrap();
+                let run_part = provider.get_run_provider_run_part().unwrap();
 
                 assert_json_snapshot!(run_environment_metadata);
+                assert_json_snapshot!(run_part);
+            },
+        );
+    }
+
+    /// A job declaring `parallelism` runs on several containers that share
+    /// `CIRCLE_JOB`, so the node index is what keeps their part ids apart.
+    #[test]
+    fn test_run_part_of_parallel_job() {
+        with_vars(
+            [
+                ("CIRCLECI", Some("true")),
+                ("CIRCLE_BRANCH", Some("main")),
+                (
+                    "CIRCLE_REPOSITORY_URL",
+                    Some("git@github.com:my-org/adrien-python-test.git"),
+                ),
+                ("CIRCLE_WORKING_DIRECTORY", Some("/home/circleci/project")),
+                (
+                    "CIRCLE_WORKFLOW_ID",
+                    Some("8d8f0b2a-1f3e-4b6a-9c2d-0f1e2a3b4c5d"),
+                ),
+                ("CIRCLE_JOB", Some("benchmarks")),
+                ("CIRCLE_NODE_INDEX", Some("2")),
+                ("CIRCLE_NODE_TOTAL", Some("4")),
+            ],
+            || {
+                let config = OrchestratorConfig {
+                    ..OrchestratorConfig::test()
+                };
+                let provider = CircleCIProvider::try_from(&config).unwrap();
+                let run_part = provider.get_run_provider_run_part().unwrap();
+
+                assert_eq!(run_part.run_id, "8d8f0b2a-1f3e-4b6a-9c2d-0f1e2a3b4c5d");
+                assert_eq!(run_part.job_name, "benchmarks");
+                assert_eq!(run_part.run_part_id, "benchmarks-2");
+                assert_json_snapshot!(run_part.metadata, @r#"
+                {
+                  "node-index": 2,
+                  "node-total": 4
+                }
+                "#);
             },
         );
     }
