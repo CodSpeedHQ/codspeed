@@ -60,8 +60,7 @@ fn get_valgrind_args(tool: &SimulationTool, config: &ExecutorConfig) -> Vec<Stri
         }
     }
 
-    // Valgrind changes argv[0] when tracing Nix's rustup wrapper, which breaks rustup proxy detection.
-    let children_skip_patterns = ["*esbuild", "*.rustup-wrapped"];
+    let children_skip_patterns = ["*esbuild"];
     args.push(format!(
         "--trace-children-skip={}",
         children_skip_patterns.join(",")
@@ -248,18 +247,6 @@ mod tests {
             .unwrap();
 
         (script_status, out_status)
-    }
-
-    #[test]
-    fn test_valgrind_skips_rustup_wrapped_proxy() {
-        let config = ExecutorConfig::test();
-        let args = get_valgrind_args(&SimulationTool::Callgrind, &config);
-        let skip_arg = args
-            .iter()
-            .find(|arg| arg.starts_with("--trace-children-skip="))
-            .unwrap();
-
-        assert!(skip_arg.contains("*.rustup-wrapped"));
     }
 
     #[test]
