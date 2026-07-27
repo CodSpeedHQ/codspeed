@@ -29,6 +29,7 @@ pub enum RunEnvironment {
     GithubActions,
     GitlabCi,
     Buildkite,
+    Circleci,
     Local,
 }
 
