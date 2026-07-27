@@ -43,10 +43,21 @@ pub fn can_elevate_without_prompt() -> bool {
     is_root_user() || (is_sudo_available() && sudo_runs_without_password())
 }
 
+#[cfg(unix)]
+fn has_controlling_terminal() -> bool {
+    std::fs::File::open("/dev/tty")
+        .map(|tty| tty.is_terminal())
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn has_controlling_terminal() -> bool {
+    false
+}
+
 /// Validate sudo access, prompting the user for their password if necessary
 fn validate_sudo_access() -> Result<()> {
-    let needs_password =
-        IsTerminal::is_terminal(&std::io::stdout()) && !sudo_runs_without_password();
+    let needs_password = has_controlling_terminal() && !sudo_runs_without_password();
 
     if needs_password {
         suspend_progress_bar(|| {
