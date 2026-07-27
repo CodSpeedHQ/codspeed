@@ -5,6 +5,17 @@
 
 
 
+## [4.19.1] - 2026-07-27
+
+### <!-- 1 -->🐛 Bug Fixes
+- Track successful posix_memalign allocations (#470) by @not-matthias in [#470](https://github.com/CodSpeedHQ/runner/pull/470)
+- Prompt sudo on interactive stdin (#459) by @not-matthias in [#459](https://github.com/CodSpeedHQ/runner/pull/459)
+- Reject empty command before executor setup (#467) by @not-matthias in [#467](https://github.com/CodSpeedHQ/runner/pull/467)
+
+### <!-- 10 -->💼 Other
+- Bump the memtrack pin to 1.3.0 by @adriencaccia in [#474](https://github.com/CodSpeedHQ/runner/pull/474)
+
+
 ## [4.19.0] - 2026-07-27
 
 ### <!-- 0 -->🚀 Features
@@ -1400,6 +1411,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[4.19.1]: https://github.com/CodSpeedHQ/runner/compare/v4.19.0..v4.19.1
 [4.19.0]: https://github.com/CodSpeedHQ/runner/compare/v4.18.4..v4.19.0
 [4.18.4]: https://github.com/CodSpeedHQ/runner/compare/v4.18.3..v4.18.4
 [4.18.3]: https://github.com/CodSpeedHQ/runner/compare/v4.18.2..v4.18.3
