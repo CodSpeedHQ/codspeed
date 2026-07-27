@@ -5,6 +5,58 @@
 
 
 
+## [4.19.0] - 2026-07-27
+
+### <!-- 0 -->🚀 Features
+- Remove eager allocator discovery by @not-matthias
+- Attach allocator probes on demand via exec-mapping watcher by @not-matthias
+- Add exec-mapping watcher BPF prog and inode maps by @not-matthias
+- Add experimental --exclude-allocations setting by @not-matthias
+
+### <!-- 1 -->🐛 Bug Fixes
+- Join attach worker thread on drop, not only on finish() by @not-matthias in [#445](https://github.com/CodSpeedHQ/runner/pull/445)
+- Fail loud when a watcher mapping is unresolved on a live process by @not-matthias
+- Canonicalize map_files dirent name for low-address mappings by @not-matthias
+- Classify unprefixed jemalloc builds as jemalloc by @not-matthias
+- Fail closed when tracking_enabled lookup fails by @not-matthias
+- Lower zstd compression level to -5 to reduce serialization overhead by @not-matthias
+- Wire MemtrackWriter serializer through BufWriter to fix per-event zstd compression bottleneck by @not-matthias
+
+### <!-- 10 -->💼 Other
+- Let the tracker own the poller and drain on shutdown by @not-matthias
+- Return the underlying sink from MemtrackWriter::finish by @not-matthias
+
+### <!-- 2 -->🏗️ Refactor
+- Split monolithic eBPF C and Rust into domain files by @not-matthias
+- Split memtrack into module by @not-matthias
+- Attach uprobes at resolved file offsets instead of func_name by @not-matthias
+- Align cycle-estimation flag with experimental naming scheme by @not-matthias in [#425](https://github.com/CodSpeedHQ/runner/pull/425)
+
+### <!-- 3 -->📚 Documentation
+- Add crate AGENTS.md guide by @not-matthias in [#455](https://github.com/CodSpeedHQ/runner/pull/455)
+- Stop hardcoding MCP tool schemas in the optimize skill by @fargito in [#451](https://github.com/CodSpeedHQ/runner/pull/451)
+
+### <!-- 4 -->⚡ Performance
+- Drain ringbuf bursts eagerly and reserve poller cores by @not-matthias in [#436](https://github.com/CodSpeedHQ/runner/pull/436)
+- Grow the event ring buffer to 256 MiB by @not-matthias
+- Wake the ringbuf consumer only past a data watermark by @not-matthias
+- Pre-size and reuse the memtrack encode window buffer by @not-matthias
+- Replace drain/writer threads with the encode pipeline by @not-matthias
+- Add parallel zstd encode pipeline for artifact events by @not-matthias
+- Detach BPF links in parallel at teardown by @not-matthias in [#440](https://github.com/CodSpeedHQ/runner/pull/440)
+- Resolve allocator symbol offsets in parallel by @not-matthias
+
+### <!-- 6 -->🧪 Testing
+- Add dlopen/on-demand allocator tests + CI matrix by @not-matthias
+- Benchmark encode_events with a realistic allocation trace by @not-matthias
+
+### <!-- 7 -->⚙️ Internals
+- Lower on-demand attach log to debug by @not-matthias in [#462](https://github.com/CodSpeedHQ/runner/pull/462)
+- Install rust toolchain by explicit channel for older rustup by @not-matthias
+- Also run runner-shared benchmarks in walltime mode by @not-matthias
+- Dedup memtrack build deps into install-bpf-deps action by @not-matthias
+
+
 ## [4.18.4] - 2026-07-09
 
 ### <!-- 10 -->💼 Other
@@ -1348,6 +1400,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[4.19.0]: https://github.com/CodSpeedHQ/runner/compare/v4.18.4..v4.19.0
 [4.18.4]: https://github.com/CodSpeedHQ/runner/compare/v4.18.3..v4.18.4
 [4.18.3]: https://github.com/CodSpeedHQ/runner/compare/v4.18.2..v4.18.3
 [4.18.2]: https://github.com/CodSpeedHQ/runner/compare/v4.18.1..v4.18.2
