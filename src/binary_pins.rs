@@ -109,9 +109,9 @@ impl ValgrindTarget {
 }
 
 const MEMTRACK_INSTALLER: BinaryPin = BinaryPin {
-    version: "1.2.3",
+    version: "1.3.0",
     url_template: "https://github.com/CodSpeedHQ/codspeed/releases/download/memtrack-v{version}/memtrack-installer.sh",
-    sha256: "67f30ebe17d5da4246b51d8663394026385d95203ff09e81289772159e969603",
+    sha256: "4f11854e4e030962ad1a05dbf5452777286053ca31cdd2bb3ae59b7149870a8b",
 };
 #[cfg(target_os = "linux")]
 pub const MEMTRACK_VERSION: &str = MEMTRACK_INSTALLER.version;
