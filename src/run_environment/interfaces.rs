@@ -29,6 +29,8 @@ pub enum RunEnvironment {
     GithubActions,
     GitlabCi,
     Buildkite,
+    /// Serialized as `CIRCLECI`, which is what CodSpeed matches on
+    Circleci,
     Local,
 }
 

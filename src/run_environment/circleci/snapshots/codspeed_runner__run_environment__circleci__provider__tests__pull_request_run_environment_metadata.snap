@@ -1,0 +1,17 @@
+---
+source: src/run_environment/circleci/provider.rs
+expression: run_environment_metadata
+---
+{
+  "ref": "refs/pull/22/merge",
+  "headRef": "feat/codspeed-runner",
+  "baseRef": null,
+  "owner": "my-org",
+  "repository": "adrien-python-test",
+  "event": "pull_request",
+  "sender": null,
+  "ghData": null,
+  "glData": null,
+  "localData": null,
+  "repositoryRootPath": "/home/circleci/project/"
+}
