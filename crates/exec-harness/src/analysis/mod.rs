@@ -71,4 +71,3 @@ pub fn perform_with_valgrind(commands: Vec<BenchmarkCommand>) -> Result<()> {
 
     Ok(())
 }
-
