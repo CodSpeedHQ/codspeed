@@ -93,15 +93,7 @@ fn select_profiler(profiler_override: Option<WalltimeProfiler>) -> Option<Box<dy
     match profiler_override {
         Some(WalltimeProfiler::Perf) => Some(Box::new(PerfProfiler::new())),
         Some(WalltimeProfiler::Samply) => Some(Box::new(SamplyProfiler::new())),
-        None => {
-            if cfg!(target_os = "linux") {
-                Some(Box::new(PerfProfiler::new()))
-            } else if cfg!(target_os = "macos") {
-                Some(Box::new(SamplyProfiler::new()))
-            } else {
-                None
-            }
-        }
+        None => Some(Box::new(SamplyProfiler::new())),
     }
 }
 
