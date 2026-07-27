@@ -88,6 +88,7 @@ shell-quote = "0.7.2"
 assert_cmd = "2.2"
 predicates = "3.1.4"
 strum = { version = "0.28.0", features = ["derive"] }
+escargot = "0.5.15"
 
 [workspace]
 members = [

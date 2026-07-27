@@ -45,9 +45,9 @@ pub enum SimulationTool {
 /// The profiler to use for walltime mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum WalltimeProfiler {
-    /// Use perf to collect profiling data (Linux).
+    /// Use perf to collect profiling data.
     Perf,
-    /// Use samply to collect profiling data (macOS).
+    /// Use samply to collect profiling data.
     Samply,
 }
 
