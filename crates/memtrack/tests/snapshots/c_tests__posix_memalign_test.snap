@@ -1,0 +1,8 @@
+---
+source: crates/memtrack/tests/c_tests.rs
+expression: formatted_events
+---
+[
+    "AlignedAlloc { size: 768 }",
+    "Free",
+]
