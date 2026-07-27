@@ -10,4 +10,6 @@ expression: formatted_events
     "Malloc { size: 88888 }",
     "AlignedAlloc { size: 32768 }",
     "Free",
+    "AlignedAlloc { size: 16384 }",
+    "Free",
 ]
