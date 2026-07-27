@@ -136,7 +136,7 @@ jobs:
       - name: Build benchmarks
         run: cargo codspeed build -p runner-shared -m ${{ matrix.mode }}
       - name: Run benchmarks
-        uses: CodSpeedHQ/action@3194d9a39c4d46684cb44bf7207fc56626aad8fd # v4
+        uses: CodSpeedHQ/action@f22792bfac16f3e14eb9fbea76f4a48e9cc22b93 # v4
         with:
           mode: ${{ matrix.mode }}
           run: cargo codspeed run -p runner-shared
