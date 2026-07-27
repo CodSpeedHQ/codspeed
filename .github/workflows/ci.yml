@@ -41,9 +41,6 @@ jobs:
       - name: Install memtrack
         run: |
           cargo install --path crates/memtrack --locked
-      - name: Install exec-harness
-        run: |
-          cargo install --path crates/exec-harness --locked
 
       - name: Grant memtrack file capabilities
         run: cargo r -- setup --mode memory
