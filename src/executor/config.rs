@@ -45,9 +45,9 @@ pub enum SimulationTool {
 /// The profiler to use for walltime mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum WalltimeProfiler {
-    /// Use perf to collect profiling data (Linux).
+    /// Use perf to collect profiling data.
     Perf,
-    /// Use samply to collect profiling data (macOS).
+    /// Use samply to collect profiling data.
     Samply,
 }
 
@@ -93,6 +93,8 @@ pub struct OrchestratorConfig {
     pub fair_sched: bool,
     /// Enable valgrind's --cycle-estimation option.
     pub cycle_estimation: bool,
+    /// Signal the backend to exclude memory allocation time from simulation results.
+    pub exclude_allocations: bool,
 }
 
 /// Per-execution configuration passed to executors.
@@ -128,6 +130,8 @@ pub struct ExecutorConfig {
     pub fair_sched: bool,
     /// Enable valgrind's --cycle-estimation option.
     pub cycle_estimation: bool,
+    /// Signal the backend to exclude memory allocation time from simulation results.
+    pub exclude_allocations: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -198,6 +202,7 @@ impl OrchestratorConfig {
             enable_introspection,
             fair_sched: self.fair_sched,
             cycle_estimation: self.cycle_estimation,
+            exclude_allocations: self.exclude_allocations,
         }
     }
 }
@@ -230,7 +235,8 @@ impl OrchestratorConfig {
             poll_results_options: PollResultsOptions::new(false, None),
             extra_env: HashMap::new(),
             fair_sched: false,
-            cycle_estimation: false,
+            cycle_estimation: true,
+            exclude_allocations: true,
         }
     }
 }

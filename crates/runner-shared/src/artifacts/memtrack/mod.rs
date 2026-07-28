@@ -1,6 +1,12 @@
 use libc::pid_t;
 use serde::{Deserialize, Serialize};
-use std::io::{BufReader, BufWriter, Read, Write};
+use std::io::{BufReader, Read, Write};
+
+mod pipeline;
+mod writer;
+
+pub use pipeline::*;
+pub use writer::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemtrackArtifact {
@@ -86,43 +92,6 @@ impl<R: Read> Iterator for MemtrackEventStream<R> {
     }
 }
 
-/// Streaming writer for memtrack events with compression
-pub struct MemtrackWriter<W: Write> {
-    serializer: rmp_serde::Serializer<zstd::Encoder<'static, BufWriter<W>>>,
-}
-
-impl<W: Write> MemtrackWriter<W> {
-    pub fn new(writer: W) -> anyhow::Result<Self> {
-        // We're dealing with a lot of events, so we want to compress as much as possible
-        // while not taking too much time to compress.
-        const COMPRESSION_LEVEL: i32 = 1;
-        const BUFFER_SIZE: usize = 256 * 1024 /* 256 KB */;
-
-        let writer = BufWriter::with_capacity(BUFFER_SIZE, writer);
-        let encoder = zstd::Encoder::new(writer, COMPRESSION_LEVEL)?;
-        Ok(Self {
-            serializer: rmp_serde::Serializer::new(encoder),
-        })
-    }
-
-    /// Write a single event to the stream
-    pub fn write_event(&mut self, event: &MemtrackEvent) -> anyhow::Result<()> {
-        event.serialize(&mut self.serializer)?;
-        Ok(())
-    }
-
-    /// Finish writing and flush the compression stream
-    pub fn finish(self) -> anyhow::Result<()> {
-        let encoder = self.serializer.into_inner();
-        let mut writer = encoder.finish()?;
-
-        // Flush the writer to ensure all data is written to the underlying writer
-        writer.flush()?;
-
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::artifacts::ArtifactExt;
@@ -163,6 +132,87 @@ mod tests {
     }
 
     #[test]
+    fn manual_serialize_is_byte_identical_to_derive() {
+        #[derive(serde::Serialize)]
+        struct Shadow {
+            pid: libc::pid_t,
+            tid: libc::pid_t,
+            timestamp: u64,
+            addr: u64,
+            #[serde(flatten)]
+            kind: MemtrackEventKind,
+        }
+
+        let kinds = [
+            MemtrackEventKind::Malloc { size: 7 },
+            MemtrackEventKind::Free,
+            MemtrackEventKind::Realloc {
+                old_addr: Some(0x1000),
+                size: 42,
+            },
+            MemtrackEventKind::Realloc {
+                old_addr: None,
+                size: 42,
+            },
+            MemtrackEventKind::Calloc { size: 9 },
+            MemtrackEventKind::AlignedAlloc { size: 9 },
+            MemtrackEventKind::Mmap { size: 9 },
+            MemtrackEventKind::Munmap { size: 9 },
+            MemtrackEventKind::Brk { size: 9 },
+        ];
+
+        for kind in kinds {
+            let event = MemtrackEvent {
+                pid: -7,
+                tid: 42,
+                timestamp: 0xDEAD,
+                addr: 0xBEEF,
+                kind,
+            };
+            let shadow = Shadow {
+                pid: -7,
+                tid: 42,
+                timestamp: 0xDEAD,
+                addr: 0xBEEF,
+                kind,
+            };
+
+            assert_eq!(
+                rmp_serde::to_vec(&event).unwrap(),
+                rmp_serde::to_vec(&shadow).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn concatenated_frames_decode_in_order() -> anyhow::Result<()> {
+        let events: Vec<_> = (0..2500)
+            .map(|i| MemtrackEvent {
+                pid: 1,
+                tid: 1,
+                timestamp: i,
+                addr: i,
+                kind: MemtrackEventKind::Malloc { size: i },
+            })
+            .collect();
+
+        let mut file = Vec::new();
+        for batch in events.chunks(1000) {
+            let mut writer = MemtrackWriter::new(Vec::<u8>::new())?;
+            for event in batch {
+                writer.write_event(event)?;
+            }
+            let frame = writer.finish()?;
+            file.extend_from_slice(&frame);
+        }
+
+        let decoded: Vec<_> = MemtrackArtifact::decode_streamed(Cursor::new(file))?.collect();
+        assert_eq!(decoded, events);
+
+        Ok(())
+    }
+
+    #[test]
     fn test_artifact_is_empty() -> anyhow::Result<()> {
         let artifact = MemtrackArtifact { events: vec![] };
 
@@ -179,7 +229,7 @@ mod tests {
     fn test_deserialize_realloc_compat() -> anyhow::Result<()> {
         // The file contains a single serialized event using the old format without `old_addr`:
         // MemtrackEventKind::Realloc { size: 42 }
-        let buf = include_bytes!("../../testdata/realloc.MemtrackArtifact.msgpack");
+        let buf = include_bytes!("../../../testdata/realloc.MemtrackArtifact.msgpack");
         assert_eq!(
             MemtrackArtifact::decode_streamed(Cursor::new(buf))?.count(),
             1

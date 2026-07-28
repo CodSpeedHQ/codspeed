@@ -48,15 +48,16 @@ pub trait Profiler {
     /// Profilers stash any live state they need for the duration of the run
     /// (control fifos, output paths) on `self`.
     ///
-    /// `isolate` mirrors the decision the executor used to wrap the benchmark in
-    /// the systemd scope: when set, the profiler records system-wide under sudo;
-    /// otherwise it records its own descendant tree unprivileged.
+    /// When `requires_sudo` is set, the profiler must run elevated: the
+    /// isolation mechanism reparented the benchmark out of its subtree, so it can
+    /// only observe it with elevated privileges. Otherwise it records its own
+    /// descendant tree unprivileged.
     async fn wrap_command(
         &mut self,
         cmd: CommandBuilder,
         config: &ExecutorConfig,
         profile_folder: &Path,
-        isolate: bool,
+        requires_sudo: bool,
     ) -> anyhow::Result<CommandBuilder>;
 
     /// The benchmarked process signaled the start of a measured region.

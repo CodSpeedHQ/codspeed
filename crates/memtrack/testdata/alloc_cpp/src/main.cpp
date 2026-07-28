@@ -52,5 +52,12 @@ int main() {
     black_box(aligned);
     free(aligned);
 
+    // posix_memalign: some allocators forward it to another exported symbol
+    // that is probed too, so this also guards against reporting it twice.
+    void* aligned_out = nullptr;
+    posix_memalign(&aligned_out, 128, 64 * 256);
+    black_box(aligned_out);
+    free(aligned_out);
+
     emit_marker();
 }

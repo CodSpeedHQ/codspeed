@@ -1,8 +1,5 @@
-// Shared test helpers. On non-linux platforms, the only consumer is the `walltime` mod, which is
-// gated behind `GITHUB_ACTIONS`. Apply the same gate here so dead-code lints don't fire on macOS
-// without the env var. On linux, valgrind always uses these helpers, so no gate is needed.
-#[cfg_attr(not(target_os = "linux"), test_with::env(GITHUB_ACTIONS))]
 mod helpers {
+    pub(crate) use crate::cli::SELF_EXE_ENV_VAR;
     pub use crate::executor::{ExecutionContext, Executor, ExecutorConfig};
     pub use crate::system::SystemInfo;
     pub use rstest_reuse::{self, *};
@@ -120,6 +117,55 @@ fi
     #[case(ENV_TESTS[7])]
     pub fn env_test_cases(#[case] env_case: (&str, &str)) {}
 
+    /// Builds a workspace binary and returns its path.
+    ///
+    /// `CARGO_BIN_EXE_*` is only set for integration tests and benches, and the
+    /// build directory layout is not a stable interface, so the path is obtained
+    /// by invoking cargo.
+    async fn workspace_binary_path(package: &'static str, bin: &'static str) -> String {
+        tokio::task::spawn_blocking(move || {
+            let path = escargot::CargoBuild::new()
+                .package(package)
+                .bin(bin)
+                .current_target()
+                .run()
+                .unwrap_or_else(|e| panic!("failed to build the {bin} binary: {e}"))
+                .path()
+                .to_path_buf();
+            path.into_os_string()
+                .into_string()
+                .unwrap_or_else(|_| panic!("{bin} binary path is not valid UTF-8"))
+        })
+        .await
+        .unwrap_or_else(|e| panic!("{bin} binary build task panicked: {e}"))
+    }
+
+    /// Path to the `codspeed` binary, built on first use.
+    ///
+    /// Code under test re-execs the running executable to reach internal
+    /// subcommands. That executable is this test binary, whose harness rejects
+    /// their arguments, so the tests point [`SELF_EXE_ENV_VAR`] at the real
+    /// binary instead.
+    pub async fn codspeed_binary_path() -> &'static str {
+        static BINARY: OnceCell<String> = OnceCell::const_new();
+
+        BINARY
+            .get_or_init(|| workspace_binary_path("codspeed-runner", "codspeed"))
+            .await
+    }
+
+    /// Path to the `exec-harness` binary, built on first use.
+    ///
+    /// Production runs install a pinned release and invoke it by name, which
+    /// would make the tests depend on what is installed on the machine.
+    pub async fn exec_harness_binary_path() -> &'static str {
+        static BINARY: OnceCell<String> = OnceCell::const_new();
+
+        BINARY
+            .get_or_init(|| workspace_binary_path("exec-harness", "exec-harness"))
+            .await
+    }
+
     pub async fn create_test_setup(config: ExecutorConfig) -> (ExecutionContext, TempDir) {
         let temp_dir = TempDir::new().unwrap();
 
@@ -205,7 +251,6 @@ mod valgrind {
     }
 }
 
-#[test_with::env(GITHUB_ACTIONS)]
 mod walltime {
     use super::helpers::*;
     use crate::executor::wall_time::executor::WallTimeExecutor;
@@ -250,11 +295,15 @@ mod walltime {
         let (_permit, mut executor) = get_walltime_executor().await;
 
         let config = walltime_config(cmd, enable_profiler);
+        let self_exe = codspeed_binary_path().await;
         // Unset GITHUB_ACTIONS to force LocalProvider which supports repository_override
-        temp_env::async_with_vars(&[("GITHUB_ACTIONS", None::<&str>)], async {
-            let (execution_context, _temp_dir) = create_test_setup(config).await;
-            executor.run(&execution_context, &None).await.unwrap();
-        })
+        temp_env::async_with_vars(
+            &[("GITHUB_ACTIONS", None), (SELF_EXE_ENV_VAR, Some(self_exe))],
+            async {
+                let (execution_context, _temp_dir) = create_test_setup(config).await;
+                executor.run(&execution_context, &None).await.unwrap();
+            },
+        )
         .await;
     }
 
@@ -268,8 +317,13 @@ mod walltime {
         let (_permit, mut executor) = get_walltime_executor().await;
 
         let (env_var, env_value) = env_case;
+        let self_exe = codspeed_binary_path().await;
         temp_env::async_with_vars(
-            &[(env_var, Some(env_value)), ("GITHUB_ACTIONS", None)],
+            &[
+                (env_var, Some(env_value)),
+                ("GITHUB_ACTIONS", None),
+                (SELF_EXE_ENV_VAR, Some(self_exe)),
+            ],
             async {
                 let cmd = env_var_validation_script(env_var, env_value);
                 let config = walltime_config(&cmd, enable_profiler);
@@ -304,11 +358,15 @@ fi
         );
         std::fs::create_dir_all(config.working_directory.as_ref().unwrap()).unwrap();
 
+        let self_exe = codspeed_binary_path().await;
         // Unset GITHUB_ACTIONS to force LocalProvider which supports repository_override
-        temp_env::async_with_vars(&[("GITHUB_ACTIONS", None::<&str>)], async {
-            let (execution_context, _temp_dir) = create_test_setup(config).await;
-            executor.run(&execution_context, &None).await.unwrap();
-        })
+        temp_env::async_with_vars(
+            &[("GITHUB_ACTIONS", None), (SELF_EXE_ENV_VAR, Some(self_exe))],
+            async {
+                let (execution_context, _temp_dir) = create_test_setup(config).await;
+                executor.run(&execution_context, &None).await.unwrap();
+            },
+        )
         .await;
     }
 
@@ -319,12 +377,16 @@ fi
         let (_permit, mut executor) = get_walltime_executor().await;
 
         let config = walltime_config("exit 1", enable_profiler);
+        let self_exe = codspeed_binary_path().await;
         // Unset GITHUB_ACTIONS to force LocalProvider which supports repository_override
-        temp_env::async_with_vars(&[("GITHUB_ACTIONS", None::<&str>)], async {
-            let (execution_context, _temp_dir) = create_test_setup(config).await;
-            let result = executor.run(&execution_context, &None).await;
-            assert!(result.is_err(), "Command should fail");
-        })
+        temp_env::async_with_vars(
+            &[("GITHUB_ACTIONS", None), (SELF_EXE_ENV_VAR, Some(self_exe))],
+            async {
+                let (execution_context, _temp_dir) = create_test_setup(config).await;
+                let result = executor.run(&execution_context, &None).await;
+                assert!(result.is_err(), "Command should fail");
+            },
+        )
         .await;
     }
     //
@@ -339,11 +401,12 @@ fi
     }
 
     fn wrap_with_exec_harness(
+        exec_harness: &str,
         walltime_args: &exec_harness::walltime::WalltimeExecutionArgs,
         command: &[String],
     ) -> String {
         shell_words::join(
-            std::iter::once(crate::executor::orchestrator::EXEC_HARNESS_COMMAND)
+            std::iter::once(exec_harness)
                 .chain(walltime_args.to_cli_args().iter().map(|s| s.as_str()))
                 .chain(command.iter().map(|s| s.as_str())),
         )
@@ -367,20 +430,24 @@ fi
         };
 
         let cmd = cmd.split(" ").map(|s| s.to_owned()).collect::<Vec<_>>();
-        let wrapped_command = wrap_with_exec_harness(&walltime_args, &cmd);
+        let wrapped_command =
+            wrap_with_exec_harness(exec_harness_binary_path().await, &walltime_args, &cmd);
 
+        let self_exe = codspeed_binary_path().await;
         // Unset GITHUB_ACTIONS to force LocalProvider which supports repository_override
-        temp_env::async_with_vars(&[("GITHUB_ACTIONS", None::<&str>)], async {
-            let config = walltime_config(&wrapped_command, true);
-            let (execution_context, _temp_dir) = create_test_setup(config).await;
-            executor.run(&execution_context, &None).await.unwrap();
-        })
+        temp_env::async_with_vars(
+            &[("GITHUB_ACTIONS", None), (SELF_EXE_ENV_VAR, Some(self_exe))],
+            async {
+                let config = walltime_config(&wrapped_command, true);
+                let (execution_context, _temp_dir) = create_test_setup(config).await;
+                executor.run(&execution_context, &None).await.unwrap();
+            },
+        )
         .await;
     }
 }
 
 #[cfg(target_os = "linux")]
-#[test_with::env(GITHUB_ACTIONS)]
 mod memory {
     use super::helpers::*;
     use crate::executor::memory::executor::MemoryExecutor;
@@ -472,6 +539,37 @@ fi
         let (_permit, _lock, mut executor) = get_memory_executor().await;
 
         temp_env::async_with_vars(&[("PATH", Some(&modified_path))], async {
+            executor.run(&execution_context, &None).await.unwrap();
+        })
+        .await;
+    }
+
+    // Regression: memtrack's file capabilities trigger glibc secure-execution mode,
+    // stripping LD_* before the benchmark inherits it. Guards that a forwarded
+    // LD_LIBRARY_PATH still reaches the benchmark (PATH would not catch this).
+    #[test_log::test(tokio::test)]
+    async fn test_memory_executor_forwards_ld_library_path() {
+        let custom_lib = "/custom/test/lib";
+        let current = std::env::var("LD_LIBRARY_PATH").unwrap_or_default();
+        let modified = match current.is_empty() {
+            true => custom_lib.to_string(),
+            false => format!("{custom_lib}:{current}"),
+        };
+
+        let cmd = format!(
+            r#"
+if ! echo "$LD_LIBRARY_PATH" | grep -q "{custom_lib}"; then
+  echo "FAIL: LD_LIBRARY_PATH does not contain {custom_lib}"
+  echo "Got LD_LIBRARY_PATH: $LD_LIBRARY_PATH"
+  exit 1
+fi
+"#
+        );
+        let config = memory_config(&cmd);
+        let (execution_context, _temp_dir) = create_test_setup(config).await;
+        let (_permit, _lock, mut executor) = get_memory_executor().await;
+
+        temp_env::async_with_vars(&[("LD_LIBRARY_PATH", Some(&modified))], async {
             executor.run(&execution_context, &None).await.unwrap();
         })
         .await;

@@ -36,18 +36,25 @@ pub fn wrap_with_env(
     mut cmd_builder: CommandBuilder,
     extra_env: &HashMap<String, String>,
 ) -> Result<(CommandBuilder, NamedTempFile)> {
-    let env_file = create_env_file(extra_env)?;
-
-    // Create bash command that sources the env file and runs the original command
-    let original_command = cmd_builder.as_command_line();
-    let bash_command = format!(
-        "source {} && {}",
-        env_file.path().display(),
-        original_command
-    );
+    let (bash_command, env_file) =
+        prefix_command_with_env(&cmd_builder.as_command_line(), extra_env)?;
     cmd_builder.wrap("bash", ["-c", &bash_command]);
 
     Ok((cmd_builder, env_file))
+}
+
+/// Prefixes a shell command with a `source` of the forwarded environment.
+///
+/// Unlike [`wrap_with_env`], the returned value is the raw `source <file> && <command>`
+/// snippet without a `bash -c` wrapper, for callers that already run their argument
+/// through a shell.
+pub fn prefix_command_with_env(
+    command: &str,
+    extra_env: &HashMap<String, String>,
+) -> Result<(String, NamedTempFile)> {
+    let env_file = create_env_file(extra_env)?;
+    let wrapped = format!("source {} && {}", env_file.path().display(), command);
+    Ok((wrapped, env_file))
 }
 
 fn create_env_file(extra_env: &HashMap<String, String>) -> Result<NamedTempFile> {

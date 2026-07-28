@@ -1,6 +1,6 @@
 [package]
 name = "codspeed-runner"
-version = "4.18.1"
+version = "5.0.0"
 edition = "2024"
 repository = "https://github.com/CodSpeedHQ/codspeed"
 publish = false
@@ -89,6 +89,7 @@ shell-quote = "0.7.2"
 assert_cmd = "2.2"
 predicates = "3.1.4"
 strum = { version = "0.28.0", features = ["derive"] }
+escargot = "0.5.15"
 
 [workspace]
 members = [
@@ -102,12 +103,14 @@ exclude = ["crates/samply-codspeed"]
 [workspace.dependencies]
 anyhow = "1.0"
 clap = { version = "4.6", features = ["derive", "env"] }
+crossbeam-channel = "0.5.15"
 libc = "0.2"
 log = "0.4.28"
 serde_json = "1.0"
 serde = { version = "1.0.228", features = ["derive"] }
 ipc-channel = "0.20"
 itertools = "0.14.0"
+rayon = "1.12"
 linux-perf-event-reader = "0.10.2"                                                       # matches the version linux-perf-data resolves to
 env_logger = "0.11.10"
 tempfile = "3.27.0"

@@ -69,6 +69,8 @@ impl RunArgs {
                 go_runner_version: None,
                 show_full_output: false,
                 base: None,
+                cycle_estimation: true,
+                exclude_allocations: true,
                 profiler_run_args: ProfilerRunArgs {
                     enable_profiler: false,
                     enable_perf: None,
@@ -78,7 +80,8 @@ impl RunArgs {
                 },
                 experimental: ExperimentalArgs {
                     experimental_fair_sched: false,
-                    cycle_estimation: false,
+                    experimental_cycle_estimation: false,
+                    experimental_exclude_allocations: false,
                 },
             },
             instruments: vec![],
@@ -128,7 +131,8 @@ fn build_orchestrator_config(
         poll_results_options,
         extra_env: HashMap::new(),
         fair_sched: args.shared.experimental.experimental_fair_sched,
-        cycle_estimation: args.shared.experimental.cycle_estimation,
+        cycle_estimation: args.shared.cycle_estimation,
+        exclude_allocations: args.shared.exclude_allocations,
     })
 }
 

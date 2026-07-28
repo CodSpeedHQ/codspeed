@@ -2,15 +2,11 @@ use clap::Parser;
 use ipc_channel::ipc;
 use memtrack::prelude::*;
 use memtrack::{MemtrackIpcMessage, Tracker, handle_ipc_message};
-use runner_shared::artifacts::{ArtifactExt, MemtrackArtifact, MemtrackEvent, MemtrackWriter};
-use std::os::unix::process::CommandExt;
+use runner_shared::artifacts::{ArtifactExt, MemtrackArtifact, encode_events};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::channel;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
 
 #[derive(Parser)]
 #[command(name = "memtrack")]
@@ -88,127 +84,89 @@ fn track_command(
         None
     };
 
-    let tracker = Tracker::new()?;
-    let tracker_arc = Arc::new(Mutex::new(tracker));
+    let tracker = Arc::new(Tracker::new()?);
 
     // Spawn IPC handler thread with the now-available tracker
     let ipc_handle = if let Some(rx) = ipc_channel {
-        let tracker_clone = tracker_arc.clone();
+        let tracker = tracker.clone();
         Some(thread::spawn(move || {
             while let Ok(msg) = rx.recv() {
-                handle_ipc_message(msg, &tracker_clone);
+                handle_ipc_message(msg, &tracker);
             }
         }))
     } else {
         // Without IPC, nothing toggles the tracking_enabled map, so events would
         // be dropped by the eBPF is_enabled() check. Enable it up front.
-        tracker_arc.lock().unwrap().enable()?;
+        tracker.enable_tracking()?;
         None
     };
 
-    // Start the target command using bash to handle shell syntax
+    // Run the target command through bash to handle shell syntax. Drop
+    // privileges if running under sudo to avoid permission issues when the
+    // target accesses files owned by the original user.
     let mut cmd = Command::new("bash");
     cmd.arg("-c").arg(cmd_string);
-
-    // Drop privileges if running under sudo. This is required to avoid permission issues
-    // when the target command tries to access files or directories that the current user
-    // does not have permission to access.
-    if let Some((uid, gid)) = get_user_uid_gid() {
+    let uid_gid = get_user_uid_gid();
+    if let Some((uid, gid)) = uid_gid {
         debug!("Running under sudo, dropping privileges to uid={uid}, gid={gid}");
-        cmd.uid(uid).gid(gid);
     }
 
-    let mut child = cmd
-        .spawn()
+    let mut session = tracker
+        .spawn(&cmd, uid_gid)
         .map_err(|e| anyhow!("Failed to spawn child process: {e}"))?;
-    let root_pid = child.id() as i32;
-    let event_rx = { tracker_arc.lock().unwrap().track(root_pid)? };
+    let root_pid = session.pid();
+    let event_rx = session.take_events()?;
     debug!("Spawned child with pid {root_pid}");
 
     // Generate output file name and create file for streaming events
     let file_name = MemtrackArtifact::file_name(Some(root_pid));
     let out_file = std::fs::File::create(out_dir.join(file_name))?;
 
-    let (write_tx, write_rx) = channel::<MemtrackEvent>();
+    // Leave headroom for the ring buffer poll thread and the tracked
+    // command: encode workers on every core starve the poller during
+    // allocation bursts, which overflows the kernel ring buffer.
+    let n_workers = thread::available_parallelism()
+        .map(|n| n.get().saturating_sub(2).max(1))
+        .unwrap_or(4);
 
-    // Stage A: Fast drain thread - This is required so that we immediately clear the ring buffer
-    // because it only has a limited size.
-    static DRAIN_EVENTS: AtomicBool = AtomicBool::new(true);
-    let write_tx_clone = write_tx.clone();
-    let drain_thread = thread::spawn(move || {
-        // Regular draining loop
-        while DRAIN_EVENTS.load(Ordering::Relaxed) {
-            let Ok(event) = event_rx.recv_timeout(Duration::from_millis(100)) else {
-                continue;
-            };
-            let _ = write_tx_clone.send(event);
-        }
-
-        // Final aggressive drain - keep trying until truly empty
-        loop {
-            match event_rx.try_recv() {
-                Ok(event) => {
-                    let _ = write_tx_clone.send(event);
-                }
-                Err(_) => {
-                    // Sleep briefly and try once more to catch late arrivals
-                    thread::sleep(Duration::from_millis(50));
-                    if let Ok(event) = event_rx.try_recv() {
-                        let _ = write_tx_clone.send(event);
-                    } else {
-                        break;
-                    }
-                }
-            }
-        }
-    });
-
-    // Stage B: Writer thread - Immediately writes the events to disk
-    let writer_thread = thread::spawn(move || -> anyhow::Result<()> {
-        let mut writer = MemtrackWriter::new(out_file)?;
-
-        let mut i = 0;
-        while let Ok(first) = write_rx.recv() {
-            writer.write_event(&first)?;
-            i += 1;
-
-            // Drain any backlog in a tight loop (batching)
-            while let Ok(ev) = write_rx.try_recv() {
-                writer.write_event(&ev)?;
-                i += 1;
-            }
-        }
-        writer.finish()?;
-
-        info!("Wrote {i} memtrack events to disk");
-
-        Ok(())
-    });
+    let pipeline_thread = thread::spawn(move || encode_events(event_rx, out_file, n_workers));
 
     // Wait for the command to complete
-    let status = child.wait().context("Failed to wait for command")?;
+    let status = session.wait().context("Failed to wait for command")?;
     debug!("Command exited with status: {status}");
 
-    // Wait for drain thread to finish
-    debug!("Waiting for the drain thread to finish");
-    DRAIN_EVENTS.store(false, Ordering::Relaxed);
-    drain_thread
-        .join()
-        .map_err(|_| anyhow::anyhow!("Failed to join drain thread"))?;
+    // Stop event production before draining: the child has exited, so anything
+    // still arriving is already in the ring buffer.
+    if let Err(e) = tracker.disable_tracking() {
+        warn!("Failed to disable tracking: {e:#}");
+    }
 
-    // Wait for writer thread to finish and propagate errors
-    debug!("Waiting for the writer thread to finish");
-    drop(write_tx);
-    writer_thread
+    // Dropping the session drops the event poller, which does a final drain of
+    // the ring buffer and then closes the event channel. Without this the
+    // encode pipeline join below would block forever.
+    debug!("Stopping the ring buffer poller");
+    drop(session);
+
+    debug!("Waiting for the encode pipeline to finish");
+    let total = pipeline_thread
         .join()
-        .map_err(|_| anyhow::anyhow!("Failed to join writer thread"))??;
+        .map_err(|_| anyhow::anyhow!("Failed to join memtrack encode pipeline"))??;
+
+    info!("Wrote {total} memtrack events to disk");
+
+    // Stop the attach worker and surface any fatal error it recorded (missed
+    // exec mappings mean incomplete allocator coverage).
+    tracker.finish()?;
+
+    // Detach probes explicitly: the IPC thread still holds an Arc clone, so the
+    // tracker would otherwise never be dropped before process::exit and the
+    // kernel would close every link fd serially during exit.
+    tracker.detach();
 
     // Read the eBPF dropped-event counter after the run is complete.
     // A non-zero value means the ring buffer overflowed and the trace is
     // incomplete.
-    let dropped_events = tracker_arc
-        .lock()
-        .map_err(|_| anyhow!("tracker mutex poisoned"))?
+    let dropped_events = tracker
         .dropped_events_count()
         .context("Failed to read memtrack dropped-event counter")?;
     if dropped_events > 0 {

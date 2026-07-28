@@ -12,18 +12,33 @@ fn build_ebpf() {
 
     println!("cargo:rerun-if-changed=src/ebpf/c");
 
-    // Build the BPF program
+    // The same source (main.bpf.c) is compiled into two skeletons through thin
+    // wrappers that differ only in whether MEMTRACK_BPF_VARIANT_TOKEN is set:
+    // the token variant attaches uprobes as uprobe_multi links, which a
+    // delegated BPF token can authorize, and the legacy variant uses
+    // perf_event_open for kernels predating uprobe_multi. See
+    // src/ebpf/c/utils/variant.h. The runtime picks one based on token
+    // availability.
     let arch = env::var("CARGO_CFG_TARGET_ARCH")
         .expect("CARGO_CFG_TARGET_ARCH must be set in build script");
-    let memtrack_out = PathBuf::from(env::var("OUT_DIR").unwrap()).join("memtrack.skel.rs");
-    SkeletonBuilder::new()
-        .source("src/ebpf/c/memtrack.bpf.c")
-        .clang_args([
-            "-I",
-            &vmlinux::include_path_root().join(arch).to_string_lossy(),
-        ])
-        .build_and_generate(&memtrack_out)
-        .unwrap();
+    let vmlinux_inc = vmlinux::include_path_root()
+        .join(arch)
+        .to_string_lossy()
+        .into_owned();
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    for (source, skel) in [
+        ("src/ebpf/c/memtrack_token.bpf.c", "memtrack_token.skel.rs"),
+        (
+            "src/ebpf/c/memtrack_legacy.bpf.c",
+            "memtrack_legacy.skel.rs",
+        ),
+    ] {
+        SkeletonBuilder::new()
+            .source(source)
+            .clang_args(["-I", &vmlinux_inc])
+            .build_and_generate(out_dir.join(skel))
+            .unwrap();
+    }
 
     // Generate bindings for event.h
     let bindings = bindgen::Builder::default()

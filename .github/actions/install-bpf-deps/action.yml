@@ -1,0 +1,7 @@
+name: Install BPF build deps
+description: System packages required to build memtrack's vendored libbpf-sys.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: sudo apt-get update && sudo apt-get install -y autopoint bison flex

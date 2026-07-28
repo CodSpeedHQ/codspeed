@@ -69,6 +69,14 @@ const ALLOCATION_TEST_CASES: &[AllocationTestCase] = &[
         name: "alloc_size",
         source: include_str!("../testdata/alloc_size.c"),
     },
+    AllocationTestCase {
+        name: "posix_memalign_test",
+        source: include_str!("../testdata/posix_memalign_test.c"),
+    },
+    AllocationTestCase {
+        name: "posix_memalign_einval",
+        source: include_str!("../testdata/posix_memalign_einval.c"),
+    },
 ];
 
 #[test_with::env(GITHUB_ACTIONS)]
@@ -81,6 +89,8 @@ const ALLOCATION_TEST_CASES: &[AllocationTestCase] = &[
 #[case(&ALLOCATION_TEST_CASES[5])]
 #[case(&ALLOCATION_TEST_CASES[6])]
 #[case(&ALLOCATION_TEST_CASES[7])]
+#[case(&ALLOCATION_TEST_CASES[8])]
+#[case(&ALLOCATION_TEST_CASES[9])]
 #[test_log::test]
 fn test_allocation_tracking(
     #[case] test_case: &AllocationTestCase,
@@ -88,11 +98,7 @@ fn test_allocation_tracking(
     let temp_dir = TempDir::new()?;
     let binary = compile_c_source(test_case.source, test_case.name, temp_dir.path())?;
 
-    let (events, thread_handle) = shared::track_binary(&binary)?;
-
-    assert_events_snapshot!(test_case.name, events);
-
-    thread_handle.join().unwrap();
+    assert_events_snapshot_for_each_variant!(test_case.name, || Command::new(&binary))?;
 
     Ok(())
 }

@@ -1,21 +1,16 @@
 #![allow(dead_code, unused)]
 
-use anyhow::Context;
 use memtrack::prelude::*;
-use memtrack::{AllocatorLib, Tracker};
+use memtrack::{BpfVariant, Tracker};
 use runner_shared::artifacts::{MemtrackEvent as Event, MemtrackEventKind};
 use std::path::Path;
 use std::process::Command;
-use std::time::Duration;
 
 type TrackResult = anyhow::Result<(Vec<Event>, std::thread::JoinHandle<()>)>;
 
-/// Asserts memory events using snapshot testing without marker filtering.
+/// Snapshot every tracked event, ordered by timestamp and deduplicated by
+/// `(addr, kind)` so repeated tracking of one allocation counts once.
 ///
-/// Formats and snapshots all memory events for regression testing.
-/// Deduplicates by address and type to remove duplicate tracking.
-///
-/// # Example
 /// ```no_run
 /// let (events, _handle) = track_binary(&binary)?;
 /// assert_events_snapshot!("test_name", events);
@@ -23,92 +18,115 @@ type TrackResult = anyhow::Result<(Vec<Event>, std::thread::JoinHandle<()>)>;
 macro_rules! assert_events_snapshot {
     ($name:expr, $events:expr) => {{
         use itertools::Itertools;
-        use runner_shared::artifacts::MemtrackEventKind;
         use std::mem::discriminant;
 
-        // Dedup events by address and type to remove duplicates
-        let events = $events
+        let formatted_events: Vec<String> = $events
             .iter()
             .sorted_by_key(|e| e.timestamp)
             .dedup_by(|a, b| a.addr == b.addr && discriminant(&a.kind) == discriminant(&b.kind))
-            .collect::<Vec<_>>();
-
-        let formatted_events: Vec<String> = events
-            .iter()
-            .map(|e| match e.kind {
-                // Exclude address in snapshots:
-                MemtrackEventKind::Realloc { size, .. } => format!("Realloc {{ size: {} }}", size),
-                _ => format!("{:?}", e.kind),
-            })
+            .map(|e| shared::describe_kind(&e.kind))
             .collect();
         insta::assert_debug_snapshot!($name, formatted_events);
     }};
 }
 
-/// Asserts events, filtered by a 0xC0D59EED allocation marker to
-/// exclude noise.
+/// [`assert_events_snapshot`] over only the events the workload bracketed with
+/// `malloc(0xC0D59EED)`, which keeps libc and runtime noise out of the snapshot.
+/// The workload must allocate the marker before and after the region of interest:
 ///
-/// Processes events by:
-/// 1. Deduplicating by address and event type
-/// 2. Filtering to events between 0xC0D59EED marker allocations
-/// 3. Creating an insta snapshot for regression testing
-///
-/// Binary must alloc `0xC0D59EED` memory before and after.
-///
-/// # Example
-///
-/// Do the following in the test:
 /// ```no_run
-/// malloc(0xC0D59EED)
-/// // do you allocations/frees here
-/// malloc(0xC0D59EED)
+/// malloc(0xC0D59EED);
+/// // allocations under test
+/// malloc(0xC0D59EED);
 /// ```
 ///
-/// Then in Rust:
 /// ```no_run
 /// let (events, _handle) = track_binary(&binary)?;
 /// assert_events_with_marker!("test_name", events);
 /// ```
 macro_rules! assert_events_with_marker {
     ($name:expr, $events:expr) => {{
-        use itertools::Itertools;
-        use runner_shared::artifacts::MemtrackEventKind;
-        use std::mem::discriminant;
-
-        // Remove events outside our 0xC0D59EED marker allocations
-        let filtered_events = $events
-            .iter()
-            .sorted_by_key(|e| e.timestamp)
-            .dedup_by(|a, b| a.addr == b.addr && discriminant(&a.kind) == discriminant(&b.kind))
-            .skip_while(|e| {
-                let MemtrackEventKind::Malloc { size } = e.kind else {
-                    return true;
-                };
-                size != 0xC0D59EED
-            })
-            .skip(2) // Skip the marker allocation and free
-            .take_while(|e| {
-                let MemtrackEventKind::Malloc { size } = e.kind else {
-                    return true;
-                };
-                size != 0xC0D59EED
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-
-        assert_events_snapshot!($name, filtered_events);
+        let filtered_events = shared::between_markers($events);
+        assert_events_snapshot!($name, &filtered_events);
     }};
 }
 
-/// Compile a Rust binary from a test crate directory.
+/// [`assert_events_snapshot`] run under each BPF variant. `$workload` is called
+/// once per variant, so it must return a fresh [`Command`] every time.
+///
+/// ```no_run
+/// assert_events_snapshot_for_each_variant!("test_name", || Command::new(&binary));
+/// ```
+macro_rules! assert_events_snapshot_for_each_variant {
+    ($name:expr, $workload:expr) => {
+        shared::for_each_variant($workload, |events| {
+            assert_events_snapshot!($name, events);
+        })
+    };
+}
+
+/// [`assert_events_with_marker`] run under each BPF variant. `$workload` is
+/// called once per variant, so it must return a fresh [`Command`] every time.
+macro_rules! assert_events_with_marker_for_each_variant {
+    ($name:expr, $workload:expr) => {
+        shared::for_each_variant($workload, |events| {
+            assert_events_with_marker!($name, events);
+        })
+    };
+}
+
+/// An event's kind and size, without the addresses that differ between runs of
+/// the same workload. `Realloc` needs spelling out since its `Debug` includes the
+/// old address.
+pub fn describe_kind(kind: &MemtrackEventKind) -> String {
+    match kind {
+        MemtrackEventKind::Realloc { size, .. } => format!("Realloc {{ size: {size} }}"),
+        other => format!("{other:?}"),
+    }
+}
+
+/// The events between the workload's `malloc(0xC0D59EED)` markers, ordered by
+/// timestamp and deduplicated by `(addr, kind)`.
+pub fn between_markers(events: &[Event]) -> Vec<Event> {
+    use itertools::Itertools;
+    use std::mem::discriminant;
+
+    const MARKER: u64 = 0xC0D5_9EED;
+    let is_marker =
+        |e: &&Event| matches!(e.kind, MemtrackEventKind::Malloc { size } if size == MARKER);
+
+    events
+        .iter()
+        .sorted_by_key(|e| e.timestamp)
+        .dedup_by(|a, b| a.addr == b.addr && discriminant(&a.kind) == discriminant(&b.kind))
+        .skip_while(|e| !is_marker(e))
+        .skip(2) // the opening marker malloc and its free
+        .take_while(|e| !is_marker(e))
+        .cloned()
+        .collect()
+}
+
+/// Compile a Rust binary from a test crate directory. Each feature set gets its
+/// own target dir, otherwise parallel test cases race to overwrite one binary.
 pub fn compile_rust_binary(
     crate_dir: &Path,
     name: &str,
     features: &[&str],
 ) -> anyhow::Result<std::path::PathBuf> {
+    let target_dir = match features {
+        [] => "target/default".to_string(),
+        _ => format!("target/{}", features.join("-")),
+    };
+
     let mut cmd = Command::new("cargo");
-    cmd.current_dir(crate_dir)
-        .args(["build", "--release", "--bin", name]);
+    cmd.current_dir(crate_dir).args([
+        "build",
+        "--release",
+        "--bin",
+        name,
+        "--target-dir",
+        &target_dir,
+    ]);
 
     if !features.is_empty() {
         cmd.arg("--features").arg(features.join(","));
@@ -121,51 +139,99 @@ pub fn compile_rust_binary(
         return Err(anyhow::anyhow!("Failed to compile Rust crate"));
     }
 
-    Ok(crate_dir.join(format!("target/release/{name}")))
+    Ok(crate_dir.join(format!("{target_dir}/release/{name}")))
 }
 
-/// Track a spawned command, collecting all memory events.
+/// Track a binary, collecting all memory events.
+pub fn track_binary(binary: &Path) -> TrackResult {
+    track_command(Command::new(binary))
+}
+
+/// Track a command, collecting all memory events. No allocators are pre-attached:
+/// the exec-mapping watcher discovers them as the tracked tree maps executables.
+pub fn track_command(command: Command) -> TrackResult {
+    track_command_with_tracker(command, Tracker::new()?)
+}
+
+/// Track a command under a specific BPF variant rather than the detected one.
+pub fn track_command_with_variant(command: Command, variant: BpfVariant) -> TrackResult {
+    track_command_with_tracker(command, Tracker::with_variant(variant)?)
+}
+
+/// How many events of each kind-and-size a run saw. Addresses, timestamps, pids
+/// and event order all differ legitimately between runs of the same workload, so
+/// none of them can be compared across variants.
+type EventProfile = std::collections::BTreeMap<String, usize>;
+
+fn event_profile(events: &[Event]) -> EventProfile {
+    let mut profile = EventProfile::new();
+    for event in events {
+        *profile.entry(describe_kind(&event.kind)).or_default() += 1;
+    }
+    profile
+}
+
+/// Run `workload` under each BPF variant, pass every run's events to
+/// `assert_events`, and require the variants to have observed the same
+/// allocations: they differ only in how probes attach, so what one sees the other
+/// must see too.
 ///
-/// When `discover_system_allocators` is true, the tracker will scan for all
-/// allocators on the system (slower). When false, only `extra_allocators` are used.
-pub fn track_command(
-    mut command: Command,
-    extra_allocators: &[AllocatorLib],
-    discover_system_allocators: bool,
-) -> TrackResult {
-    // IMPORTANT: Always initialize the tracker BEFORE spawning the binary, as it can take some time to
-    // attach to all the allocator libraries (especially when using NixOS).
-    let mut tracker = if discover_system_allocators {
-        memtrack::Tracker::new()?
-    } else {
-        memtrack::Tracker::new_without_allocators()?
-    };
-    tracker.attach_allocators(extra_allocators)?;
+/// Variants that cannot attach on this host are skipped, since the token variant
+/// needs `uprobe_multi` (kernel >= 6.6). Panics if none attach.
+pub fn for_each_variant(
+    mut workload: impl FnMut() -> Command,
+    mut assert_events: impl FnMut(&[Event]),
+) -> anyhow::Result<()> {
+    let mut profiles: Vec<(BpfVariant, EventProfile)> = Vec::new();
 
-    let child = command.spawn().context("Failed to spawn command")?;
-    let root_pid = child.id() as i32;
+    for variant in [BpfVariant::Legacy, BpfVariant::Token] {
+        let tracker = match Tracker::with_variant(variant) {
+            Ok(tracker) => tracker,
+            Err(err) => {
+                eprintln!("skipping {variant:?} variant, cannot attach here: {err:#}");
+                continue;
+            }
+        };
 
-    tracker.enable()?;
-    let rx = tracker.track(root_pid)?;
-
-    let mut events = Vec::new();
-    while let Ok(event) = rx.recv_timeout(Duration::from_secs(10)) {
-        events.push(event);
+        let (events, thread_handle) = track_command_with_tracker(workload(), tracker)?;
+        assert_events(&events);
+        profiles.push((variant, event_profile(&events)));
+        thread_handle.join().unwrap();
     }
 
-    // Drop the tracker in a new thread to not block the test
-    let thread_handle = std::thread::spawn(move || core::mem::drop(tracker));
+    let Some(((first_variant, first), rest)) = profiles.split_first() else {
+        panic!("no BPF variant could attach");
+    };
+    for (variant, profile) in rest {
+        assert_eq!(
+            first, profile,
+            "{first_variant:?} and {variant:?} variants disagree on tracked allocations"
+        );
+    }
+
+    Ok(())
+}
+
+fn track_command_with_tracker(command: Command, tracker: Tracker) -> TrackResult {
+    tracker.enable_tracking()?;
+
+    let mut session = tracker.spawn(&command, None)?;
+    let rx = session.take_events()?;
+
+    session.wait()?;
+    // Dropping the session does a final ring buffer drain and closes the
+    // channel, so collecting terminates without a silence timeout.
+    drop(session);
+    let events: Vec<Event> = rx.iter().collect();
+
+    tracker.finish()?;
+
+    // Detaching the probes blocks on RCU grace periods; let the caller decide
+    // when to wait for it.
+    let thread_handle = std::thread::spawn(move || drop(tracker));
 
     info!("Tracked {} events", events.len());
     trace!("Events: {events:#?}");
 
     Ok((events, thread_handle))
-}
-
-pub fn track_binary_with_opts(binary: &Path, extra_allocators: &[AllocatorLib]) -> TrackResult {
-    track_command(Command::new(binary), extra_allocators, true)
-}
-
-pub fn track_binary(binary: &Path) -> TrackResult {
-    track_binary_with_opts(binary, &[])
 }

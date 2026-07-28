@@ -64,10 +64,8 @@ Use the CodSpeed MCP tools to understand where time is spent:
 1. **List runs** to find your baseline run ID:
    - Use `list_runs` with appropriate filters (branch, event type)
 
-2. **Query flamegraphs** on the hottest benchmarks:
-   - Use `query_flamegraph` with the run ID and benchmark name
-   - Start with `depth_limit: 5` to get the big picture
-   - Use `root_function_name` to zoom into hot subtrees
+2. **Query flamegraphs** on the hottest benchmarks with `query_flamegraph`:
+   - Start from the whole flame graph to get the big picture, then re-root into the hottest subtrees to zoom in
    - Look for:
      - Functions with high **self time** (these are the actual bottlenecks)
      - Instruction-bound vs cache-bound vs memory-bound breakdown
@@ -209,19 +207,13 @@ Keep iterating until:
 - Or define benchmarks in `codspeed.yml` and use `codspeed run`
 - No code changes required — CodSpeed instruments the binary externally
 
-## MCP tools reference
+## MCP tools
 
-You have access to these CodSpeed MCP tools:
+You have access to the CodSpeed MCP tools. Their live schemas are the source of truth for each tool's exact name, parameters, and behavior; read the parameters there and don't assume any beyond what a tool declares. How to use them for this task:
 
-- **`list_runs`**: Find run IDs. Filter by branch, event type. Use this to find your baseline and latest runs.
-- **`compare_runs`**: Compare two runs. Shows improvements, regressions, new/missing benchmarks with formatted values. This is your primary tool for measuring impact.
-- **`query_flamegraph`**: Inspect where time is spent. Parameters:
-  - `run_id`: which run to look at
-  - `benchmark_name`: full benchmark URI
-  - `depth_limit`: call tree depth (default 5, max 20)
-  - `root_function_name`: re-root at a specific function to zoom in
-- **`list_repositories`**: Find the repository slug if needed
-- **`get_run`**: Get details about a specific run
+- **`compare_runs`** is your primary tool for measuring impact: it reports the improvements, regressions, and new/missing benchmarks between two runs.
+- **`query_flamegraph`** shows where time is spent. Use it to find the real hot path — often not where you'd guess — before changing anything, and to zoom into a specific function or thread.
+- **`list_runs`**, **`get_run`**, and **`list_repositories`** cover run and repository lookups — use them to find your baseline and latest run IDs, and the repository slug if needed.
 
 ## Guiding principles
 

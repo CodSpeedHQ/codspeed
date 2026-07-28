@@ -37,14 +37,10 @@ jobs:
       - uses: ./.github/actions/install-rust
 
       # Install memtrack for the memory integration tests
-      - name: Install dependencies required for libbpf-sys (vendored feature)
-        run: sudo apt-get update && sudo apt-get install -y autopoint bison flex
+      - uses: ./.github/actions/install-bpf-deps
       - name: Install memtrack
         run: |
           cargo install --path crates/memtrack --locked
-      - name: Install exec-harness
-        run: |
-          cargo install --path crates/exec-harness --locked
 
       - name: Grant memtrack file capabilities
         run: cargo r -- setup --mode memory
@@ -96,7 +92,7 @@ jobs:
         # Each memtrack integration test binary runs its cases serially
         # (eBPF tracker can't overlap with itself in one process), so we
         # shard at the test-binary level to parallelize across jobs.
-        test: [c_tests, cpp_tests, rust_tests, spawn_tests]
+        test: [c_tests, cpp_tests, rust_tests, spawn_tests, dlopen_tests]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -105,8 +101,7 @@ jobs:
       - uses: ./.github/actions/install-rust
         with:
           cache-key: ${{ matrix.test }}
-      - name: Install dependencies required for libbpf-sys (vendored feature)
-        run: sudo apt-get update && sudo apt-get install -y autopoint bison flex
+      - uses: ./.github/actions/install-bpf-deps
 
       - name: Install additional allocators
         run: sudo apt-get install -y libmimalloc-dev libjemalloc-dev
@@ -122,7 +117,11 @@ jobs:
         run: sudo chown -R $USER:$USER . ~/.cargo
 
   benchmarks:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.mode == 'walltime' && 'codspeed-macro' || 'ubuntu-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [simulation, walltime]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -135,11 +134,11 @@ jobs:
           tool: cargo-codspeed
 
       - name: Build benchmarks
-        run: cargo codspeed build -p runner-shared
+        run: cargo codspeed build -p runner-shared -m ${{ matrix.mode }}
       - name: Run benchmarks
         uses: CodSpeedHQ/action@3194d9a39c4d46684cb44bf7207fc56626aad8fd # v4
         with:
-          mode: simulation
+          mode: ${{ matrix.mode }}
           run: cargo codspeed run -p runner-shared
 
   check:

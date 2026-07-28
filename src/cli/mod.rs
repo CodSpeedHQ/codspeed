@@ -112,13 +112,23 @@ pub(crate) enum InternalCommands {
     Samply(samply::SamplyArgs),
 }
 
+/// Overrides the executable used to re-invoke internal subcommands.
+///
+/// [`std::env::current_exe`] is not always a binary that can dispatch them: it
+/// resolves to the host executable when this crate is linked into one, and to
+/// a wrapper when the CLI is invoked through a launcher script.
+pub(crate) const SELF_EXE_ENV_VAR: &str = "CODSPEED_SELF_EXE";
+
 impl InternalCommands {
     /// Build a [`CommandBuilder`] that re-execs the current binary into this
     /// internal subcommand. Each variant owns its own arg layout.
     pub fn get_command_builder(&self) -> Result<CommandBuilder> {
-        let current_exe = std::env::current_exe()
-            .context("failed to resolve current executable for internal subcommand")?;
-        let mut builder = CommandBuilder::new(current_exe);
+        let self_exe = match std::env::var_os(SELF_EXE_ENV_VAR) {
+            Some(path) => PathBuf::from(path),
+            None => std::env::current_exe()
+                .context("failed to resolve current executable for internal subcommand")?,
+        };
+        let mut builder = CommandBuilder::new(self_exe);
         match self {
             InternalCommands::Samply(args) => {
                 builder.arg("samply");
@@ -161,6 +171,7 @@ pub async fn run() -> Result<()> {
                 .upload_url
                 .get_or_insert_with(|| codspeed_config.upload_url.clone());
             args.shared.experimental.warn_if_active();
+            args.shared.experimental.warn_if_deprecated();
             run::run(
                 args,
                 &mut api_client,
@@ -175,6 +186,7 @@ pub async fn run() -> Result<()> {
                 .upload_url
                 .get_or_insert_with(|| codspeed_config.upload_url.clone());
             args.shared.experimental.warn_if_active();
+            args.shared.experimental.warn_if_deprecated();
             exec::run(
                 args,
                 &mut api_client,

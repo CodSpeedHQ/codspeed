@@ -85,26 +85,20 @@ impl MemtrackIpcClient {
 
 /// Handle incoming IPC messages in memtrack
 #[cfg(feature = "ebpf")]
-pub fn handle_ipc_message(msg: IpcMessage, tracker: &std::sync::Arc<std::sync::Mutex<Tracker>>) {
+pub fn handle_ipc_message(msg: IpcMessage, tracker: &Tracker) {
     let response = match msg.command {
-        IpcCommand::Enable => match tracker.lock() {
-            Ok(mut t) => match t.enable() {
-                Ok(_) => {
-                    debug!("Tracking enabled");
-                    IpcResponse::Ack
-                }
-                Err(_) => IpcResponse::Err,
-            },
+        IpcCommand::Enable => match tracker.enable_tracking() {
+            Ok(_) => {
+                debug!("Tracking enabled");
+                IpcResponse::Ack
+            }
             Err(_) => IpcResponse::Err,
         },
-        IpcCommand::Disable => match tracker.lock() {
-            Ok(mut t) => match t.disable() {
-                Ok(_) => {
-                    debug!("Tracking disabled");
-                    IpcResponse::Ack
-                }
-                Err(_) => IpcResponse::Err,
-            },
+        IpcCommand::Disable => match tracker.disable_tracking() {
+            Ok(_) => {
+                debug!("Tracking disabled");
+                IpcResponse::Ack
+            }
             Err(_) => IpcResponse::Err,
         },
         IpcCommand::Ping => IpcResponse::Ack,

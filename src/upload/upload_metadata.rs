@@ -37,6 +37,7 @@ mod tests {
                 version: "2.1.0".into(),
                 instruments: vec![InstrumentName::MongoDB],
                 executor: ExecutorName::Valgrind,
+                exclude_allocations: false,
                 system_info: SystemInfo::test(),
             },
             run_environment: RunEnvironment::GithubActions,
@@ -95,6 +96,7 @@ mod tests {
                 version: "4.11.1".into(),
                 instruments: vec![],
                 executor: ExecutorName::Valgrind,
+                exclude_allocations: false,
                 system_info: SystemInfo {
                     os: crate::system::SupportedOs::Linux(
                         crate::system::LinuxDistribution::Other {

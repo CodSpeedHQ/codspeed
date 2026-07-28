@@ -5,6 +5,112 @@
 
 
 
+## [5.0.0] - 2026-07-28
+
+### <!-- 0 -->🚀 Features
+- Load eBPF through a delegated BPF token by @GuillaumeLagrange
+- Enable cycle estimation and allocation exclusion by default by @not-matthias in [#461](https://github.com/CodSpeedHQ/runner/pull/461)
+- Make samply profiler default for all OSes (#472) by @GuillaumeLagrange in [#475](https://github.com/CodSpeedHQ/runner/pull/475)
+
+### <!-- 1 -->🐛 Bug Fixes
+- Classify mapped libraries without init-userns privilege by @GuillaumeLagrange
+
+### <!-- 10 -->💼 Other
+- Bump the memtrack pin to 1.4.0 by @adriencaccia in [#484](https://github.com/CodSpeedHQ/runner/pull/484)
+
+### <!-- 2 -->🏗️ Refactor
+- Hook-based CPU isolation for the walltime runner by @GuillaumeLagrange
+
+### <!-- 6 -->🧪 Testing
+- Run every tracking test under both BPF variants by @GuillaumeLagrange
+
+### <!-- 7 -->⚙️ Internals
+- Bump submodule to reduce debug info server timeouts by @GuillaumeLagrange
+- Make tests run release builds of the binaries by @GuillaumeLagrange in [#456](https://github.com/CodSpeedHQ/runner/pull/456)
+- Update submodule to fix fmt and ignore ubuntu debuginfod serv by @GuillaumeLagrange
+
+
+## [4.19.1] - 2026-07-27
+
+### <!-- 1 -->🐛 Bug Fixes
+- Track successful posix_memalign allocations (#470) by @not-matthias in [#470](https://github.com/CodSpeedHQ/runner/pull/470)
+- Prompt sudo on interactive stdin (#459) by @not-matthias in [#459](https://github.com/CodSpeedHQ/runner/pull/459)
+- Reject empty command before executor setup (#467) by @not-matthias in [#467](https://github.com/CodSpeedHQ/runner/pull/467)
+
+### <!-- 10 -->💼 Other
+- Bump the memtrack pin to 1.3.0 by @adriencaccia in [#474](https://github.com/CodSpeedHQ/runner/pull/474)
+
+
+## [4.19.0] - 2026-07-27
+
+### <!-- 0 -->🚀 Features
+- Remove eager allocator discovery by @not-matthias
+- Attach allocator probes on demand via exec-mapping watcher by @not-matthias
+- Add exec-mapping watcher BPF prog and inode maps by @not-matthias
+- Add experimental --exclude-allocations setting by @not-matthias
+
+### <!-- 1 -->🐛 Bug Fixes
+- Join attach worker thread on drop, not only on finish() by @not-matthias in [#445](https://github.com/CodSpeedHQ/runner/pull/445)
+- Fail loud when a watcher mapping is unresolved on a live process by @not-matthias
+- Canonicalize map_files dirent name for low-address mappings by @not-matthias
+- Classify unprefixed jemalloc builds as jemalloc by @not-matthias
+- Fail closed when tracking_enabled lookup fails by @not-matthias
+- Lower zstd compression level to -5 to reduce serialization overhead by @not-matthias
+- Wire MemtrackWriter serializer through BufWriter to fix per-event zstd compression bottleneck by @not-matthias
+
+### <!-- 10 -->💼 Other
+- Let the tracker own the poller and drain on shutdown by @not-matthias
+- Return the underlying sink from MemtrackWriter::finish by @not-matthias
+
+### <!-- 2 -->🏗️ Refactor
+- Split monolithic eBPF C and Rust into domain files by @not-matthias
+- Split memtrack into module by @not-matthias
+- Attach uprobes at resolved file offsets instead of func_name by @not-matthias
+- Align cycle-estimation flag with experimental naming scheme by @not-matthias in [#425](https://github.com/CodSpeedHQ/runner/pull/425)
+
+### <!-- 3 -->📚 Documentation
+- Add crate AGENTS.md guide by @not-matthias in [#455](https://github.com/CodSpeedHQ/runner/pull/455)
+- Stop hardcoding MCP tool schemas in the optimize skill by @fargito in [#451](https://github.com/CodSpeedHQ/runner/pull/451)
+
+### <!-- 4 -->⚡ Performance
+- Drain ringbuf bursts eagerly and reserve poller cores by @not-matthias in [#436](https://github.com/CodSpeedHQ/runner/pull/436)
+- Grow the event ring buffer to 256 MiB by @not-matthias
+- Wake the ringbuf consumer only past a data watermark by @not-matthias
+- Pre-size and reuse the memtrack encode window buffer by @not-matthias
+- Replace drain/writer threads with the encode pipeline by @not-matthias
+- Add parallel zstd encode pipeline for artifact events by @not-matthias
+- Detach BPF links in parallel at teardown by @not-matthias in [#440](https://github.com/CodSpeedHQ/runner/pull/440)
+- Resolve allocator symbol offsets in parallel by @not-matthias
+
+### <!-- 6 -->🧪 Testing
+- Add dlopen/on-demand allocator tests + CI matrix by @not-matthias
+- Benchmark encode_events with a realistic allocation trace by @not-matthias
+
+### <!-- 7 -->⚙️ Internals
+- Lower on-demand attach log to debug by @not-matthias in [#462](https://github.com/CodSpeedHQ/runner/pull/462)
+- Install rust toolchain by explicit channel for older rustup by @not-matthias
+- Also run runner-shared benchmarks in walltime mode by @not-matthias
+- Dedup memtrack build deps into install-bpf-deps action by @not-matthias
+
+
+## [4.18.4] - 2026-07-09
+
+### <!-- 10 -->💼 Other
+- Bump pinned valgrind-codspeed to 3.26.0-0codspeed6 (#448) by @adriencaccia in [#448](https://github.com/CodSpeedHQ/runner/pull/448)
+
+
+## [4.18.3] - 2026-07-08
+
+### <!-- 0 -->🚀 Features
+- Bump valgrind-codspeed to 3.26.0-0codspeed5 (#444) by @adriencaccia in [#444](https://github.com/CodSpeedHQ/runner/pull/444)
+
+
+## [4.18.2] - 2026-07-07
+
+### <!-- 1 -->🐛 Bug Fixes
+- Source forwarded env below memtrack's capability boundary by @not-matthias in [#439](https://github.com/CodSpeedHQ/runner/pull/439)
+
+
 ## [4.18.1] - 2026-06-24
 
 ### <!-- 0 -->🚀 Features
@@ -1330,6 +1436,12 @@
 - Add linting components to the toolchain by @art049
 
 
+[5.0.0]: https://github.com/CodSpeedHQ/runner/compare/v4.19.1..v5.0.0
+[4.19.1]: https://github.com/CodSpeedHQ/runner/compare/v4.19.0..v4.19.1
+[4.19.0]: https://github.com/CodSpeedHQ/runner/compare/v4.18.4..v4.19.0
+[4.18.4]: https://github.com/CodSpeedHQ/runner/compare/v4.18.3..v4.18.4
+[4.18.3]: https://github.com/CodSpeedHQ/runner/compare/v4.18.2..v4.18.3
+[4.18.2]: https://github.com/CodSpeedHQ/runner/compare/v4.18.1..v4.18.2
 [4.18.1]: https://github.com/CodSpeedHQ/runner/compare/v4.18.0..v4.18.1
 [4.18.0]: https://github.com/CodSpeedHQ/runner/compare/v4.17.6..v4.18.0
 [4.17.6]: https://github.com/CodSpeedHQ/runner/compare/v4.17.5..v4.17.6

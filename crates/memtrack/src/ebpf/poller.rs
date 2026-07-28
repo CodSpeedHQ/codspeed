@@ -1,88 +1,79 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use libbpf_rs::{MapCore, RingBufferBuilder};
-use runner_shared::artifacts::MemtrackEvent as Event;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use super::events::parse_event;
-
-/// A handler function for processing ring buffer events
-pub type EventHandler = Box<dyn Fn(Event) + Send>;
-
-/// RingBufferPoller manages polling a BPF ring buffer in a background thread
-/// and sending events to handlers
+/// Polls a BPF ring buffer in a background thread, parsing raw entries with a
+/// user-supplied closure and forwarding them to an mpsc channel.
+///
+/// The poll thread runs until the poller is dropped, doing a final full
+/// `consume()` on shutdown so no buffered entries are lost.
 pub struct RingBufferPoller {
-    shutdown: Arc<AtomicBool>,
+    ctl: Option<Sender<Sender<()>>>,
     poll_thread: Option<JoinHandle<()>>,
 }
 
 impl RingBufferPoller {
-    /// Create a new RingBufferPoller for the given ring buffer map
-    ///
-    /// # Arguments
-    /// * `rb_map` - The BPF ring buffer map to poll
-    /// * `handler` - Callback function to handle each event
-    /// * `poll_timeout_ms` - How long to wait for events in each poll iteration
-    pub fn new<M: MapCore + 'static>(
-        rb_map: &M,
-        handler: EventHandler,
-        poll_timeout_ms: u64,
-    ) -> Result<Self> {
+    pub fn new<M, T, F>(rb_map: &M, parse: F, tx: Sender<T>, poll_interval_ms: u64) -> Result<Self>
+    where
+        M: MapCore,
+        T: Send + 'static,
+        F: Fn(&[u8]) -> Option<T> + Send + 'static,
+    {
         let mut builder = RingBufferBuilder::new();
         builder.add(rb_map, move |data| {
-            if let Some(event) = parse_event(data) {
-                handler(event);
+            if let Some(item) = parse(data) {
+                let _ = tx.send(item);
             }
             0
         })?;
-
         let ringbuf = builder.build()?;
-        let shutdown = Arc::new(AtomicBool::new(false));
-        let shutdown_clone = shutdown.clone();
 
+        // The control channel doubles as the poll pacing: a received message is
+        // a drain request (acked after a full consume), a timeout is a regular
+        // poll tick, and disconnection is the shutdown signal.
+        let (ctl, ctl_rx) = mpsc::channel::<Sender<()>>();
         let poll_thread = std::thread::spawn(move || {
-            while !shutdown_clone.load(Ordering::Relaxed) {
-                let _ = ringbuf.poll(Duration::from_millis(poll_timeout_ms));
+            loop {
+                match ctl_rx.recv_timeout(Duration::from_millis(poll_interval_ms)) {
+                    Ok(ack) => {
+                        let _ = ringbuf.consume();
+                        let _ = ack.send(());
+                    }
+                    Err(RecvTimeoutError::Timeout) => {
+                        let _ = ringbuf.poll(Duration::ZERO);
+                    }
+                    Err(RecvTimeoutError::Disconnected) => {
+                        let _ = ringbuf.consume();
+                        break;
+                    }
+                }
             }
         });
 
         Ok(Self {
-            shutdown,
+            ctl: Some(ctl),
             poll_thread: Some(poll_thread),
         })
     }
 
-    /// Create a new RingBufferPoller with an mpsc channel for events
-    ///
-    /// Returns the RingBufferPoller and the receiver end of the channel
-    pub fn with_channel<M: MapCore + 'static>(
-        rb_map: &M,
-        poll_timeout_ms: u64,
-    ) -> Result<(Self, mpsc::Receiver<Event>)> {
-        let (tx, rx) = mpsc::channel();
-        let poller = Self::new(
-            rb_map,
-            Box::new(move |event| {
-                let _ = tx.send(event);
-            }),
-            poll_timeout_ms,
-        )?;
-        Ok((poller, rx))
-    }
-
-    /// Stop the polling thread and wait for it to finish
-    pub fn shutdown(&mut self) {
-        self.shutdown.store(true, Ordering::Relaxed);
-        if let Some(thread) = self.poll_thread.take() {
-            let _ = thread.join();
-        }
+    /// Block until a full `consume()` of the ring buffer completes. When every
+    /// producer is stopped, all pending entries are in the channel afterwards.
+    pub fn drain(&self) -> Result<()> {
+        let (ack_tx, ack_rx) = mpsc::channel();
+        let ctl = self.ctl.as_ref().context("poller already shut down")?;
+        ctl.send(ack_tx).context("poll thread is gone")?;
+        ack_rx.recv().context("poll thread died during drain")?;
+        Ok(())
     }
 }
 
 impl Drop for RingBufferPoller {
     fn drop(&mut self) {
-        self.shutdown();
+        drop(self.ctl.take());
+        if let Some(thread) = self.poll_thread.take() {
+            let _ = thread.join();
+        }
     }
 }

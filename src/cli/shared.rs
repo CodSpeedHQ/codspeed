@@ -113,6 +113,24 @@ pub struct ExecAndRunSharedArgs {
     #[arg(long)]
     pub base: Option<String>,
 
+    /// Enable Valgrind cycle estimation (--cycle-estimation) in simulation mode.
+    #[arg(
+        long,
+        env = "CODSPEED_CYCLE_ESTIMATION",
+        default_value_t = true,
+        action = clap::ArgAction::Set
+    )]
+    pub cycle_estimation: bool,
+
+    /// Exclude memory allocation time from simulation results.
+    #[arg(
+        long,
+        env = "CODSPEED_EXCLUDE_ALLOCATIONS",
+        default_value_t = true,
+        action = clap::ArgAction::Set
+    )]
+    pub exclude_allocations: bool,
+
     #[command(flatten)]
     pub profiler_run_args: ProfilerRunArgs,
 

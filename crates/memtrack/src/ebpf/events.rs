@@ -89,6 +89,31 @@ pub fn parse_event(data: &[u8]) -> Option<MemtrackEvent> {
     })
 }
 
+/// A request from the exec-mapping watcher to attach allocator probes.
+#[derive(Debug, Clone, Copy)]
+pub struct AttachRequest {
+    pub pid: u32,
+    pub dev: u64,
+    pub ino: u64,
+}
+impl AttachRequest {
+    /// Parse an attach request from raw ring buffer bytes.
+    ///
+    /// SAFETY: The data must be a valid `bindings::attach_request`
+    pub fn parse(data: &[u8]) -> Option<Self> {
+        if data.len() < std::mem::size_of::<bindings::attach_request>() {
+            return None;
+        }
+
+        let req = unsafe { &*(data.as_ptr() as *const bindings::attach_request) };
+        Some(AttachRequest {
+            pid: req.pid,
+            dev: req.dev,
+            ino: req.ino,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -17,14 +17,13 @@ pub struct ExperimentalArgs {
     )]
     pub experimental_fair_sched: bool,
 
-    /// Enable Valgrind cycle estimation (--cycle-estimation) in simulation mode.
-    #[arg(
-        long,
-        default_value_t = false,
-        help_heading = "Experimental",
-        env = "CODSPEED_CYCLE_ESTIMATION"
-    )]
-    pub cycle_estimation: bool,
+    /// Deprecated: cycle estimation is enabled by default and this flag has no effect.
+    #[arg(long, hide = true, env = "CODSPEED_EXPERIMENTAL_CYCLE_ESTIMATION")]
+    pub experimental_cycle_estimation: bool,
+
+    /// Deprecated: allocation exclusion is enabled by default and this flag has no effect.
+    #[arg(long, hide = true, env = "CODSPEED_EXPERIMENTAL_EXCLUDE_ALLOCATIONS")]
+    pub experimental_exclude_allocations: bool,
 }
 
 impl ExperimentalArgs {
@@ -33,9 +32,6 @@ impl ExperimentalArgs {
         let mut flags = Vec::new();
         if self.experimental_fair_sched {
             flags.push("--experimental-fair-sched");
-        }
-        if self.cycle_estimation {
-            flags.push("--cycle-estimation");
         }
         flags
     }
@@ -61,5 +57,34 @@ impl ExperimentalArgs {
             flag_list,
             style("https://github.com/CodSpeedHQ/codspeed/issues").underlined(),
         );
+    }
+
+    /// Warns about deprecated flags that were graduated to default-on options and
+    /// no longer have any effect.
+    pub fn warn_if_deprecated(&self) {
+        let deprecated = [
+            (
+                self.experimental_cycle_estimation,
+                "--experimental-cycle-estimation",
+                "cycle estimation",
+                "--cycle-estimation",
+            ),
+            (
+                self.experimental_exclude_allocations,
+                "--experimental-exclude-allocations",
+                "allocation exclusion",
+                "--exclude-allocations",
+            ),
+        ];
+
+        for (_, flag, feature, new_flag) in deprecated.iter().filter(|(set, ..)| *set) {
+            eprintln!(
+                "  {} {} has no effect: {} is now controlled by {} (defaults to true).",
+                style(Icon::Warning.to_string()).yellow(),
+                style(*flag).bold(),
+                feature,
+                style(*new_flag).bold(),
+            );
+        }
     }
 }

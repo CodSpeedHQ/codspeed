@@ -13,7 +13,7 @@ pub const VALGRIND_CODSPEED_VERSION: Version = Version::new(3, 26, 0);
 /// the .deb is repackaged without a new upstream valgrind release. Appears in
 /// the .deb package version (`3.26.0-0codspeed3`) and in `valgrind --version`
 /// output (`valgrind-3.26.0.codspeed3`).
-pub const VALGRIND_CODSPEED_ITERATION: u32 = 4;
+pub const VALGRIND_CODSPEED_ITERATION: u32 = 6;
 /// Suffix appended to `VALGRIND_CODSPEED_VERSION` to form the .deb package version.
 static VALGRIND_DEB_REV: LazyLock<String> =
     LazyLock::new(|| format!("0codspeed{VALGRIND_CODSPEED_ITERATION}"));
@@ -93,25 +93,25 @@ impl ValgrindTarget {
     fn sha256(self) -> &'static str {
         match (self.distro_version, self.arch) {
             (DistroVersion::Ubuntu2204, Arch::Amd64) => {
-                "998439a0beac2e98224660137cd5e82b56e62d24d569f9ae1f957d10c5849216"
+                "d7ca177bbdacf69c4144a822488faca5f2e98b953bacf64831eb3fdbe599fdad"
             }
             (DistroVersion::Ubuntu2404, Arch::Amd64) => {
-                "c32a574f2cd4acd754371e55979bd7f5e6cd0ce203ca095985e64b8ed090cee1"
+                "454becce1a232bba1c408ed8aad4a20afa78acfbaba072cef2bf1c0a636ebd71"
             }
             (DistroVersion::Ubuntu2204, Arch::Arm64) => {
-                "1d1c1e9ee566487cae2bf49b19b3ca189f6ce6b2ffabb33300c4eeeeb064fee0"
+                "79385d28546f711c4f3c000dbcf50362a2be13b1ce9c7c6746870bfe48ffcedf"
             }
             (DistroVersion::Ubuntu2404, Arch::Arm64) => {
-                "9353f52a53996aa3e0c4a102921882c369445c03e485c6e2a74064d6164aa460"
+                "47e71ef8a095a8dc26e31e7a5d66c3665ff2d68a3f0350d351d7affe3aec2944"
             }
         }
     }
 }
 
 const MEMTRACK_INSTALLER: BinaryPin = BinaryPin {
-    version: "1.2.3",
+    version: "1.4.0",
     url_template: "https://github.com/CodSpeedHQ/codspeed/releases/download/memtrack-v{version}/memtrack-installer.sh",
-    sha256: "67f30ebe17d5da4246b51d8663394026385d95203ff09e81289772159e969603",
+    sha256: "bbc6aac54bac8ec93c1f37ce341811b02ab31e39a211cf6c80a2ee80c2f088f6",
 };
 #[cfg(target_os = "linux")]
 pub const MEMTRACK_VERSION: &str = MEMTRACK_INSTALLER.version;

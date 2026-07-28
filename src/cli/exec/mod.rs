@@ -8,7 +8,7 @@ use crate::project_config::ProjectConfig;
 use crate::project_config::merger::ConfigMerger;
 use crate::upload::poll_results::PollResultsOptions;
 use clap::Args;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::Path;
 use url::Url;
 
@@ -30,6 +30,7 @@ pub struct ExecArgs {
     pub name: Option<String>,
 
     /// The command to execute with the exec harness
+    #[arg(required = true)]
     pub command: Vec<String>,
 }
 
@@ -89,7 +90,8 @@ fn build_orchestrator_config(
         poll_results_options,
         extra_env: HashMap::new(),
         fair_sched: args.shared.experimental.experimental_fair_sched,
-        cycle_estimation: args.shared.experimental.cycle_estimation,
+        cycle_estimation: args.shared.cycle_estimation,
+        exclude_allocations: args.shared.exclude_allocations,
     })
 }
 
@@ -120,43 +122,11 @@ pub async fn run(
 /// Sets up the orchestrator and drives execution. Exec-harness installation is handled
 /// by the orchestrator when exec targets are present.
 pub async fn execute_config(
-    mut config: OrchestratorConfig,
+    config: OrchestratorConfig,
     api_client: &mut CodSpeedAPIClient,
     setup_cache_dir: Option<&Path>,
 ) -> Result<()> {
-    // Resolve exec target binary paths so memtrack can discover statically linked
-    // allocators (which may not live in known build dirs).
-    let memtrack_binaries: HashSet<_> = config
-        .targets
-        .iter()
-        .filter_map(|t| match t {
-            executor::BenchmarkTarget::Exec { command, .. } => command.first().cloned(),
-            _ => None,
-        })
-        .filter_map(|bin| {
-            let result = match &config.working_directory {
-                Some(cwd) => which::which_in(&bin, std::env::var_os("PATH"), cwd),
-                None => which::which(&bin),
-            };
-            result.ok()
-        })
-        .collect();
-
-    if !memtrack_binaries.is_empty() {
-        let mut all_paths = memtrack_binaries;
-
-        // Merge with any user-provided value from the parent environment.
-        if let Some(existing) = std::env::var_os("CODSPEED_MEMTRACK_BINARIES") {
-            all_paths.extend(std::env::split_paths(&existing));
-        }
-
-        let joined =
-            std::env::join_paths(&all_paths).expect("memtrack binary paths should be joinable");
-        config.extra_env.insert(
-            "CODSPEED_MEMTRACK_BINARIES".into(),
-            joined.to_string_lossy().into_owned(),
-        );
-    }
+    ensure_exec_commands_runnable(&config.targets)?;
 
     let orchestrator = executor::Orchestrator::new(config, api_client).await?;
 
@@ -169,4 +139,78 @@ pub async fn execute_config(
     orchestrator.execute(setup_cache_dir, api_client).await?;
 
     Ok(())
+}
+
+/// Rejects exec targets whose executable (first token) is missing or blank before
+/// the orchestrator does any setup. A blank executable otherwise surfaces only as an
+/// opaque failure deep inside exec-harness. Empty *arguments* after a real executable
+/// stay valid.
+fn ensure_exec_commands_runnable(targets: &[executor::BenchmarkTarget]) -> Result<()> {
+    for target in targets {
+        let executor::BenchmarkTarget::Exec { command, name, .. } = target else {
+            continue;
+        };
+        if command.first().is_none_or(|exe| exe.trim().is_empty()) {
+            let label = name.as_deref().unwrap_or("<unnamed>");
+            bail!(
+                "Empty command for exec benchmark target `{label}`. Provide a program to run \
+                 (e.g. `codspeed exec -- <program> [args...]`, or set a non-empty `exec` in the config)."
+            );
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::cli::Cli;
+    use crate::executor;
+    use clap::Parser;
+
+    #[test]
+    fn exec_requires_a_command() {
+        // `codspeed exec` with no command must be rejected at parse time instead of
+        // proceeding into executor setup with an empty command.
+        assert!(Cli::try_parse_from(["codspeed", "exec"]).is_err());
+    }
+
+    #[test]
+    fn exec_accepts_a_command() {
+        assert!(Cli::try_parse_from(["codspeed", "exec", "echo", "hello"]).is_ok());
+    }
+
+    fn exec_target(command: &[&str], name: Option<&str>) -> executor::BenchmarkTarget {
+        executor::BenchmarkTarget::Exec {
+            command: command.iter().map(|s| s.to_string()).collect(),
+            name: name.map(str::to_string),
+            walltime_args: Default::default(),
+        }
+    }
+
+    #[test]
+    fn rejects_missing_or_empty_executable() {
+        // Empty vec (`exec: ""`), an empty first token (`codspeed exec ''` / `exec: "''"`),
+        // and a whitespace-only token (`codspeed exec "   "`) are all invalid.
+        assert!(super::ensure_exec_commands_runnable(&[exec_target(&[], Some("a"))]).is_err());
+        assert!(super::ensure_exec_commands_runnable(&[exec_target(&["   "], Some("a"))]).is_err());
+        let err = super::ensure_exec_commands_runnable(&[exec_target(&[""], Some("bench"))])
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("bench"), "{err}");
+    }
+
+    #[test]
+    fn accepts_runnable_command_with_empty_argument() {
+        // An empty *argument* after a real executable stays valid (e.g. `grep '' file`).
+        assert!(super::ensure_exec_commands_runnable(&[exec_target(&["grep", ""], None)]).is_ok());
+    }
+
+    #[test]
+    fn ignores_entrypoint_targets() {
+        let target = executor::BenchmarkTarget::Entrypoint {
+            command: String::new(),
+            name: None,
+        };
+        assert!(super::ensure_exec_commands_runnable(&[target]).is_ok());
+    }
 }
