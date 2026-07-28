@@ -5,11 +5,34 @@ use std::time::{Duration, Instant};
 /// A mapping resolved from `/proc/<pid>/maps` back to an attachable path.
 #[derive(Debug)]
 pub(super) struct ResolvedMapping {
-    /// `/proc/<pid>/map_files/<start>-<end>` — resolves uniformly for deleted
-    /// files and requires root (which memtrack already has for uprobes).
+    /// `/proc/<pid>/map_files/<start>-<end>` — resolves uniformly for replaced
+    /// and deleted files, but opening it requires `CAP_CHECKPOINT_RESTORE` or
+    /// `CAP_SYS_ADMIN` *in the init user namespace* (`proc_map_files_get_link`
+    /// calls `checkpoint_restore_ns_capable(&init_user_ns)`). A process in a
+    /// nested user namespace cannot satisfy that, however privileged it is there.
     pub attach_path: PathBuf,
-    /// The pathname column, for logs.
+    /// The pathname column, for logs and as the fallback attach path.
     pub display: String,
+}
+
+impl ResolvedMapping {
+    /// Paths to try opening the mapped file through, in preference order.
+    ///
+    /// [`Self::attach_path`] comes first because it references the mapped inode,
+    /// so it stays correct even when the path has been replaced or unlinked. The
+    /// pathname column is the fallback: it needs no privilege beyond read access,
+    /// but being a name rather than an inode reference it can resolve to
+    /// different contents than the process actually mapped.
+    ///
+    /// A `[deleted]`-suffixed or non-absolute pathname (`[heap]`, `[vdso]`, an
+    /// anonymous mapping) names no openable file and is skipped.
+    pub fn candidate_paths(&self) -> Vec<PathBuf> {
+        let mut paths = vec![self.attach_path.clone()];
+        if self.display.starts_with('/') && !self.display.ends_with(" (deleted)") {
+            paths.push(PathBuf::from(&self.display));
+        }
+        paths
+    }
 }
 
 /// Block until every thread of `pid` is group-stopped.
@@ -255,6 +278,46 @@ mod tests {
                 "map_files path {:?} did not resolve: {e}",
                 resolved.attach_path
             ),
+        }
+    }
+
+    /// A tracker that cannot open `map_files` reaches the mapped file only
+    /// through the pathname column, so it must be offered.
+    #[test]
+    fn candidate_paths_falls_back_to_the_pathname_column() {
+        let mapping = ResolvedMapping {
+            attach_path: PathBuf::from("/proc/1/map_files/400000-452000"),
+            display: "/lib/x86_64-linux-gnu/libc.so.6".to_string(),
+        };
+        assert_eq!(
+            mapping.candidate_paths(),
+            vec![
+                PathBuf::from("/proc/1/map_files/400000-452000"),
+                PathBuf::from("/lib/x86_64-linux-gnu/libc.so.6"),
+            ],
+            "map_files must be preferred, with the pathname column as fallback"
+        );
+    }
+
+    /// A pathname naming no openable file must not be offered: opening it either
+    /// fails or, for a reused path, reads the wrong file.
+    #[test]
+    fn candidate_paths_skips_unopenable_pathnames() {
+        for display in [
+            "/tmp/libfoo.so (deleted)",
+            "[heap]",
+            "[vdso]",
+            "<anonymous>",
+        ] {
+            let mapping = ResolvedMapping {
+                attach_path: PathBuf::from("/proc/1/map_files/400000-452000"),
+                display: display.to_string(),
+            };
+            assert_eq!(
+                mapping.candidate_paths(),
+                vec![PathBuf::from("/proc/1/map_files/400000-452000")],
+                "{display} should not be offered as an attach path"
+            );
         }
     }
 

@@ -232,8 +232,38 @@ impl Worker {
             ),
         };
 
-        let Ok(lib) = AllocatorLib::from_path_static(&mapping.attach_path) else {
-            debug!("on-demand: not an allocator: {}", mapping.display);
+        let candidates = mapping.candidate_paths();
+        let mut lib = None;
+        let mut unreadable = Vec::new();
+        for path in &candidates {
+            match AllocatorLib::from_path_static(path) {
+                Ok(found) => {
+                    lib = Some(found);
+                    break;
+                }
+                // Classification reads the whole file, so a failed open is
+                // indistinguishable from a readable non-allocator. Probe
+                // openability to tell them apart.
+                Err(_) => {
+                    if let Err(e) = std::fs::File::open(path) {
+                        unreadable.push(format!("{}: {e}", path.display()));
+                    }
+                }
+            }
+        }
+
+        let Some(lib) = lib else {
+            // A mapping no path can reach costs coverage of that one library,
+            // which is not worth killing the run over.
+            if unreadable.len() == candidates.len() {
+                warn!(
+                    "no readable path for mapping {} in pid {}, allocator coverage may be incomplete",
+                    mapping.display, req.pid
+                );
+                debug!("unreadable paths: {}", unreadable.join(", "));
+            } else {
+                debug!("on-demand: not an allocator: {}", mapping.display);
+            }
             return Ok(true);
         };
 
