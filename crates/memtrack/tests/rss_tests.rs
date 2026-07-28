@@ -431,6 +431,91 @@ fn test_rss_external_reclaim(#[case] mode: Reclaim) -> Result<(), Box<dyn std::e
     Ok(())
 }
 
+/// An rss_stat ownership registration is keyed on the kernel's `mm_id` hash,
+/// which outlives the mm it was seeded from: once the owner execs, the freed
+/// `mm_struct` can be recycled by an unrelated fork whose near-zero counters
+/// hash to the same id. Those counters must be dropped rather than emitted as
+/// the live owner's absolute RSS collapsing to ~0.
+#[test_with::env(GITHUB_ACTIONS)]
+#[test]
+fn test_rss_stale_mm_owner_keeps_live_rss() -> Result<(), Box<dyn std::error::Error>> {
+    let (_report, events) = track_fixture(
+        include_str!("../testdata/rss/stale_mm_owner.c"),
+        "stale_mm_owner",
+        shared::track_command_with_rmap,
+    )?;
+
+    // The fixture's only fork before the burst is the child that execs into the
+    // memory-holding image, so it keeps its pid across the exec.
+    let (_parent, big) = first_fork_pair(&events).ok_or("no fork event")?;
+    let exec_ts = events
+        .iter()
+        .find(|e| e.pid == big && matches!(e.kind, MemtrackEventKind::Exec))
+        .map(|e| e.timestamp)
+        .ok_or("no exec event for the memory-holding child")?;
+
+    // Only the post-exec address space is of interest: the pre-exec image
+    // faulted a single page, and that mm is the one whose slab slot gets reused.
+    let anon_after_exec: Vec<_> = events
+        .iter()
+        .filter_map(|e| match e.kind {
+            MemtrackEventKind::Rss { member: 1, size } if e.pid == big && e.timestamp > exec_ts => {
+                Some((e, size))
+            }
+            _ => None,
+        })
+        .collect();
+
+    let (peak_ts, peak) = anon_after_exec
+        .iter()
+        .max_by_key(|&&(_, size)| size)
+        .map(|&(e, size)| (e.timestamp, size))
+        .ok_or("no anon rss_stat event after the exec")?;
+    assert!(peak >= 128 * MIB, "peak anon RSS too small: {peak}");
+
+    // Past the peak the region is held untouched until the fixture is killed, so
+    // no legitimate absolute sample may fall back near zero. Before it, samples
+    // are just the fault-in ramp.
+    let collapsed: Vec<_> = anon_after_exec
+        .iter()
+        .filter(|&&(e, size)| e.timestamp > peak_ts && size < peak / 4)
+        .map(|&(e, size)| (e.tid, size))
+        .collect();
+    assert!(
+        collapsed.is_empty(),
+        "{} absolute anon samples for pid {big} collapsed below {} bytes while it held {peak}: \
+         (tid, size) = {:?}",
+        collapsed.len(),
+        peak / 4,
+        &collapsed[..collapsed.len().min(5)]
+    );
+
+    // The rmap-reconstructed peak confirms the pages became and stayed resident,
+    // so a collapsing absolute sample could only come from a recycled mm. The
+    // final net is unusable: only since v6.16 does trace_sched_process_exit fire
+    // before exit_mm, so older kernels attribute the SIGKILL teardown's foreign
+    // rmap removes while ownership is still bound, netting the sum to ~0.
+    let rmap_peak = events
+        .iter()
+        .sorted_by_key(|e| e.timestamp)
+        .filter_map(|e| match e.kind {
+            MemtrackEventKind::Rmap { member: 1, delta } if e.pid == big => Some(delta),
+            _ => None,
+        })
+        .scan(0i64, |net, delta| {
+            *net += delta;
+            Some(*net)
+        })
+        .max()
+        .unwrap_or(0)
+        * page_size() as i64;
+    assert!(
+        rmap_peak >= (peak / 2) as i64,
+        "fixture never held the region per rmap: peak net {rmap_peak} bytes"
+    );
+    Ok(())
+}
+
 /// A fork issued by a worker thread must still track the child: registration
 /// keys on the parent's tgid (task_newtask fires in the cloning task, whose
 /// pid_tgid upper half is the tgid), not on the raw creator tid.

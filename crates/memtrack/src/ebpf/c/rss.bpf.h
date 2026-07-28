@@ -5,14 +5,18 @@
 #include "utils/event_helpers.h"
 #include "utils/process_tracking.h"
 
-/* (rss_stat mm_id << 32 | member) -> {owning tgid, last in-context size}. Keyed per
- * counter so an external (curr==0) update is attributed only once that mm/member was
- * established in-context. An external event may only lower a counter: any size above
- * the last in-context value is dropped, so neither a stale/racing reclaim read nor an
- * mm_id hash collision with another task can invent a peak. LRU eviction + re-seeding
- * on the owner's next in-context event covers hash reuse, so no teardown hook needed. */
+/* (rss_stat mm_id << 32 | member) -> {owning tgid, that tgid's mm at seeding time,
+ * last in-context size}. Keyed per counter so an external (curr==0) update is
+ * attributed only once that mm/member was established in-context. An external event
+ * may only lower a counter: any size above the last in-context value is dropped, so
+ * neither a stale/racing reclaim read nor an mm_id hash collision with another task
+ * can invent a peak. mm_id is only a hash, so the pointer is stored alongside and
+ * revalidated against pid_mm on the external path: an entry whose mm the owner no
+ * longer holds describes a freed mm_struct whose slab slot (and therefore hash) has
+ * been recycled by an unrelated address space. */
 struct rss_owner {
     __u32 pid;
+    __u64 mm;
     __u64 size;
 };
 struct {
@@ -20,7 +24,7 @@ struct {
     __uint(max_entries, 40960);
     __type(key, __u64);
     __type(value, struct rss_owner);
-} mm_to_pid SEC(".maps");
+} rss_counter_owner SEC(".maps");
 
 /* Foreign-actor rmap attribution: rmap events run by a task other than the mm's
  * owner (kswapd reclaim, another process's process_madvise, khugepaged, KSM,
@@ -45,6 +49,16 @@ struct {
     __type(value, __u32);
 } mm_owner SEC(".maps");
 BPF_HASH_MAP(pid_mm, __u32, __u64, 10240);
+
+/* Guard-then-write keeps the common case a read-only lookup (pid_mm is a plain
+ * hash, so a fresh entry never needs rewriting). The recorded mm is what the
+ * external rss_stat path validates against to detect a recycled mm_struct. */
+static __always_inline void refresh_pid_mm(__u32 pid, __u64 mm) {
+    __u64* cur_mm = bpf_map_lookup_elem(&pid_mm, &pid);
+    if (!cur_mm || *cur_mm != mm) {
+        bpf_map_update_elem(&pid_mm, &pid, &mm, BPF_ANY);
+    }
+}
 
 #define FOLIO_MAPPING_ANON 0x1UL
 
@@ -73,10 +87,17 @@ int tracepoint_rss_stat(struct trace_event_raw_rss_stat* ctx) {
             return 0;
         }
         owner = cur;
-        struct rss_owner state = {.pid = cur, .size = size};
-        bpf_map_update_elem(&mm_to_pid, &key, &state, BPF_ANY);
+        /* curr means current->mm is the mm the counter belongs to. Recording it
+         * (and keeping pid_mm current, which the rmap hooks may never do when
+         * only rss_stat is attached) is what lets the external path below tell a
+         * live mm from a recycled slab slot. */
+        struct task_struct* task = bpf_get_current_task_btf();
+        __u64 mm = (__u64)BPF_CORE_READ(task, mm);
+        struct rss_owner state = {.pid = cur, .mm = mm, .size = size};
+        bpf_map_update_elem(&rss_counter_owner, &key, &state, BPF_ANY);
+        refresh_pid_mm(cur, mm);
     } else {
-        struct rss_owner* found = bpf_map_lookup_elem(&mm_to_pid, &key);
+        struct rss_owner* found = bpf_map_lookup_elem(&rss_counter_owner, &key);
         if (!found) {
             return 0;
         }
@@ -85,6 +106,14 @@ int tracepoint_rss_stat(struct trace_event_raw_rss_stat* ctx) {
          * on exit), so drop it. Genuine external actors (reclaim, another process's
          * madvise) run in a different task, so cur != owner. */
         if (cur == owner) {
+            return 0;
+        }
+        /* mm_id is a hash of a pointer the tracepoint never exposes, so the key
+         * survives the mm it was seeded from. Once the owner no longer holds that
+         * mm (it execed, or the entry predates a pid reuse), the hash now belongs
+         * to a recycled mm_struct and its counters describe another address space. */
+        __u64* owner_mm = bpf_map_lookup_elem(&pid_mm, &owner);
+        if (!owner_mm || *owner_mm != found->mm) {
             return 0;
         }
         /* An external actor may only lower a counter. A larger value is a stale
@@ -177,18 +206,13 @@ static __always_inline int submit_rmap(struct vm_area_struct* vma, __s32 member,
         }
 
         /* Register ownership so foreign actors can later attribute to this pid.
-         * Both maps are validated (not just written) on every in-context event:
-         * the lookups keep the hot path cheap AND keep both entries LRU-fresh,
-         * since pid_mm is otherwise never read until exec/exit and could be
-         * evicted independently of its still-hot mm_owner twin. */
+         * The guarded updates keep the hot path read-only in the common case and
+         * keep the LRU mm_owner entry fresh even when nothing else touches it. */
         __u32* reg = bpf_map_lookup_elem(&mm_owner, &mm);
         if (!reg || *reg != pid) {
             bpf_map_update_elem(&mm_owner, &mm, &pid, BPF_ANY);
         }
-        __u64* cur_mm = bpf_map_lookup_elem(&pid_mm, &pid);
-        if (!cur_mm || *cur_mm != mm) {
-            bpf_map_update_elem(&pid_mm, &pid, &mm, BPF_ANY);
-        }
+        refresh_pid_mm(pid, mm);
         owner = pid;
     } else {
         /* Foreign actor (task->mm != mm, including kthreads whose task->mm is NULL):
