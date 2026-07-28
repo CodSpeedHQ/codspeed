@@ -16,6 +16,7 @@ use crate::run_environment::provider::{RunEnvironmentDetector, RunEnvironmentPro
 use crate::run_environment::{RunEnvironment, RunPart};
 
 use super::logger::CircleCILogger;
+use super::oidc;
 
 #[derive(Debug)]
 pub struct CircleCIProvider {
@@ -31,6 +32,15 @@ pub struct CircleCIProvider {
     node_index: u32,
     /// Number of containers the job runs on, `1` when unset.
     node_total: u32,
+
+    /// Whether the build runs on a pull request opened from a fork.
+    is_forked_pull_request: bool,
+
+    /// Whether uploads authenticate with an OIDC token minted by CircleCI.
+    ///
+    /// Decided in [`RunEnvironmentProvider::check_oidc_configuration`], acted on in
+    /// [`RunEnvironmentProvider::set_oidc_token`].
+    uses_oidc: bool,
 }
 
 /// Returns the number of the pull request the build runs on, if any.
@@ -55,6 +65,14 @@ fn get_ref(pr_number: Option<u64>) -> Result<String> {
         Some(pr_number) => Ok(format!("refs/pull/{pr_number}/merge")),
         None => Ok(format!("refs/heads/{}", get_env_variable("CIRCLE_BRANCH")?)),
     }
+}
+
+/// Returns whether the build runs on a pull request opened from a fork.
+///
+/// `CIRCLE_PR_NUMBER` is only populated for pull requests opened from a fork, so its
+/// presence is the signal.
+fn is_forked_pull_request() -> bool {
+    env::var("CIRCLE_PR_NUMBER").is_ok()
 }
 
 fn get_env_number(name: &str, default: u32) -> u32 {
@@ -126,6 +144,8 @@ impl TryFrom<&OrchestratorConfig> for CircleCIProvider {
             job_name: get_env_variable("CIRCLE_JOB")?,
             node_index: get_env_number("CIRCLE_NODE_INDEX", 0),
             node_total: get_env_number("CIRCLE_NODE_TOTAL", 1),
+            is_forked_pull_request: is_forked_pull_request(),
+            uses_oidc: false,
         })
     }
 }
@@ -186,14 +206,64 @@ impl RunEnvironmentProvider for CircleCIProvider {
         })
     }
 
-    /// CircleCI requires a static `CODSPEED_TOKEN`. We don't yet support OIDC
-    /// tokens here (could be added via `CIRCLE_OIDC_TOKEN_V2`:
-    /// <https://circleci.com/docs/openid-connect-tokens>), so this just enforces
-    /// token presence.
+    /// Decide how the uploads of this job authenticate.
+    ///
+    /// A static `CODSPEED_TOKEN` is used as is when there is one. Otherwise the runner
+    /// mints an OIDC token itself, which needs two things: the `circleci` CLI, the only
+    /// documented way to request the audience CodSpeed expects, and a build that is not
+    /// a forked pull request. CircleCI issues a forked build a token that names the
+    /// fork, and CodSpeed only accepts uploads to the repository its token names.
+    ///
+    /// Failing here rather than at upload time is deliberate: authentication is
+    /// unrecoverable, and the benchmarks have not run yet.
     fn check_oidc_configuration(&mut self, api_client: &CodSpeedAPIClient) -> Result<()> {
-        if api_client.token().is_none() {
-            bail!("Token authentication is required for CircleCI");
+        if api_client.token().is_some() {
+            if !self.is_forked_pull_request && oidc::is_cli_available() {
+                announcement!(
+                    "This job can authenticate with an OpenID Connect (OIDC) token minted by CircleCI, \
+                    instead of a `CODSPEED_TOKEN` secret.\n\
+                    Remove `CODSPEED_TOKEN` from the job to use it: it is safer, and there is nothing to rotate.\n"
+                );
+            }
+
+            return Ok(());
         }
+
+        if self.is_forked_pull_request {
+            bail!(
+                "Pull requests opened from a fork cannot authenticate with OIDC on CircleCI, \
+                because the token CircleCI issues them identifies the fork.\n\
+                Set `CODSPEED_TOKEN` for this job instead."
+            );
+        }
+
+        if !oidc::is_cli_available() {
+            bail!(
+                "Authenticating with OIDC needs the `circleci` CLI, which this job does not have.\n\
+                Use an image that ships it, or set `CODSPEED_TOKEN` for this job instead."
+            );
+        }
+
+        self.uses_oidc = true;
+
+        Ok(())
+    }
+
+    /// Mint the OIDC token authenticating the upload that follows.
+    ///
+    /// A token expires an hour after it is minted, so each upload gets its own rather
+    /// than reusing the one of a previous call.
+    async fn set_oidc_token(&self, api_client: &mut CodSpeedAPIClient) -> Result<()> {
+        if !self.uses_oidc {
+            return Ok(());
+        }
+
+        let token = oidc::mint_token(self.get_oidc_audience())
+            .context("Failed to mint an OIDC token to authenticate the upload")?;
+
+        debug!("Minted an OIDC token to authenticate the upload");
+        api_client.set_token(Some(token));
+
         Ok(())
     }
 }
@@ -418,6 +488,89 @@ mod tests {
                   "node-total": 4
                 }
                 "#);
+            },
+        );
+    }
+
+    fn api_client(token: Option<&str>) -> CodSpeedAPIClient {
+        CodSpeedAPIClient::new(
+            token.map(str::to_string),
+            "https://gql.codspeed.io/".to_string(),
+        )
+    }
+
+    /// Whether the runner mints a token is not decided from the environment alone: it
+    /// also needs the `circleci` CLI, which a machine running the tests may or may not
+    /// have. Only the cases settled before the CLI is looked up are asserted here; the
+    /// remaining ones need an actual CircleCI job.
+    #[test]
+    fn test_static_token_is_used_as_is() {
+        with_vars(
+            [
+                ("CIRCLECI", Some("true")),
+                ("CIRCLE_BRANCH", Some("main")),
+                (
+                    "CIRCLE_REPOSITORY_URL",
+                    Some("git@github.com:my-org/adrien-python-test.git"),
+                ),
+                ("CIRCLE_WORKING_DIRECTORY", Some("/home/circleci/project")),
+                (
+                    "CIRCLE_WORKFLOW_ID",
+                    Some("8d8f0b2a-1f3e-4b6a-9c2d-0f1e2a3b4c5d"),
+                ),
+                ("CIRCLE_JOB", Some("benchmarks")),
+            ],
+            || {
+                let config = OrchestratorConfig {
+                    ..OrchestratorConfig::test()
+                };
+                let mut provider = CircleCIProvider::try_from(&config).unwrap();
+
+                provider
+                    .check_oidc_configuration(&api_client(Some("a-static-token")))
+                    .unwrap();
+
+                assert!(!provider.uses_oidc);
+            },
+        );
+    }
+
+    #[test]
+    fn test_forked_pull_request_requires_a_static_token() {
+        with_vars(
+            [
+                ("CIRCLECI", Some("true")),
+                ("CIRCLE_BRANCH", Some("pull/22")),
+                ("CIRCLE_PR_NUMBER", Some("22")),
+                (
+                    "CIRCLE_REPOSITORY_URL",
+                    Some("git@github.com:my-org/adrien-python-test.git"),
+                ),
+                ("CIRCLE_WORKING_DIRECTORY", Some("/home/circleci/project")),
+                (
+                    "CIRCLE_WORKFLOW_ID",
+                    Some("8d8f0b2a-1f3e-4b6a-9c2d-0f1e2a3b4c5d"),
+                ),
+                ("CIRCLE_JOB", Some("benchmarks")),
+            ],
+            || {
+                let config = OrchestratorConfig {
+                    ..OrchestratorConfig::test()
+                };
+                let mut provider = CircleCIProvider::try_from(&config).unwrap();
+
+                let error = provider
+                    .check_oidc_configuration(&api_client(None))
+                    .unwrap_err();
+
+                assert_eq!(
+                    error.to_string(),
+                    "Pull requests opened from a fork cannot authenticate with OIDC on CircleCI, \
+                    because the token CircleCI issues them identifies the fork.\n\
+                    Set `CODSPEED_TOKEN` for this job instead."
+                );
+
+                assert!(!provider.uses_oidc);
             },
         );
     }
