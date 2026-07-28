@@ -1,5 +1,5 @@
 use crate::prelude::*;
-use libbpf_rs::UprobeOpts;
+use libbpf_rs::{UprobeMultiOpts, UprobeOpts};
 use paste::paste;
 use std::path::Path;
 

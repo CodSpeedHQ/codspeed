@@ -31,8 +31,7 @@ int BPF_PROG(watch_exec_mmap, struct file* file, unsigned long prot, unsigned lo
         return 0;
     }
 
-    __u64 pid_tgid = bpf_get_current_pid_tgid();
-    __u32 tgid = pid_tgid >> 32;
+    __u32 tgid = current_tgid();
     if (!is_tracked(tgid)) {
         return 0;
     }

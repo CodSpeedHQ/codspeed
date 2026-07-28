@@ -2,6 +2,7 @@
 #define __PROCESS_TRACKING_H__
 
 #include "map_helpers.h"
+#include "variant.h"
 
 BPF_HASH_MAP(tracked_pids, __u32, __u8, 10000);
 BPF_HASH_MAP(pids_ppid, __u32, __u32, 10000);
@@ -43,15 +44,26 @@ static __always_inline void track_child(__u32 child_pid, __u32 parent_pid) {
     bpf_map_update_elem(&pids_ppid, &child_pid, &parent_pid, BPF_ANY);
 }
 
-SEC("tracepoint/sched/sched_process_fork")
-int tracepoint_sched_fork(struct trace_event_raw_sched_process_fork* ctx) {
-    __u32 parent_pid = ctx->parent_pid;
-    __u32 child_pid = ctx->child_pid;
-
+/* Record a parent→child fork so the child inherits the parent's tracked state. */
+static __always_inline void follow_fork(__u32 parent_pid, __u32 child_pid) {
+    if (parent_pid == 0 || child_pid == 0) {
+        return;
+    }
     if (is_tracked(parent_pid)) {
         track_child(child_pid, parent_pid);
     }
+}
 
+/* tp_btf rather than a classic tracepoint on two counts: it attaches with
+ * BPF_RAW_TRACEPOINT_OPEN, so a token can delegate it (perf_event_open() cannot
+ * be), and its arguments are task_struct pointers rather than a flattened trace
+ * event, so PIDs resolve through the tracker's namespace.
+ *
+ * https://docs.ebpf.io/linux/program-type/BPF_PROG_TYPE_TRACING/
+ */
+SEC("tp_btf/sched_process_fork")
+int BPF_PROG(tracepoint_sched_fork, struct task_struct* parent, struct task_struct* child) {
+    follow_fork(task_ns_tgid(parent), task_ns_tgid(child));
     return 0;
 }
 

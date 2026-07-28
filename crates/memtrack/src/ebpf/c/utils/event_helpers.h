@@ -21,16 +21,18 @@ static __always_inline long wake_flags(void) {
 }
 
 static __always_inline int store_param(void* map, __u64 value) {
-    __u64 tid = bpf_get_current_pid_tgid();
-    __u32 pid = tid >> 32;
-    if (is_tracked(pid)) {
+    /* Key by the tid: unique per thread, so it survives the entry/exit pair even
+     * when several threads are inside the same allocator call. */
+    struct task_ids ids = current_task_ids();
+    __u64 tid = ids.tid;
+    if (is_tracked(ids.tgid)) {
         bpf_map_update_elem(map, &tid, &value, BPF_ANY);
     }
     return 0;
 }
 
 static __always_inline __u64* take_param(void* map) {
-    __u64 tid = bpf_get_current_pid_tgid();
+    __u64 tid = current_tid();
     __u64* value = bpf_map_lookup_elem(map, &tid);
     if (value) {
         bpf_map_delete_elem(map, &tid);
@@ -40,10 +42,9 @@ static __always_inline __u64* take_param(void* map) {
 
 #define SUBMIT_EVENT(evt_type, fill_data)                               \
     {                                                                   \
-        __u64 tid = bpf_get_current_pid_tgid();                         \
-        __u32 pid = tid >> 32;                                          \
+        struct task_ids ids = current_task_ids();                       \
                                                                         \
-        if (!is_tracked(pid) || !is_enabled()) {                        \
+        if (!is_tracked(ids.tgid) || !is_enabled()) {                   \
             return 0;                                                   \
         }                                                               \
                                                                         \
@@ -58,8 +59,8 @@ static __always_inline __u64* take_param(void* map) {
         }                                                               \
                                                                         \
         e->header.timestamp = bpf_ktime_get_ns();                       \
-        e->header.pid = pid;                                            \
-        e->header.tid = tid & 0xFFFFFFFF;                               \
+        e->header.pid = ids.tgid;                                       \
+        e->header.tid = ids.tid;                                        \
         e->header.event_type = evt_type;                                \
                                                                         \
         fill_data;                                                      \

@@ -7,9 +7,9 @@
 
 #define UPROBE_ARG_RET(name, arg_expr, submit_block)                                      \
     BPF_HASH_MAP(name##_arg, __u64, __u64, 10000);                                        \
-    SEC("uprobe")                                                                         \
+    SEC(UPROBE_SEC)                                                                       \
     int uprobe_##name(struct pt_regs* ctx) { return store_param(&name##_arg, arg_expr); } \
-    SEC("uretprobe")                                                                      \
+    SEC(URETPROBE_SEC)                                                                    \
     int uretprobe_##name(struct pt_regs* ctx) {                                           \
         __u64* arg_ptr = take_param(&name##_arg);                                         \
         if (!arg_ptr) {                                                                   \
@@ -24,7 +24,7 @@
     }
 
 #define UPROBE_RET(name, arg_expr, submit_block) \
-    SEC("uprobe")                                \
+    SEC(UPROBE_SEC)                              \
     int uprobe_##name(struct pt_regs* ctx) {     \
         __u64 arg0 = arg_expr;                   \
         if (arg0 == 0) {                         \
@@ -39,12 +39,12 @@
         __u64 arg1;                                                           \
     };                                                                        \
     BPF_HASH_MAP(name##_args, __u64, struct name##_args_t, 10000);            \
-    SEC("uprobe")                                                             \
+    SEC(UPROBE_SEC)                                                           \
     int uprobe_##name(struct pt_regs* ctx) {                                  \
-        __u64 tid = bpf_get_current_pid_tgid();                               \
-        __u32 pid = tid >> 32;                                                \
+        struct task_ids ids = current_task_ids();                             \
+        __u64 tid = ids.tid;                                                  \
                                                                               \
-        if (!is_tracked(pid)) {                                               \
+        if (!is_tracked(ids.tgid)) {                                          \
             return 0;                                                         \
         }                                                                     \
                                                                               \
@@ -53,9 +53,9 @@
         bpf_map_update_elem(&name##_args, &tid, &args, BPF_ANY);              \
         return 0;                                                             \
     }                                                                         \
-    SEC("uretprobe")                                                          \
+    SEC(URETPROBE_SEC)                                                        \
     int uretprobe_##name(struct pt_regs* ctx) {                               \
-        __u64 tid = bpf_get_current_pid_tgid();                               \
+        __u64 tid = current_tid();                                            \
         struct name##_args_t* args = bpf_map_lookup_elem(&name##_args, &tid); \
                                                                               \
         if (!args) {                                                          \
@@ -105,11 +105,11 @@ struct posix_memalign_args_t {
 };
 BPF_HASH_MAP(posix_memalign_args, __u64, struct posix_memalign_args_t, 10000);
 
-SEC("uprobe")
+SEC(UPROBE_SEC)
 int uprobe_posix_memalign(struct pt_regs* ctx) {
-    __u64 tid = bpf_get_current_pid_tgid();
-    __u32 pid = tid >> 32;
-    if (!is_tracked(pid)) {
+    struct task_ids ids = current_task_ids();
+    __u64 tid = ids.tid;
+    if (!is_tracked(ids.tgid)) {
         return 0;
     }
 
@@ -118,9 +118,9 @@ int uprobe_posix_memalign(struct pt_regs* ctx) {
     return 0;
 }
 
-SEC("uretprobe")
+SEC(URETPROBE_SEC)
 int uretprobe_posix_memalign(struct pt_regs* ctx) {
-    __u64 tid = bpf_get_current_pid_tgid();
+    __u64 tid = current_tid();
     struct posix_memalign_args_t* args = bpf_map_lookup_elem(&posix_memalign_args, &tid);
     if (!args) {
         return 0;
@@ -149,9 +149,9 @@ struct mmap_args {
 BPF_HASH_MAP(mmap_temp, __u64, struct mmap_args, 10000);
 
 static __always_inline void store_mmap_args(__u64 addr, __u64 len) {
-    __u64 tid = bpf_get_current_pid_tgid();
-    __u32 pid = tid >> 32;
-    if (is_tracked(pid)) {
+    struct task_ids ids = current_task_ids();
+    __u64 tid = ids.tid;
+    if (is_tracked(ids.tgid)) {
         struct mmap_args args = {.addr = addr, .len = len};
         bpf_map_update_elem(&mmap_temp, &tid, &args, BPF_ANY);
     }

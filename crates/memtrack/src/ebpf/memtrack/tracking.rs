@@ -13,11 +13,7 @@ impl MemtrackBpf {
     /// Attach the exec-mapping watcher (fentry/security_mmap_file). Only used in
     /// on-demand mode; the program is loaded and verified in all modes.
     pub fn attach_exec_watcher(&mut self) -> Result<()> {
-        let link = self
-            .skel
-            .progs
-            .watch_exec_mmap
-            .attach()
+        let link = with_skel!(mut self, skel => skel.progs.watch_exec_mmap.attach())
             .context("Failed to attach exec-mapping watcher")?;
         self.probes.push(link);
         Ok(())

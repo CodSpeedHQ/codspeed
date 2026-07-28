@@ -1,6 +1,6 @@
-use crate::ebpf::MemtrackBpf;
 use crate::ebpf::attach_worker::AttachWorker;
 use crate::ebpf::spawn::{resume, spawn_stopped, wrap_stopped};
+use crate::ebpf::{BpfVariant, MemtrackBpf};
 use crate::prelude::*;
 use crate::session::Session;
 use parking_lot::Mutex;
@@ -18,9 +18,18 @@ impl Tracker {
     /// Create a new tracker. The exec-mapping watcher discovers and attaches
     /// allocator probes as the tracked process tree maps executable files.
     pub fn new() -> Result<Self> {
+        Self::with_bpf(MemtrackBpf::new()?)
+    }
+
+    /// Like [`Tracker::new`], but pinned to a specific BPF variant instead of
+    /// the detected one.
+    pub fn with_variant(variant: BpfVariant) -> Result<Self> {
+        Self::with_bpf(MemtrackBpf::with_variant(variant)?)
+    }
+
+    fn with_bpf(mut bpf: MemtrackBpf) -> Result<Self> {
         Self::bump_memlock_rlimit()?;
 
-        let mut bpf = MemtrackBpf::new()?;
         bpf.attach_tracepoints()?;
         bpf.attach_exec_watcher()?;
 

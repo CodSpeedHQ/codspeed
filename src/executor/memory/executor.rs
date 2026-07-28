@@ -18,6 +18,7 @@ use async_trait::async_trait;
 use ipc_channel::ipc;
 use memtrack::MemtrackIpcClient;
 use memtrack::MemtrackIpcServer;
+use memtrack::has_delegated_bpf_token;
 use runner_shared::artifacts::{ArtifactExt, ExecutionTimestamps};
 use runner_shared::fifo::Command as FifoCommand;
 use runner_shared::fifo::IntegrationMode;
@@ -77,11 +78,11 @@ impl MemoryExecutor {
         Ok((ipc_server, cmd_builder, env_file))
     }
 
-    /// Ensure memtrack can load its eBPF programs: either run as root or hold the
-    /// required file capabilities. Tries a one-time capability grant if neither
-    /// holds, and bails if that fails.
+    /// Ensure memtrack can load its eBPF programs: either run as root, hold the
+    /// required file capabilities, or be handed a delegated BPF token. Tries a
+    /// one-time capability grant if none holds, and bails if that fails.
     fn ensure_privileges() -> Result<()> {
-        if is_root_user() || has_memtrack_capabilities() {
+        if is_root_user() || has_delegated_bpf_token() || has_memtrack_capabilities() {
             return Ok(());
         }
 
@@ -114,6 +115,11 @@ impl Executor for MemoryExecutor {
                 detail: "running as root".to_string(),
             });
         }
+        if has_delegated_bpf_token() {
+            return Some(PrivilegeStatus::Satisfied {
+                detail: "delegated BPF token".to_string(),
+            });
+        }
         if has_memtrack_capabilities() {
             return Some(PrivilegeStatus::Satisfied {
                 detail: "capabilities granted".to_string(),
@@ -140,6 +146,11 @@ impl Executor for MemoryExecutor {
     }
 
     fn grant_privileges(&self) -> Result<()> {
+        // A delegated BPF token already provides the privilege memtrack needs;
+        // there is nothing to grant (and no sudo to prompt for) in that case.
+        if has_delegated_bpf_token() {
+            return Ok(());
+        }
         ensure_memtrack_capabilities()
     }
 
