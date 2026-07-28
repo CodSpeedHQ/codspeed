@@ -127,6 +127,7 @@ fi
             let path = escargot::CargoBuild::new()
                 .package(package)
                 .bin(bin)
+                .release()
                 .current_target()
                 .run()
                 .unwrap_or_else(|e| panic!("failed to build the {bin} binary: {e}"))
