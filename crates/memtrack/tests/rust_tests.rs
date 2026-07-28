@@ -3,6 +3,7 @@ mod shared;
 
 use rstest::rstest;
 use std::path::Path;
+use std::process::Command;
 
 #[test_with::env(GITHUB_ACTIONS)]
 #[rstest]
@@ -18,9 +19,7 @@ fn test_rust_alloc_tracking(
     let binary = shared::compile_rust_binary(crate_path, "alloc_rust", features)?;
 
     // No extra allocators: the watcher must discover the static allocator itself.
-    let (events, thread_handle) = shared::track_binary(&binary)?;
-    assert_events_with_marker!(name, &events);
+    assert_events_with_marker_for_each_variant!(name, || Command::new(&binary))?;
 
-    thread_handle.join().unwrap();
     Ok(())
 }

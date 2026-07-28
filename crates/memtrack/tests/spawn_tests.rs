@@ -17,12 +17,11 @@ fn test_spawn_static_allocator_discovery() -> Result<(), Box<dyn std::error::Err
     let wrapper = compile_spawn_binary("wrapper")?;
     let child = compile_spawn_binary("alloc_child")?;
 
-    let mut cmd = Command::new(&wrapper);
-    cmd.arg(&child);
-    let (events, thread_handle) = shared::track_command(cmd)?;
+    assert_events_with_marker_for_each_variant!("spawn_on_demand_discovery", || {
+        let mut cmd = Command::new(&wrapper);
+        cmd.arg(&child);
+        cmd
+    })?;
 
-    assert_events_with_marker!("spawn_on_demand_discovery", &events);
-
-    thread_handle.join().unwrap();
     Ok(())
 }

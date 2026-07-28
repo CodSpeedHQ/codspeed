@@ -57,33 +57,39 @@ fn test_dlopen_allocator() -> Result<(), Box<dyn std::error::Error>> {
         &["-ldl"],
     );
 
-    let mut cmd = Command::new(&exe);
-    cmd.arg(&lib);
-    let (events, thread_handle) = shared::track_command(cmd)?;
+    shared::for_each_variant(
+        || {
+            let mut cmd = Command::new(&exe);
+            cmd.arg(&lib);
+            cmd
+        },
+        |events| {
+            let malloc_addrs: HashSet<u64> = events
+                .iter()
+                .filter_map(|e| match e.kind {
+                    MemtrackEventKind::Malloc { size: 4242 } => Some(e.addr),
+                    _ => None,
+                })
+                .collect();
+            let malloc_count = events
+                .iter()
+                .filter(|e| matches!(e.kind, MemtrackEventKind::Malloc { size: 4242 }))
+                .count();
+            let free_count = events
+                .iter()
+                .filter(|e| {
+                    matches!(e.kind, MemtrackEventKind::Free) && malloc_addrs.contains(&e.addr)
+                })
+                .count();
 
-    let malloc_addrs: HashSet<u64> = events
-        .iter()
-        .filter_map(|e| match e.kind {
-            MemtrackEventKind::Malloc { size: 4242 } => Some(e.addr),
-            _ => None,
-        })
-        .collect();
-    let malloc_count = events
-        .iter()
-        .filter(|e| matches!(e.kind, MemtrackEventKind::Malloc { size: 4242 }))
-        .count();
-    let free_count = events
-        .iter()
-        .filter(|e| matches!(e.kind, MemtrackEventKind::Free) && malloc_addrs.contains(&e.addr))
-        .count();
+            assert_eq!(malloc_count, 100, "expected 100 mi_malloc(4242) events");
+            assert_eq!(
+                free_count, 100,
+                "expected 100 mi_free events for tracked addrs"
+            );
+        },
+    )?;
 
-    assert_eq!(malloc_count, 100, "expected 100 mi_malloc(4242) events");
-    assert_eq!(
-        free_count, 100,
-        "expected 100 mi_free events for tracked addrs"
-    );
-
-    thread_handle.join().unwrap();
     Ok(())
 }
 
@@ -110,22 +116,26 @@ fn test_thread_dlopen() -> Result<(), Box<dyn std::error::Error>> {
         &["-ldl", "-lpthread"],
     );
 
-    let mut cmd = Command::new(&exe);
-    cmd.arg(&mimalloc).arg(&jemalloc);
-    let (events, thread_handle) = shared::track_command(cmd)?;
+    shared::for_each_variant(
+        || {
+            let mut cmd = Command::new(&exe);
+            cmd.arg(&mimalloc).arg(&jemalloc);
+            cmd
+        },
+        |events| {
+            let m4242 = events
+                .iter()
+                .filter(|e| matches!(e.kind, MemtrackEventKind::Malloc { size: 4242 }))
+                .count();
+            let m4243 = events
+                .iter()
+                .filter(|e| matches!(e.kind, MemtrackEventKind::Malloc { size: 4243 }))
+                .count();
 
-    let m4242 = events
-        .iter()
-        .filter(|e| matches!(e.kind, MemtrackEventKind::Malloc { size: 4242 }))
-        .count();
-    let m4243 = events
-        .iter()
-        .filter(|e| matches!(e.kind, MemtrackEventKind::Malloc { size: 4243 }))
-        .count();
+            assert_eq!(m4242, 100, "expected 100 mi_malloc(4242) events");
+            assert_eq!(m4243, 100, "expected 100 je_malloc(4243) events");
+        },
+    )?;
 
-    assert_eq!(m4242, 100, "expected 100 mi_malloc(4242) events");
-    assert_eq!(m4243, 100, "expected 100 je_malloc(4243) events");
-
-    thread_handle.join().unwrap();
     Ok(())
 }

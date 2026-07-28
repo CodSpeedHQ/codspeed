@@ -98,11 +98,7 @@ fn test_allocation_tracking(
     let temp_dir = TempDir::new()?;
     let binary = compile_c_source(test_case.source, test_case.name, temp_dir.path())?;
 
-    let (events, thread_handle) = shared::track_binary(&binary)?;
-
-    assert_events_snapshot!(test_case.name, events);
-
-    thread_handle.join().unwrap();
+    assert_events_snapshot_for_each_variant!(test_case.name, || Command::new(&binary))?;
 
     Ok(())
 }

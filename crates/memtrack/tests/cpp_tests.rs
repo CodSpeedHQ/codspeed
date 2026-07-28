@@ -75,9 +75,7 @@ fn test_cpp_alloc_tracking(#[case] target: &str) -> Result<(), Box<dyn std::erro
     let project_path = Path::new("testdata/alloc_cpp");
     let binary = compile_cpp_project(project_path, target)?;
 
-    let (events, thread_handle) = shared::track_binary(&binary)?;
-    assert_events_with_marker!(target, &events);
+    assert_events_with_marker_for_each_variant!(target, || Command::new(&binary))?;
 
-    thread_handle.join().unwrap();
     Ok(())
 }
