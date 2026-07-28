@@ -713,7 +713,6 @@ dependencies = [
  "gimli",
  "git2",
  "gql_client",
- "indexmap",
  "indicatif",
  "insta",
  "instrument-hooks-bindings",
