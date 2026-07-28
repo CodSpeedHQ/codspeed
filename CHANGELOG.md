@@ -5,6 +5,31 @@
 
 
 
+## [5.0.0] - 2026-07-28
+
+### <!-- 0 -->🚀 Features
+- Load eBPF through a delegated BPF token by @GuillaumeLagrange
+- Enable cycle estimation and allocation exclusion by default by @not-matthias in [#461](https://github.com/CodSpeedHQ/runner/pull/461)
+- Make samply profiler default for all OSes (#472) by @GuillaumeLagrange in [#475](https://github.com/CodSpeedHQ/runner/pull/475)
+
+### <!-- 1 -->🐛 Bug Fixes
+- Classify mapped libraries without init-userns privilege by @GuillaumeLagrange
+
+### <!-- 10 -->💼 Other
+- Bump the memtrack pin to 1.4.0 by @adriencaccia in [#484](https://github.com/CodSpeedHQ/runner/pull/484)
+
+### <!-- 2 -->🏗️ Refactor
+- Hook-based CPU isolation for the walltime runner by @GuillaumeLagrange
+
+### <!-- 6 -->🧪 Testing
+- Run every tracking test under both BPF variants by @GuillaumeLagrange
+
+### <!-- 7 -->⚙️ Internals
+- Bump submodule to reduce debug info server timeouts by @GuillaumeLagrange
+- Make tests run release builds of the binaries by @GuillaumeLagrange in [#456](https://github.com/CodSpeedHQ/runner/pull/456)
+- Update submodule to fix fmt and ignore ubuntu debuginfod serv by @GuillaumeLagrange
+
+
 ## [4.19.1] - 2026-07-27
 
 ### <!-- 1 -->🐛 Bug Fixes
@@ -1411,6 +1436,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[5.0.0]: https://github.com/CodSpeedHQ/runner/compare/v4.19.1..v5.0.0
 [4.19.1]: https://github.com/CodSpeedHQ/runner/compare/v4.19.0..v4.19.1
 [4.19.0]: https://github.com/CodSpeedHQ/runner/compare/v4.18.4..v4.19.0
 [4.18.4]: https://github.com/CodSpeedHQ/runner/compare/v4.18.3..v4.18.4
