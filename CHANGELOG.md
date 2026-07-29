@@ -5,6 +5,12 @@
 
 
 
+## [5.0.1] - 2026-07-29
+
+### <!-- 1 -->🐛 Bug Fixes
+- Disable allocator exclusion by default (#489) by @not-matthias in [#489](https://github.com/CodSpeedHQ/runner/pull/489)
+
+
 ## [5.0.0] - 2026-07-28
 
 ### <!-- 0 -->🚀 Features
@@ -1436,6 +1442,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[5.0.1]: https://github.com/CodSpeedHQ/runner/compare/v5.0.0..v5.0.1
 [5.0.0]: https://github.com/CodSpeedHQ/runner/compare/v4.19.1..v5.0.0
 [4.19.1]: https://github.com/CodSpeedHQ/runner/compare/v4.19.0..v4.19.1
 [4.19.0]: https://github.com/CodSpeedHQ/runner/compare/v4.18.4..v4.19.0
