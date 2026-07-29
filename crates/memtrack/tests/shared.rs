@@ -1,5 +1,6 @@
 #![allow(dead_code, unused)]
 
+pub use memtrack::OwnershipMaps;
 use memtrack::prelude::*;
 use memtrack::{BpfVariant, Tracker, TrackerOptions};
 use runner_shared::artifacts::{MemtrackEvent as Event, MemtrackEventKind};
@@ -208,9 +209,60 @@ pub fn track_command_with_rmap(command: Command) -> TrackResult {
     )
 }
 
+/// Probe selection used by the rmap-snapshot helpers: RSS reconstruction only,
+/// without allocator uprobes.
+fn rmap_only_options() -> TrackerOptions {
+    TrackerOptions::builder()
+        .allocators(false)
+        .rmap(true)
+        .build()
+}
+
 /// Track a command with an explicit probe selection rather than the environment's.
 pub fn track_command_with_opts(command: Command, options: TrackerOptions) -> TrackResult {
     track_command_with_tracker(command, Tracker::with_options(options)?)
+}
+
+/// Track a command with rmap hooks and snapshot its ownership maps after the
+/// tracked tree exits but before tracker teardown frees the BPF maps.
+pub fn track_command_with_rmap_maps(
+    command: Command,
+) -> anyhow::Result<(Vec<Event>, OwnershipMaps, std::thread::JoinHandle<()>)> {
+    let tracker = Tracker::with_options(rmap_only_options())?;
+    let (tracker, events, ()) = run_tracked(command, tracker, |_, _| Ok(()))?;
+    let maps = tracker.ownership_maps()?;
+    Ok((events, maps, std::thread::spawn(move || drop(tracker))))
+}
+
+/// Track a command with rmap hooks and snapshot the ownership maps at a
+/// fixture-signalled checkpoint.
+///
+/// The fixture creates `ready` and waits for `release`. The root pid is returned
+/// for correlating snapshot entries with events.
+pub fn track_command_with_rmap_checkpoint(
+    command: Command,
+    ready: &Path,
+    release: &Path,
+) -> anyhow::Result<(Vec<Event>, OwnershipMaps, i32, std::thread::JoinHandle<()>)> {
+    let tracker = Tracker::with_options(rmap_only_options())?;
+    let (tracker, events, (maps, root_pid)) = run_tracked(command, tracker, |tracker, pid| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !ready.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let maps = tracker.ownership_maps()?;
+        // Release before bailing: nothing else reaps the fixture, which is
+        // parked holding its mapping.
+        std::fs::write(release, b"")?;
+        ensure!(ready.exists(), "fixture never reached the checkpoint");
+        Ok((maps, pid))
+    })?;
+    Ok((
+        events,
+        maps,
+        root_pid,
+        std::thread::spawn(move || drop(tracker)),
+    ))
 }
 
 /// How many events of each kind-and-size a run saw. Addresses, timestamps, pids
@@ -281,10 +333,28 @@ pub fn for_each_variant(
 }
 
 fn track_command_with_tracker(command: Command, tracker: Tracker) -> TrackResult {
+    let (tracker, events, ()) = run_tracked(command, tracker, |_, _| Ok(()))?;
+
+    // Detaching the probes blocks on RCU grace periods; let the caller decide
+    // when to wait for it.
+    let thread_handle = std::thread::spawn(move || drop(tracker));
+
+    Ok((events, thread_handle))
+}
+
+/// Run `command` to completion under `tracker` and drain its events, handing
+/// back the still-live tracker so BPF state can be read before teardown.
+/// `checkpoint` runs while the tracked tree is still live.
+fn run_tracked<T>(
+    command: Command,
+    tracker: Tracker,
+    checkpoint: impl FnOnce(&Tracker, i32) -> anyhow::Result<T>,
+) -> anyhow::Result<(Tracker, Vec<Event>, T)> {
     tracker.enable_tracking()?;
 
     let mut session = tracker.spawn(&command, None)?;
     let rx = session.take_events()?;
+    let checkpoint = checkpoint(&tracker, session.pid())?;
 
     session.wait()?;
     // Dropping the session does a final ring buffer drain and closes the
@@ -294,12 +364,8 @@ fn track_command_with_tracker(command: Command, tracker: Tracker) -> TrackResult
 
     tracker.finish()?;
 
-    // Detaching the probes blocks on RCU grace periods; let the caller decide
-    // when to wait for it.
-    let thread_handle = std::thread::spawn(move || drop(tracker));
-
     info!("Tracked {} events", events.len());
     trace!("Events: {events:#?}");
 
-    Ok((events, thread_handle))
+    Ok((tracker, events, checkpoint))
 }

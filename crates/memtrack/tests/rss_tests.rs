@@ -5,7 +5,8 @@ use itertools::Itertools;
 use rstest::rstest;
 use runner_shared::artifacts::{MemtrackEvent, MemtrackEventKind};
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use tempfile::TempDir;
 
@@ -169,8 +170,42 @@ fn per_pid_peaks(events: &[MemtrackEvent]) -> (Vec<PidRss>, Vec<PidRss>) {
     (project(&rss), project(&rmap))
 }
 
-/// Compile a fixture that writes a `/proc` RSS report to its argv[1], run it under
-/// `track`, and return the raw report text alongside the collected events.
+/// Headers the fixtures `#include`. Each fixture compiles in its own temp dir,
+/// so they are copied in next to the source.
+fn write_fixture_headers(dir: &Path) -> std::io::Result<()> {
+    for (name, source) in [
+        ("rss_report.h", include_str!("../testdata/rss/rss_report.h")),
+        (
+            "file_region.h",
+            include_str!("../testdata/rss/file_region.h"),
+        ),
+    ] {
+        std::fs::write(dir.join(name), source)?;
+    }
+    Ok(())
+}
+
+/// Compile a fixture and build the command that runs it against a report path
+/// in the returned temp dir, which must outlive the run.
+fn build_fixture(
+    source: &str,
+    name: &str,
+) -> Result<(TempDir, PathBuf, Command), Box<dyn std::error::Error>> {
+    // Fixtures mmap data files created next to the report path, so the temp dir
+    // must be disk-backed: /tmp may be tmpfs (Ubuntu >= 25.04), which accounts
+    // mapped file pages as shmem instead of file.
+    std::fs::create_dir_all(env!("CARGO_TARGET_TMPDIR"))?;
+    let temp_dir = TempDir::new_in(env!("CARGO_TARGET_TMPDIR"))?;
+    write_fixture_headers(temp_dir.path())?;
+    let binary = shared::compile_c_source(source, name, temp_dir.path())?;
+    let report_path = temp_dir.path().join(format!("{name}.report"));
+    let mut command = Command::new(&binary);
+    command.arg(&report_path);
+    Ok((temp_dir, report_path, command))
+}
+
+/// Run a fixture under `track` and return the raw `/proc` RSS report it wrote to
+/// its argv[1] alongside the collected events.
 ///
 /// The report read is best-effort: some fixtures write no report.
 fn track_fixture(
@@ -178,32 +213,65 @@ fn track_fixture(
     name: &str,
     track: impl FnOnce(Command) -> shared::TrackResult,
 ) -> Result<(Option<String>, Vec<MemtrackEvent>), Box<dyn std::error::Error>> {
-    // Fixtures mmap data files created next to the report path, so the temp dir
-    // must be disk-backed: /tmp may be tmpfs (Ubuntu >= 25.04), which accounts
-    // mapped file pages as shmem instead of file.
-    std::fs::create_dir_all(env!("CARGO_TARGET_TMPDIR"))?;
-    let temp_dir = TempDir::new_in(env!("CARGO_TARGET_TMPDIR"))?;
-    std::fs::write(
-        temp_dir.path().join("rss_report.h"),
-        include_str!("../testdata/rss/rss_report.h"),
-    )?;
-    let binary = shared::compile_c_source(source, name, temp_dir.path())?;
-    let report_path = temp_dir.path().join(format!("{name}.report"));
-    let mut command = Command::new(&binary);
-    command.arg(&report_path);
-
+    let (_temp_dir, report_path, command) = build_fixture(source, name)?;
     let (events, thread_handle) = track(command)?;
     let raw_report = std::fs::read_to_string(&report_path).ok();
     thread_handle.join().unwrap();
     Ok((raw_report, events))
 }
 
+/// [`track_fixture`] returning the ownership maps snapshotted once the tracked
+/// tree exited, instead of the report text.
+fn track_fixture_with_maps(
+    source: &str,
+    name: &str,
+) -> Result<(Vec<MemtrackEvent>, shared::OwnershipMaps), Box<dyn std::error::Error>> {
+    let (_temp_dir, _report_path, command) = build_fixture(source, name)?;
+    let (events, maps, thread_handle) = shared::track_command_with_rmap_maps(command)?;
+    thread_handle.join().unwrap();
+    Ok((events, maps))
+}
+
+/// Every fork as `(parent_pid, child_pid)`, in timestamp order.
+fn fork_pairs(events: &[MemtrackEvent]) -> Vec<(i32, i32)> {
+    events
+        .iter()
+        .sorted_by_key(|e| e.timestamp)
+        .filter_map(|e| match e.kind {
+            MemtrackEventKind::Fork { parent_pid } => Some((parent_pid, e.pid)),
+            _ => None,
+        })
+        .collect()
+}
+
 /// The first fork observed: `(parent_pid, child_pid)`.
 fn first_fork_pair(events: &[MemtrackEvent]) -> Option<(i32, i32)> {
-    events.iter().find_map(|e| match e.kind {
-        MemtrackEventKind::Fork { parent_pid } => Some((parent_pid, e.pid)),
-        _ => None,
-    })
+    fork_pairs(events).first().copied()
+}
+
+/// Summed rmap bytes for one pid's `member` counter, in one direction. `tid`
+/// narrows to a single performing task, which is how a foreign actor's events
+/// are told apart from the owner's own.
+fn rmap_bytes(
+    events: &[MemtrackEvent],
+    pid: i32,
+    tid: Option<i32>,
+    member: i32,
+    positive: bool,
+) -> u64 {
+    events
+        .iter()
+        .filter(|e| e.pid == pid && tid.is_none_or(|tid| e.tid == tid))
+        .filter_map(|e| match e.kind {
+            MemtrackEventKind::Rmap { member: m, delta }
+                if m == member && (delta > 0) == positive =>
+            {
+                Some(delta.unsigned_abs())
+            }
+            _ => None,
+        })
+        .sum::<u64>()
+        * page_size()
 }
 
 /// Pins reconstructed rmap addresses to the exact punched range: hole pages are
@@ -392,16 +460,7 @@ fn test_rss_external_reclaim(#[case] mode: Reclaim) -> Result<(), Box<dyn std::e
             );
         }
         Reclaim::Rmap => {
-            let in_context_bytes = events
-                .iter()
-                .filter_map(|e| match e.kind {
-                    MemtrackEventKind::Rmap { member: 0, delta } if e.pid == a && delta > 0 => {
-                        Some(delta)
-                    }
-                    _ => None,
-                })
-                .sum::<i64>() as u64
-                * page_size();
+            let in_context_bytes = rmap_bytes(&events, a, None, 0, true);
             assert!(
                 in_context_bytes >= 32 * MIB,
                 "in-context file rmap adds too small: {in_context_bytes}"
@@ -410,18 +469,7 @@ fn test_rss_external_reclaim(#[case] mode: Reclaim) -> Result<(), Box<dyn std::e
             // A file-page remove owned by A but emitted from B's context (tid == B),
             // only present when the foreign reclaim's rmap events are attributed to
             // the owner via the mm_owner map.
-            let external_bytes = events
-                .iter()
-                .filter_map(|e| match e.kind {
-                    MemtrackEventKind::Rmap { member: 0, delta }
-                        if e.pid == a && e.tid == b && delta < 0 =>
-                    {
-                        Some(-delta)
-                    }
-                    _ => None,
-                })
-                .sum::<i64>() as u64
-                * page_size();
+            let external_bytes = rmap_bytes(&events, a, Some(b), 0, false);
             assert!(
                 external_bytes >= 8 * MIB,
                 "external MADV_PAGEOUT remove not attributed to the owner (pid=A, tid=B): only {external_bytes} bytes"
@@ -439,10 +487,9 @@ fn test_rss_external_reclaim(#[case] mode: Reclaim) -> Result<(), Box<dyn std::e
 #[test_with::env(GITHUB_ACTIONS)]
 #[test]
 fn test_rss_stale_mm_owner_keeps_live_rss() -> Result<(), Box<dyn std::error::Error>> {
-    let (_report, events) = track_fixture(
+    let (events, maps) = track_fixture_with_maps(
         include_str!("../testdata/rss/stale_mm_owner.c"),
         "stale_mm_owner",
-        shared::track_command_with_rmap,
     )?;
 
     // The fixture's only fork before the burst is the child that execs into the
@@ -490,11 +537,9 @@ fn test_rss_stale_mm_owner_keeps_live_rss() -> Result<(), Box<dyn std::error::Er
         &collapsed[..collapsed.len().min(5)]
     );
 
-    // The rmap-reconstructed peak confirms the pages became and stayed resident,
-    // so a collapsing absolute sample could only come from a recycled mm. The
-    // final net is unusable: only since v6.16 does trace_sched_process_exit fire
-    // before exit_mm, so older kernels attribute the SIGKILL teardown's foreign
-    // rmap removes while ownership is still bound, netting the sum to ~0.
+    // Running max, not the final net: only since v6.16 does trace_sched_process_exit
+    // fire before exit_mm, so older kernels charge the SIGKILL teardown's rmap
+    // removes to a still-bound owner and net the sum to ~0.
     let rmap_peak = events
         .iter()
         .sorted_by_key(|e| e.timestamp)
@@ -512,6 +557,34 @@ fn test_rss_stale_mm_owner_keeps_live_rss() -> Result<(), Box<dyn std::error::Er
     assert!(
         rmap_peak >= (peak / 2) as i64,
         "fixture never held the region per rmap: peak net {rmap_peak} bytes"
+    );
+
+    let forks = events
+        .iter()
+        .filter(|e| matches!(e.kind, MemtrackEventKind::Fork { .. }))
+        .count();
+    assert!(
+        forks >= 200,
+        "the mm_struct-recycling fork burst did not run tracked: {forks} forks"
+    );
+
+    // Every fixture process is dead by now, so no ownership entry may still name one.
+    let tracked: BTreeSet<i32> = events.iter().map(|e| e.pid).collect();
+    let residue: Vec<String> = maps
+        .pid_mm
+        .iter()
+        .filter(|(pid, _)| tracked.contains(&(*pid as i32)))
+        .map(|e| format!("pid_mm {e:?}"))
+        .chain(
+            maps.mm_owner
+                .iter()
+                .filter(|(_, owner)| tracked.contains(&(*owner as i32)))
+                .map(|e| format!("mm_owner {e:?}")),
+        )
+        .collect();
+    assert!(
+        residue.is_empty(),
+        "ownership entries outlived their pid: {residue:?}"
     );
     Ok(())
 }
@@ -536,20 +609,142 @@ fn test_rss_rmap_thread_fork_tracks_child() -> Result<(), Box<dyn std::error::Er
         first_fork_pair(&events).ok_or("no fork event: worker-thread fork was not tracked")?;
     assert_ne!(parent, child);
 
-    let child_anon: i64 = events
-        .iter()
-        .filter_map(|e| match e.kind {
-            MemtrackEventKind::Rmap { member: 1, delta } if e.pid == child && delta > 0 => {
-                Some(delta)
-            }
-            _ => None,
-        })
-        .sum();
+    let child_anon = rmap_bytes(&events, child, None, 1, true);
     assert!(
-        child_anon * page_size() as i64 >= ((REGION_MIB - 16) * MIB) as i64,
-        "child of a worker-thread fork missed rmap tracking: anon adds {} bytes, expected ~{} MiB",
-        child_anon * page_size() as i64,
-        REGION_MIB
+        child_anon >= (REGION_MIB - 16) * MIB,
+        "child of a worker-thread fork missed rmap tracking: anon adds {child_anon} bytes, \
+         expected ~{REGION_MIB} MiB"
+    );
+    Ok(())
+}
+
+/// Both accountings restart from zero at EXEC, so past that point they must agree:
+/// rss_stat reports the kernel's own counters while rmap sums folio add/remove
+/// deltas, and a lost fork seed or a dropped in-context event shows up as a
+/// reconstructed peak far below the counters.
+#[test_with::env(GITHUB_ACTIONS)]
+#[test]
+fn test_rmap_matches_rss_stat_across_execs() -> Result<(), Box<dyn std::error::Error>> {
+    // Two compressors in one shell so ancestor state spans both execs. xz -9's
+    // dictionary and bzip2 -9's 900k block buffer are what make the peaks large
+    // enough to compare; the input only has to be compressible, not random.
+    let temp_dir = TempDir::new()?;
+    let mut command = Command::new("bash");
+    command
+        .arg("-c")
+        .arg(
+            "yes alpha bravo charlie delta | head -c 16777216 > corpus.tar \
+              && xz -9 -k -f -T1 corpus.tar && bzip2 -9 -k -f corpus.tar",
+        )
+        .current_dir(temp_dir.path());
+
+    let (events, thread_handle) = shared::track_command_with_rmap(command)?;
+    thread_handle.join().unwrap();
+
+    let (_order, rss, rmap) = per_pid_raw(&events);
+
+    // Only pids that exec'd can be compared: a pid whose pages were already
+    // resident when the tracker attached has absolute rss_stat counters covering
+    // them but no rmap events, and nothing resets that deficit. EXEC does.
+    let exec_pids: BTreeSet<i32> = events
+        .iter()
+        .filter(|e| matches!(e.kind, MemtrackEventKind::Exec))
+        .map(|e| e.pid)
+        .collect();
+
+    let mut compared = 0;
+    for pid in &exec_pids {
+        // Large enough that page-level noise cannot explain a shortfall.
+        let rss_peak = rss.get(pid).map_or(0, |acc| acc.max_rss.max(0)) as u64;
+        if rss_peak <= 6 * MIB {
+            continue;
+        }
+        compared += 1;
+        let rmap_peak = rmap.get(pid).map_or(0, |acc| acc.max_rss.max(0)) as u64;
+        assert!(
+            rmap_peak * 4 >= rss_peak * 3,
+            "pid {pid}: rmap reconstructed {rmap_peak} bytes against rss_stat's {rss_peak}"
+        );
+    }
+    assert!(
+        compared >= 2,
+        "expected xz and bzip2 above 6 MiB, compared {compared} of {} exec'd pids",
+        exec_pids.len()
+    );
+    Ok(())
+}
+
+/// A CLONE_VM child shares its parent's mm until exec. Its faults must not
+/// transfer ownership because exec cleanup would remove the parent's live
+/// binding.
+#[test_with::env(GITHUB_ACTIONS)]
+#[test]
+fn test_rmap_clone_vm_keeps_parent_ownership() -> Result<(), Box<dyn std::error::Error>> {
+    // Disk-backed: the fixture mmaps a data file next to argv[1] (see build_fixture).
+    std::fs::create_dir_all(env!("CARGO_TARGET_TMPDIR"))?;
+    let tmp = TempDir::new_in(env!("CARGO_TARGET_TMPDIR"))?;
+    write_fixture_headers(tmp.path())?;
+    let binary = shared::compile_c_source(
+        include_str!("../testdata/rss/vfork_spawn.c"),
+        "vfork_spawn",
+        tmp.path(),
+    )?;
+    let ready = tmp.path().join("checkpoint-ready");
+    let release = tmp.path().join("checkpoint-release");
+    let mut command = Command::new(&binary);
+    command.arg(&ready).arg(&release);
+
+    let (events, checkpoint, root_pid, thread_handle) =
+        shared::track_command_with_rmap_checkpoint(command, &ready, &release)?;
+    thread_handle.join().unwrap();
+
+    // A stale entry naming the parent is insufficient; check its current mm.
+    let parent_mm = checkpoint
+        .pid_mm
+        .iter()
+        .find_map(|&(pid, mm)| (pid == root_pid as u32).then_some(mm))
+        .expect("parent has no pid_mm binding at the checkpoint");
+    assert!(
+        checkpoint.mm_owner.contains(&(parent_mm, root_pid as u32)),
+        "mm_owner lost the parent's current mm after its CLONE_VM child exec'd \
+         (parent mm {parent_mm:#x}, snapshot: {:?})",
+        checkpoint.mm_owner
+    );
+
+    let pairs = fork_pairs(&events);
+    let [(parent, shared_child), (reclaimer_parent, reclaimer), ..] = pairs[..] else {
+        return Err("expected forks for the CLONE_VM child and the reclaimer".into());
+    };
+    assert_eq!(
+        reclaimer_parent, parent,
+        "the reclaimer was not forked by the fixture"
+    );
+
+    // Confirm both processes produced the events needed to exercise ownership.
+    let owner_adds = rmap_bytes(&events, parent, None, 0, true);
+    assert!(
+        owner_adds >= 32 * MIB,
+        "in-context file rmap adds too small: {owner_adds}"
+    );
+
+    let shared_mm_adds = rmap_bytes(&events, shared_child, None, 1, true);
+    assert!(
+        shared_mm_adds >= 256 * 1024,
+        "CLONE_VM child faulted no anon pages into the shared mm: {shared_mm_adds} bytes"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| e.pid == shared_child && matches!(e.kind, MemtrackEventKind::Exec)),
+        "CLONE_VM child never exec'd, so its ownership cleanup never ran"
+    );
+
+    // process_madvise runs in the reclaimer's context, so removals require
+    // foreign ownership attribution.
+    let reclaimed = rmap_bytes(&events, parent, Some(reclaimer), 0, false);
+    assert!(
+        reclaimed >= 8 * MIB,
+        "foreign reclaim was not attributed to the owner after its CLONE_VM child exec'd: only {reclaimed} bytes"
     );
     Ok(())
 }

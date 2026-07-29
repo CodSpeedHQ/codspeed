@@ -1,6 +1,6 @@
 use crate::ebpf::attach_worker::AttachWorker;
 use crate::ebpf::spawn::{resume, spawn_stopped, wrap_stopped};
-use crate::ebpf::{BpfVariant, MemtrackBpf};
+use crate::ebpf::{BpfVariant, MemtrackBpf, OwnershipMaps};
 use crate::prelude::*;
 use crate::session::Session;
 use parking_lot::Mutex;
@@ -133,6 +133,11 @@ impl Tracker {
     /// A non-zero value means the resulting trace is incomplete.
     pub fn dropped_events_count(&self) -> Result<u64> {
         self.bpf.lock().dropped_events_count()
+    }
+
+    /// Only meaningful while the BPF object is alive; teardown frees the maps.
+    pub fn ownership_maps(&self) -> Result<OwnershipMaps> {
+        self.bpf.lock().ownership_maps()
     }
 
     /// Stop the attach worker, if any, and surface any fatal error it recorded,

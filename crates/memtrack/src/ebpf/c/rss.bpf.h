@@ -5,15 +5,11 @@
 #include "utils/event_helpers.h"
 #include "utils/process_tracking.h"
 
-/* (rss_stat mm_id << 32 | member) -> {owning tgid, that tgid's mm at seeding time,
- * last in-context size}. Keyed per counter so an external (curr==0) update is
- * attributed only once that mm/member was established in-context. An external event
- * may only lower a counter: any size above the last in-context value is dropped, so
- * neither a stale/racing reclaim read nor an mm_id hash collision with another task
- * can invent a peak. mm_id is only a hash, so the pointer is stored alongside and
- * revalidated against pid_mm on the external path: an entry whose mm the owner no
- * longer holds describes a freed mm_struct whose slab slot (and therefore hash) has
- * been recycled by an unrelated address space. */
+/* (rss_stat mm_id << 32 | member) -> {owning tgid, its mm when seeded, last
+ * in-context size}. An external (curr==0) update may only lower the counter, and
+ * only while pid_mm still binds the owner to the seeded mm: mm_id is a hash, so
+ * without both guards a stale reclaim read, a hash collision, or a recycled
+ * mm_struct slab slot could invent a peak. */
 struct rss_owner {
     __u32 pid;
     __u64 mm;
@@ -29,19 +25,11 @@ struct {
 /* Foreign-actor rmap attribution: rmap events run by a task other than the mm's
  * owner (kswapd reclaim, another process's process_madvise, khugepaged, KSM,
  * uffd) carry no owning-pid context, so mm_owner recovers it from the mm_struct
- * pointer. pid_mm is the inverse, letting the exec and exit hooks remove an entry
- * by value.
+ * pointer. pid_mm is the inverse, letting exec and exit remove an entry by
+ * value; attribution requires both to agree, so a stale mm fails closed.
  *
- * Lifecycle invariant: every mm_owner entry is removed when its process execs
- * (the old mm is freed mid-life) or when its thread group dies, whichever comes
- * first; LRU eviction is only a backstop. A stale entry surviving mm-pointer
- * reuse would misattribute another process's events, so ownership is only ever
- * registered from an in-context (task->mm == mm) event.
- *
- * pid_mm is a plain hash on purpose: an LRU inverse could be evicted while its
- * forward twin stays lookup-hot, leaving exec/exit unable to remove the live
- * mm_owner entry. Like tracked_pids, its entries are bound to the process
- * lifecycle and removed at group death. */
+ * pid_mm must not use LRU eviction: losing the inverse binding would leave exec
+ * and exit unable to remove the forward entry. */
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, 10240);
@@ -50,13 +38,42 @@ struct {
 } mm_owner SEC(".maps");
 BPF_HASH_MAP(pid_mm, __u32, __u64, 10240);
 
-/* Guard-then-write keeps the common case a read-only lookup (pid_mm is a plain
- * hash, so a fresh entry never needs rewriting). The recorded mm is what the
- * external rss_stat path validates against to detect a recycled mm_struct. */
-static __always_inline void refresh_pid_mm(__u32 pid, __u64 mm) {
-    __u64* cur_mm = bpf_map_lookup_elem(&pid_mm, &pid);
-    if (!cur_mm || *cur_mm != mm) {
+/* Rebind pid's address space; mm == 0 unbinds at exit. The mm_owner entry is only
+ * dropped while it still names pid: a live CLONE_VM sibling shares the mm and must
+ * keep its registration. */
+static __always_inline void set_pid_mm(__u32 pid, __u64 mm) {
+    __u64* cur = bpf_map_lookup_elem(&pid_mm, &pid);
+    if (cur && *cur == mm) {
+        return;
+    }
+    if (cur) {
+        __u32* owner = bpf_map_lookup_elem(&mm_owner, cur);
+        if (owner && *owner == pid) {
+            bpf_map_delete_elem(&mm_owner, cur);
+        }
+    }
+    if (mm) {
         bpf_map_update_elem(&pid_mm, &pid, &mm, BPF_ANY);
+    } else {
+        bpf_map_delete_elem(&pid_mm, &pid);
+    }
+}
+
+/* Claim mm for pid without stealing from a live owner: CLONE_VM siblings share the
+ * mm, and overwriting would let the child's exec-time cleanup delete the entry out
+ * from under the still-live parent. */
+static __always_inline void mm_owner_take(__u64 mm, __u32 pid) {
+    __u32* reg = bpf_map_lookup_elem(&mm_owner, &mm);
+    if (!reg) {
+        bpf_map_update_elem(&mm_owner, &mm, &pid, BPF_ANY);
+        return;
+    }
+    if (*reg == pid) {
+        return;
+    }
+    __u64* reg_mm = bpf_map_lookup_elem(&pid_mm, reg);
+    if (!reg_mm || *reg_mm != mm) {
+        bpf_map_update_elem(&mm_owner, &mm, &pid, BPF_ANY);
     }
 }
 
@@ -87,15 +104,13 @@ int tracepoint_rss_stat(struct trace_event_raw_rss_stat* ctx) {
             return 0;
         }
         owner = cur;
-        /* curr means current->mm is the mm the counter belongs to. Recording it
-         * (and keeping pid_mm current, which the rmap hooks may never do when
-         * only rss_stat is attached) is what lets the external path below tell a
-         * live mm from a recycled slab slot. */
+        /* curr == 1 means current->mm is the counter's mm. pid_mm is maintained
+         * here too because the rmap hooks may not be attached. */
         struct task_struct* task = bpf_get_current_task_btf();
         __u64 mm = (__u64)BPF_CORE_READ(task, mm);
         struct rss_owner state = {.pid = cur, .mm = mm, .size = size};
         bpf_map_update_elem(&rss_counter_owner, &key, &state, BPF_ANY);
-        refresh_pid_mm(cur, mm);
+        set_pid_mm(cur, mm);
     } else {
         struct rss_owner* found = bpf_map_lookup_elem(&rss_counter_owner, &key);
         if (!found) {
@@ -108,10 +123,6 @@ int tracepoint_rss_stat(struct trace_event_raw_rss_stat* ctx) {
         if (cur == owner) {
             return 0;
         }
-        /* mm_id is a hash of a pointer the tracepoint never exposes, so the key
-         * survives the mm it was seeded from. Once the owner no longer holds that
-         * mm (it execed, or the entry predates a pid reuse), the hash now belongs
-         * to a recycled mm_struct and its counters describe another address space. */
         __u64* owner_mm = bpf_map_lookup_elem(&pid_mm, &owner);
         if (!owner_mm || *owner_mm != found->mm) {
             return 0;
@@ -205,14 +216,8 @@ static __always_inline int submit_rmap(struct vm_area_struct* vma, __s32 member,
             return 0;
         }
 
-        /* Register ownership so foreign actors can later attribute to this pid.
-         * The guarded updates keep the hot path read-only in the common case and
-         * keep the LRU mm_owner entry fresh even when nothing else touches it. */
-        __u32* reg = bpf_map_lookup_elem(&mm_owner, &mm);
-        if (!reg || *reg != pid) {
-            bpf_map_update_elem(&mm_owner, &mm, &pid, BPF_ANY);
-        }
-        refresh_pid_mm(pid, mm);
+        mm_owner_take(mm, pid);
+        set_pid_mm(pid, mm);
         owner = pid;
     } else {
         /* Foreign actor (task->mm != mm, including kthreads whose task->mm is NULL):
@@ -224,6 +229,12 @@ static __always_inline int submit_rmap(struct vm_area_struct* vma, __s32 member,
         }
         owner = *found;
         if (!is_tracked(owner)) {
+            return 0;
+        }
+        /* An mm_struct address may be reused while a stale owner entry remains.
+         * Accept only the current inverse binding. */
+        __u64* owner_mm = bpf_map_lookup_elem(&pid_mm, &owner);
+        if (!owner_mm || *owner_mm != mm) {
             return 0;
         }
     }
@@ -331,21 +342,6 @@ int tracepoint_task_newtask(struct trace_event_raw_task_newtask* ctx) {
     SUBMIT_EVENT_AS(child_pid, EVENT_TYPE_FORK, { e->data.fork.parent_pid = parent_pid; });
 }
 
-/* Remove pid's ownership registration. The mm_owner value is verified against
- * pid before deleting: a stale pid_mm entry (LRU eviction skew) could otherwise
- * point at an mm since re-registered by another process, and deleting that
- * would silence a live owner's foreign attribution. */
-static __always_inline void drop_mm_ownership(__u32 pid) {
-    __u64* mm = bpf_map_lookup_elem(&pid_mm, &pid);
-    if (mm) {
-        __u32* owner = bpf_map_lookup_elem(&mm_owner, mm);
-        if (owner && *owner == pid) {
-            bpf_map_delete_elem(&mm_owner, mm);
-        }
-    }
-    bpf_map_delete_elem(&pid_mm, &pid);
-}
-
 SEC("tracepoint/sched/sched_process_exec")
 int tracepoint_sched_process_exec(void* ctx) {
     __u32 pid = bpf_get_current_pid_tgid() >> 32;
@@ -353,17 +349,13 @@ int tracepoint_sched_process_exec(void* ctx) {
         return 0;
     }
 
-    /* Maintain ownership before submitting (SUBMIT_EVENT_AS returns from the
-     * function). Exec frees the old mm long before group death, so the stale
-     * pointer must be dropped here or a reused mm_struct would be misattributed. */
-    drop_mm_ownership(pid);
-
+    /* SUBMIT_EVENT_AS returns, so the rebind must precede it. */
     struct task_struct* task = bpf_get_current_task_btf();
     __u64 new_mm = (__u64)BPF_CORE_READ(task, mm);
     if (new_mm) {
-        bpf_map_update_elem(&mm_owner, &new_mm, &pid, BPF_ANY);
-        bpf_map_update_elem(&pid_mm, &pid, &new_mm, BPF_ANY);
+        mm_owner_take(new_mm, pid);
     }
+    set_pid_mm(pid, new_mm);
 
     SUBMIT_EVENT_AS(pid, EVENT_TYPE_EXEC, {});
 }
@@ -398,7 +390,7 @@ int tracepoint_sched_process_exit(void* ctx) {
 
     /* Drop the ownership mapping so foreign actors stop attributing to a pid
      * the kernel may reuse. */
-    drop_mm_ownership(pid);
+    set_pid_mm(pid, 0);
 
     SUBMIT_EVENT_AS(pid, EVENT_TYPE_EXIT, {});
 }
