@@ -118,7 +118,9 @@ pub struct ExecAndRunSharedArgs {
         long,
         env = "CODSPEED_CYCLE_ESTIMATION",
         default_value_t = true,
-        action = clap::ArgAction::Set
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "true"
     )]
     pub cycle_estimation: bool,
 
@@ -126,8 +128,10 @@ pub struct ExecAndRunSharedArgs {
     #[arg(
         long,
         env = "CODSPEED_EXCLUDE_ALLOCATIONS",
-        default_value_t = false,
-        action = clap::ArgAction::Set
+        default_value = "false",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "true"
     )]
     pub exclude_allocations: bool,
 
