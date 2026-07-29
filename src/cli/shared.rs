@@ -126,7 +126,7 @@ pub struct ExecAndRunSharedArgs {
     #[arg(
         long,
         env = "CODSPEED_EXCLUDE_ALLOCATIONS",
-        default_value_t = true,
+        default_value_t = false,
         action = clap::ArgAction::Set
     )]
     pub exclude_allocations: bool,
