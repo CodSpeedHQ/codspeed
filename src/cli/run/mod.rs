@@ -70,7 +70,7 @@ impl RunArgs {
                 show_full_output: false,
                 base: None,
                 cycle_estimation: true,
-                exclude_allocations: true,
+                exclude_allocations: false,
                 profiler_run_args: ProfilerRunArgs {
                     enable_profiler: false,
                     enable_perf: None,

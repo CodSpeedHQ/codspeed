@@ -236,7 +236,7 @@ impl OrchestratorConfig {
             extra_env: HashMap::new(),
             fair_sched: false,
             cycle_estimation: true,
-            exclude_allocations: true,
+            exclude_allocations: false,
         }
     }
 }
