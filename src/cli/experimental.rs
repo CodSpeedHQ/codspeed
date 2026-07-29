@@ -21,7 +21,7 @@ pub struct ExperimentalArgs {
     #[arg(long, hide = true, env = "CODSPEED_EXPERIMENTAL_CYCLE_ESTIMATION")]
     pub experimental_cycle_estimation: bool,
 
-    /// Deprecated: allocation exclusion is enabled by default and this flag has no effect.
+    /// Deprecated: allocation exclusion is controlled by `--exclude-allocations` and this flag has no effect.
     #[arg(long, hide = true, env = "CODSPEED_EXPERIMENTAL_EXCLUDE_ALLOCATIONS")]
     pub experimental_exclude_allocations: bool,
 }
@@ -79,7 +79,7 @@ impl ExperimentalArgs {
 
         for (_, flag, feature, new_flag) in deprecated.iter().filter(|(set, ..)| *set) {
             eprintln!(
-                "  {} {} has no effect: {} is now controlled by {} (defaults to true).",
+                "  {} {} has no effect: {} is now controlled by {}.",
                 style(Icon::Warning.to_string()).yellow(),
                 style(*flag).bold(),
                 feature,
