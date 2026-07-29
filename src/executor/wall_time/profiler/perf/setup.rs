@@ -36,27 +36,34 @@ fn is_perf_installed() -> bool {
 }
 
 pub async fn install_perf(system_info: &SystemInfo, setup_cache_dir: Option<&Path>) -> Result<()> {
-    apt::install_cached(system_info, setup_cache_dir, is_perf_installed, || async {
-        debug!("Installing perf");
-        let cmd = Command::new("uname")
-            .arg("-r")
-            .output()
-            .expect("Failed to execute uname");
-        let kernel_release = String::from_utf8_lossy(&cmd.stdout);
-        let kernel_release = kernel_release.trim();
-        let linux_tools_kernel_release = format!("linux-tools-{kernel_release}");
+    apt::install_cached(
+        system_info,
+        setup_cache_dir,
+        is_perf_installed,
+        apt::CacheManifest::matches_installed_packages,
+        is_perf_installed,
+        || async {
+            debug!("Installing perf");
+            let cmd = Command::new("uname")
+                .arg("-r")
+                .output()
+                .expect("Failed to execute uname");
+            let kernel_release = String::from_utf8_lossy(&cmd.stdout);
+            let kernel_release = kernel_release.trim();
+            let linux_tools_kernel_release = format!("linux-tools-{kernel_release}");
 
-        let packages = vec![
-            "linux-tools-common".to_string(),
-            "linux-tools-generic".to_string(),
-            linux_tools_kernel_release,
-        ];
-        let package_refs: Vec<&str> = packages.iter().map(|s| s.as_str()).collect();
+            let packages = vec![
+                "linux-tools-common".to_string(),
+                "linux-tools-generic".to_string(),
+                linux_tools_kernel_release,
+            ];
+            let package_refs: Vec<&str> = packages.iter().map(|s| s.as_str()).collect();
 
-        apt::install(system_info, &package_refs)?;
+            apt::install(system_info, &package_refs)?;
 
-        // Return package names for caching
-        Ok(packages)
-    })
+            // Return package names for caching
+            Ok(packages)
+        },
+    )
     .await
 }

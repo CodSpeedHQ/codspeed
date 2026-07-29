@@ -1,6 +1,7 @@
 use super::run_with_sudo::run_with_sudo;
 use crate::prelude::*;
 use crate::system::{SupportedOs, SystemInfo};
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Command;
 
@@ -8,6 +9,73 @@ const METADATA_FILENAME: &str = "./tmp/codspeed-cache-metadata.txt";
 
 pub fn is_system_compatible(system_info: &SystemInfo) -> bool {
     matches!(system_info.os, SupportedOs::Linux(ref distro) if distro.is_supported())
+}
+
+/// The packages a cache entry holds, with the version each of them had when it was saved.
+///
+/// The cached tree is a plain file copy: nothing is recorded in the dpkg database when it is
+/// applied, so `dpkg` cannot answer whether a cached package is present, let alone which
+/// version. The manifest is the only description of the entry's contents available before
+/// applying it to the filesystem.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct CacheManifest {
+    packages: BTreeMap<String, String>,
+}
+
+impl CacheManifest {
+    fn of_installed_packages(packages: &[&str]) -> Self {
+        let packages = packages
+            .iter()
+            .filter_map(|package| {
+                let version = installed_package_version(package)?;
+                Some((package.to_string(), version))
+            })
+            .collect();
+
+        Self { packages }
+    }
+
+    fn parse(content: &str) -> Self {
+        let packages = content
+            .lines()
+            .filter_map(|line| line.trim().split_once('='))
+            .map(|(package, version)| (package.to_string(), version.to_string()))
+            .collect();
+
+        Self { packages }
+    }
+
+    fn serialize(&self) -> String {
+        self.packages
+            .iter()
+            .map(|(package, version)| format!("{package}={version}"))
+            .join("\n")
+    }
+
+    pub fn version_of(&self, package: &str) -> Option<&str> {
+        self.packages.get(package).map(String::as_str)
+    }
+
+    pub fn package_names(&self) -> impl Iterator<Item = &str> {
+        self.packages.keys().map(String::as_str)
+    }
+
+    /// Whether every cached package that dpkg also knows about is at the version it had when the
+    /// entry was saved, so that files coming from the cache cannot contradict the system's own
+    /// packages.
+    pub fn matches_installed_packages(&self) -> bool {
+        self.packages.iter().all(|(package, cached_version)| {
+            match installed_package_version(package) {
+                Some(installed_version) if &installed_version != cached_version => {
+                    debug!(
+                        "Cached {package} {cached_version} does not match installed {installed_version}"
+                    );
+                    false
+                }
+                _ => true,
+            }
+        })
+    }
 }
 
 /// Installs packages with caching support.
@@ -19,7 +87,13 @@ pub fn is_system_compatible(system_info: &SystemInfo) -> bool {
 ///
 /// * `system_info` - System information to determine compatibility
 /// * `setup_cache_dir` - Optional directory to restore from/save to cache
-/// * `is_installed` - Function that checks if the tool is already installed
+/// * `is_installed` - Whether the tool is installed according to the system's package state.
+///   Only consulted before the cache is applied, since a cached tree leaves no trace in the
+///   dpkg database
+/// * `is_cache_usable` - Whether a cache entry can be applied to the running system, given the
+///   packages and versions it was saved with. Evaluated before any file is copied
+/// * `is_functional` - Whether the tool works once the cache has been applied. Must not depend
+///   on the package state, only on what the cached files provide
 /// * `install_packages` - Async closure that:
 ///   1. Performs the installation (e.g., downloads .deb files, calls `apt::install`)
 ///   2. Returns a Vec of package names that should be cached via `dpkg -L`
@@ -27,10 +101,10 @@ pub fn is_system_compatible(system_info: &SystemInfo) -> bool {
 /// # Flow
 ///
 /// 1. Check if already installed - if yes, skip everything
-/// 2. Try to restore from cache (if cache_dir provided)
-/// 3. Check again if installed - if yes, we're done
-/// 4. Run the install closure to install and get package names
-/// 5. Save installed packages to cache (if cache_dir provided)
+/// 2. Read the cache manifest and, if the entry is usable, apply it and check that the tool is
+///    functional - if it is, we're done
+/// 3. Run the install closure to install and get package names
+/// 4. Save installed packages to cache (if cache_dir provided)
 ///
 /// # Example
 ///
@@ -38,6 +112,8 @@ pub fn is_system_compatible(system_info: &SystemInfo) -> bool {
 /// apt::install_cached(
 ///     system_info,
 ///     setup_cache_dir,
+///     || Command::new("which").arg("perf").status().is_ok(),
+///     |manifest| manifest.matches_installed_packages(),
 ///     || Command::new("which").arg("perf").status().is_ok(),
 ///     || async {
 ///         let packages = vec!["linux-tools-common".to_string()];
@@ -47,14 +123,18 @@ pub fn is_system_compatible(system_info: &SystemInfo) -> bool {
 ///     },
 /// ).await?;
 /// ```
-pub async fn install_cached<F, I, Fut>(
+pub async fn install_cached<F, C, R, I, Fut>(
     system_info: &SystemInfo,
     setup_cache_dir: Option<&Path>,
     is_installed: F,
+    is_cache_usable: C,
+    is_functional: R,
     install_packages: I,
 ) -> Result<()>
 where
     F: Fn() -> bool,
+    C: Fn(&CacheManifest) -> bool,
+    R: Fn() -> bool,
     I: FnOnce() -> Fut,
     Fut: std::future::Future<Output = Result<Vec<String>>>,
 {
@@ -64,12 +144,24 @@ where
     }
 
     // Try to restore from cache first
-    if let Some(cache_dir) = setup_cache_dir {
-        restore_from_cache(system_info, cache_dir)?;
+    if let Some(cache_dir) = setup_cache_dir
+        && let Some(manifest) = read_manifest(system_info, cache_dir)
+    {
+        if is_cache_usable(&manifest) {
+            info!(
+                "Packages restored from cache: {}",
+                manifest.package_names().join(", ")
+            );
+            restore_from_cache(system_info, cache_dir)?;
 
-        if is_installed() {
-            info!("Tool has been successfully restored from cache");
-            return Ok(());
+            if is_functional() {
+                info!("Tool has been successfully restored from cache");
+                return Ok(());
+            }
+
+            warn!("Tool is not functional after being restored from cache, installing it instead");
+        } else {
+            info!("Cached packages do not apply to this system, installing instead");
         }
     }
 
@@ -93,6 +185,48 @@ pub fn is_package_installed(package: &str) -> bool {
         .args(["-s", package])
         .output()
         .is_ok_and(|output| output.status.success())
+}
+
+/// Returns the version `dpkg` reports for a package, or `None` when it is not installed.
+pub fn installed_package_version(package: &str) -> Option<String> {
+    let output = Command::new("dpkg-query")
+        .args(["-W", "-f=${db:Status-Status} ${Version}", package])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let (status, version) = stdout.trim().split_once(' ')?;
+    if status != "installed" {
+        return None;
+    }
+
+    Some(version.to_string())
+}
+
+/// Read the manifest of the cache entry sitting in `cache_dir`, if there is one to read.
+fn read_manifest(system_info: &SystemInfo, cache_dir: &Path) -> Option<CacheManifest> {
+    if !is_system_compatible(system_info) {
+        info!("Cache restore is not supported on this system, skipping");
+        return None;
+    }
+
+    let metadata_path = cache_dir.join(METADATA_FILENAME);
+    if !metadata_path.exists() {
+        debug!("No metadata file found in cache directory");
+        return None;
+    }
+
+    match std::fs::read_to_string(&metadata_path) {
+        Ok(content) => Some(CacheManifest::parse(&content)),
+        Err(e) => {
+            warn!("Failed to read metadata file: {e}");
+            None
+        }
+    }
 }
 
 pub fn install(system_info: &SystemInfo, packages: &[&str]) -> Result<()> {
@@ -139,24 +273,6 @@ fn restore_from_cache(system_info: &SystemInfo, cache_dir: &Path) -> Result<()> 
         "Restoring tools from cache directory: {}",
         cache_dir.display()
     );
-
-    // Read and log the metadata file if it exists
-    let metadata_path = cache_dir.join(METADATA_FILENAME);
-    if metadata_path.exists() {
-        match std::fs::read_to_string(&metadata_path) {
-            Ok(content) => {
-                info!(
-                    "Packages restored from cache: {}",
-                    content.lines().join(", ")
-                );
-            }
-            Err(e) => {
-                warn!("Failed to read metadata file: {e}");
-            }
-        }
-    } else {
-        debug!("No metadata file found in cache directory");
-    }
 
     // Use bash to properly handle glob expansion
     let cache_dir_str = cache_dir
@@ -211,9 +327,9 @@ fn save_to_cache(system_info: &SystemInfo, cache_dir: &Path, packages: &[&str]) 
         bail!("Failed to save packages to cache");
     }
 
-    // Create metadata file containing the installed packages
+    // Create metadata file containing the cached packages and their versions
     let metadata_path = cache_dir.join(METADATA_FILENAME);
-    let metadata_content = packages.join("\n"); // TODO: add package versions as well, by using the output of the install command for example
+    let metadata_content = CacheManifest::of_installed_packages(packages).serialize();
     if let Ok(()) = std::fs::create_dir_all(metadata_path.parent().unwrap()) {
         if let Ok(()) = std::fs::write(&metadata_path, metadata_content)
             .context("Failed to write metadata file")
@@ -234,4 +350,34 @@ fn save_to_cache(system_info: &SystemInfo, cache_dir: &Path, packages: &[&str]) 
 
     debug!("Packages cached successfully");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn manifest_of(packages: &[(&str, &str)]) -> CacheManifest {
+        CacheManifest {
+            packages: packages
+                .iter()
+                .map(|(package, version)| (package.to_string(), version.to_string()))
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn manifest_round_trips() {
+        let manifest = manifest_of(&[("libc6-dbg", "2.39-0ubuntu8.8"), ("valgrind", "1:3.26.0")]);
+
+        assert_eq!(CacheManifest::parse(&manifest.serialize()), manifest);
+    }
+
+    #[test]
+    fn manifest_ignores_entries_without_a_version() {
+        // Entries saved before versions were recorded hold bare package names
+        let manifest = CacheManifest::parse("valgrind\nlibc6-dbg=2.39-0ubuntu8.8");
+
+        assert_eq!(manifest.version_of("valgrind"), None);
+        assert_eq!(manifest.version_of("libc6-dbg"), Some("2.39-0ubuntu8.8"));
+    }
 }

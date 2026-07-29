@@ -173,11 +173,15 @@ fn classify_valgrind_version(version: String) -> ToolInstallStatus {
     ToolInstallStatus::Installed { version }
 }
 
-fn is_valgrind_installed(system_info: &SystemInfo) -> bool {
-    if !matches!(
+fn is_valgrind_functional() -> bool {
+    matches!(
         get_valgrind_status().status,
         ToolInstallStatus::Installed { .. }
-    ) {
+    )
+}
+
+fn is_valgrind_installed(system_info: &SystemInfo) -> bool {
+    if !is_valgrind_functional() {
         return false;
     }
 
@@ -191,6 +195,33 @@ fn is_valgrind_installed(system_info: &SystemInfo) -> bool {
     }
 }
 
+/// The debug symbols shipped by `libc6-dbg` only match the `libc6` build they were produced
+/// from, so an entry saved against another `libc6` version cannot be applied.
+fn is_valgrind_cache_usable(manifest: &apt::CacheManifest) -> bool {
+    if !manifest.matches_installed_packages() {
+        return false;
+    }
+
+    let Some(cached_libc_dbg_version) = manifest.version_of("libc6-dbg") else {
+        debug!("Cache entry does not hold libc6-dbg");
+        return false;
+    };
+
+    match apt::installed_package_version("libc6") {
+        Some(libc_version) if libc_version == cached_libc_dbg_version => true,
+        Some(libc_version) => {
+            debug!(
+                "Cached libc6-dbg {cached_libc_dbg_version} does not match installed libc6 {libc_version}"
+            );
+            false
+        }
+        None => {
+            debug!("Could not determine the installed libc6 version");
+            false
+        }
+    }
+}
+
 pub async fn install_valgrind(
     system_info: &SystemInfo,
     setup_cache_dir: Option<&Path>,
@@ -199,6 +230,8 @@ pub async fn install_valgrind(
         system_info,
         setup_cache_dir,
         || is_valgrind_installed(system_info),
+        is_valgrind_cache_usable,
+        is_valgrind_functional,
         || async {
             debug!("Installing valgrind");
             let binary = get_codspeed_valgrind_binary(system_info)?;
