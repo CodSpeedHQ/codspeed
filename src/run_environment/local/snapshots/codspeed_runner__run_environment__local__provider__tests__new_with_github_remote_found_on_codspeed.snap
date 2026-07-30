@@ -10,8 +10,6 @@ expression: run_environment_metadata
   "repository": "my-owner",
   "event": "local",
   "sender": null,
-  "ghData": null,
-  "glData": null,
   "localData": {
     "expectedRunPartsCount": 1
   },
