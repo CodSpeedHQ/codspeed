@@ -168,7 +168,7 @@ impl Log for LocalLogger {
 }
 
 /// Format a group header with styled prefix
-fn format_group_header(name: &str) -> String {
+pub(crate) fn format_group_header(name: &str) -> String {
     let prefix = style(Icon::GroupArrow.to_string())
         .color256(CODSPEED_U8_COLOR_CODE)
         .bold();
@@ -191,7 +191,7 @@ pub(crate) fn format_checkmark(label: &str, dim: bool) -> String {
 }
 
 /// Format elapsed duration in a compact human-readable way
-fn format_elapsed(duration: Duration) -> String {
+pub(crate) fn format_elapsed(duration: Duration) -> String {
     let secs = duration.as_secs();
     let millis = duration.as_millis();
 
@@ -234,7 +234,7 @@ fn print_record(record: &log::Record) {
 }
 
 /// Format a log entry with the appropriate style for its level.
-fn format_log(level: log::Level, message: &str, target: &str) -> String {
+pub(crate) fn format_log(level: log::Level, message: &str, target: &str) -> String {
     match level {
         log::Level::Error => {
             let prefix = style(Icon::Error.to_string()).red().bold();
