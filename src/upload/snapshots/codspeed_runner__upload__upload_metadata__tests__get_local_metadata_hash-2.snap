@@ -4,7 +4,7 @@ expression: upload_metadata
 ---
 {
   "repositoryProvider": "PROJECT",
-  "version": 10,
+  "version": 11,
   "tokenless": false,
   "profileMd5": "tfC4VxYiYdJcTWpHpv4Ouw==",
   "profileEncoding": "gzip",
@@ -46,8 +46,6 @@ expression: upload_metadata
   "repository": "local-runs",
   "event": "local",
   "sender": null,
-  "ghData": null,
-  "glData": null,
   "localData": {
     "expectedRunPartsCount": 1
   },

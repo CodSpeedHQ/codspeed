@@ -10,8 +10,6 @@ expression: run_environment_metadata
   "repository": "adrien-python-test",
   "event": "pull_request",
   "sender": null,
-  "ghData": null,
-  "glData": null,
   "localData": null,
   "repositoryRootPath": "/home/circleci/project/"
 }
