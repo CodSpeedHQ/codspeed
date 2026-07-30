@@ -3,6 +3,7 @@ pub mod logger;
 mod provider;
 
 use buildkite::BuildkiteProvider;
+use circleci::CircleCIProvider;
 use github_actions::GitHubActionsProvider;
 use gitlab_ci::GitLabCIProvider;
 use local::LocalProvider;
@@ -17,6 +18,7 @@ pub use self::provider::RunEnvironmentProvider;
 
 // RunEnvironment Provider implementations
 mod buildkite;
+mod circleci;
 mod github_actions;
 mod gitlab_ci;
 mod local;
@@ -28,6 +30,9 @@ pub async fn get_provider(
     let mut provider: Box<dyn RunEnvironmentProvider> = {
         if BuildkiteProvider::detect() {
             let provider = BuildkiteProvider::try_from(config)?;
+            Box::new(provider)
+        } else if CircleCIProvider::detect() {
+            let provider = CircleCIProvider::try_from(config)?;
             Box::new(provider)
         } else if GitHubActionsProvider::detect() {
             let provider = GitHubActionsProvider::try_from(config)?;
