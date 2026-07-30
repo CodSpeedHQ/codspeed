@@ -2,41 +2,23 @@ name: probe2604
 on: [push]
 jobs:
   probe:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, ubuntu-26.04]
+    runs-on: ubuntu-26.04
     steps:
-      - run: |
-          uname -a
-          for d in / /home/runner/work /home/runner /tmp /var/tmp /mnt; do
-            printf '%s -> %s\n' "$d" "$(stat -f -c %T "$d" 2>/dev/null)"
-          done
-          findmnt -o TARGET,SOURCE,FSTYPE | head -30
-      - name: repro
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: cod-3089-collect-rss-in-memtrack
+      - name: repro fixture exactly
         run: |
-          mkdir -p "$HOME/work/probe/target/tmp"
-          cat > /tmp/r.c <<'EOF'
-          #include <stdio.h>
-          #include <stdlib.h>
-          #include <string.h>
-          #include <sys/mman.h>
-          #include <unistd.h>
-          int main(int argc, char** argv) {
-            size_t len = 64UL*1024*1024;
-            char t[4096]; snprintf(t, sizeof t, "%s/probe-XXXXXX", argv[1]);
-            int fd = mkstemp(t); if (fd < 0) return 1; unlink(t);
-            char c[65536]; memset(c, 0x42, sizeof c);
-            for (size_t o = 0; o < len; o += sizeof c) if (write(fd, c, sizeof c) < 0) return 1;
-            void* m = mmap(NULL, len, PROT_READ, MAP_PRIVATE, fd, 0);
-            if (m == MAP_FAILED) return 1;
-            volatile char s = 0;
-            for (size_t i = 0; i < len; i += 4096) s ^= ((volatile char*)m)[i];
-            FILE* f = fopen("/proc/self/status", "r"); char line[256];
-            while (fgets(line, sizeof line, f)) if (strstr(line, "Rss") || strstr(line, "VmHWM")) fputs(line, stdout);
-            return s & 0;
-          }
-          EOF
-          gcc -O0 -o /tmp/r /tmp/r.c
-          for d in "$HOME/work/probe/target/tmp" /var/tmp /tmp; do echo "== $d ($(stat -f -c %T $d))"; /tmp/r "$d"; done
+          set -x
+          d="$PWD/target/tmp/probe"
+          mkdir -p "$d"
+          stat -f -c '%T %n' "$d" "$PWD" /tmp
+          echo "TMPDIR=${TMPDIR-unset}"
+          cd crates/memtrack
+          gcc -O0 -I testdata/rss -o /tmp/fixture testdata/rss/file.c
+          /tmp/fixture "$d/file.report"; echo "exit=$?"
+          cat "$d/file.report"
+          echo "--- as root"
+          sudo /tmp/fixture "$d/file2.report"; cat "$d/file2.report"
+          echo "--- in /tmp"
+          /tmp/fixture /tmp/file3.report; cat /tmp/file3.report
