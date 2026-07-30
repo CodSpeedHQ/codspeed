@@ -30,7 +30,7 @@
 - 💬 **PR comments & status checks** showing performance impact directly in your workflow.
 - 🛡️ **Merge protection** to block PRs that degrade performance beyond your threshold.
 - 🐍 **Multi-language support** for Python, Rust, Node.js, Go, C/C++ and more.
-- 🏠 **Run locally or in CI** - works on your machine and integrates with GitHub Actions, GitLab CI, and more.
+- 🏠 **Run locally or in CI** - works on your machine and integrates with GitHub Actions, GitLab CI, CircleCI, and more.
 - 🔌 **Plug your existing benchmarks** in less than 5 minutes - works with pytest, vitest, criterion, and more.
 
 ## Installation
@@ -251,6 +251,33 @@ codspeed:
   script:
     - codspeed run --mode simulation -- pytest tests/ --codspeed
 ```
+
+### CircleCI
+
+CodSpeed supports CircleCI for repositories hosted on GitHub.
+
+Here is a sample `.circleci/config.yml` configuration for Python:
+
+```yaml
+version: 2.1
+
+jobs:
+  benchmarks:
+    docker:
+      - image: cimg/python:3.12
+    steps:
+      - checkout
+      - run: pip install -r requirements.txt
+      - run: curl -fsSL https://codspeed.io/install.sh | bash -s -- --quiet
+      - run: codspeed run --mode simulation -- pytest tests/ --codspeed
+
+workflows:
+  codspeed:
+    jobs:
+      - benchmarks
+```
+
+Jobs authenticate with OpenID Connect (OIDC) automatically, so there is no token to store. Pull requests opened from a fork cannot mint an OIDC token: set the `CODSPEED_TOKEN` environment variable for those jobs, as described in the [CircleCI configuration documentation](https://codspeed.io/docs/integrations/ci/circleci/configuration).
 
 > [!TIP]
 > For more CI integration examples and advanced configurations, check out the [CI Integration Documentation](https://codspeed.io/docs/integrations/ci/).
