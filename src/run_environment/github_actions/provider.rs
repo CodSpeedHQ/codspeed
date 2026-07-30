@@ -15,7 +15,7 @@ use crate::executor::config::OrchestratorConfig;
 use crate::prelude::*;
 use crate::request_client::OIDC_CLIENT;
 use crate::run_environment::interfaces::{
-    GhData, RepositoryProvider, RunEnvironmentMetadata, RunEvent, Sender,
+    RepositoryProvider, RunEnvironmentMetadata, RunEvent, Sender,
 };
 use crate::run_environment::provider::{RunEnvironmentDetector, RunEnvironmentProvider};
 use crate::run_environment::{RunEnvironment, RunPart};
@@ -29,7 +29,8 @@ pub struct GitHubActionsProvider {
     pub head_ref: Option<String>,
     pub base_ref: Option<String>,
     pub sender: Option<Sender>,
-    pub gh_data: GhData,
+    pub run_id: String,
+    pub job_name: String,
     pub event: RunEvent,
     pub repository_root_path: String,
 
@@ -135,10 +136,8 @@ impl TryFrom<&OrchestratorConfig> for GitHubActionsProvider {
             ref_,
             head_ref,
             event,
-            gh_data: GhData {
-                job: get_env_variable("GITHUB_JOB")?,
-                run_id: get_env_variable("GITHUB_RUN_ID")?,
-            },
+            run_id: get_env_variable("GITHUB_RUN_ID")?,
+            job_name: get_env_variable("GITHUB_JOB")?,
             sender: Some(Sender {
                 login: get_env_variable("GITHUB_ACTOR")?,
                 id: get_env_variable("GITHUB_ACTOR_ID")?,
@@ -178,8 +177,6 @@ impl RunEnvironmentProvider for GitHubActionsProvider {
             base_ref: self.base_ref.clone(),
             head_ref: self.head_ref.clone(),
             event: self.event.clone(),
-            gh_data: Some(self.gh_data.clone()),
-            gl_data: None,
             local_data: None,
             sender: self.sender.clone(),
             owner: self.owner.clone(),
@@ -211,7 +208,7 @@ impl RunEnvironmentProvider for GitHubActionsProvider {
     /// Plus we are interested in the content of these objects,
     /// so it makes sense to parse and re-serialize them.
     fn get_run_provider_run_part(&self) -> Option<RunPart> {
-        let job_name = self.gh_data.job.clone();
+        let job_name = self.job_name.clone();
 
         let mut metadata = BTreeMap::new();
 
@@ -240,13 +237,13 @@ impl RunEnvironmentProvider for GitHubActionsProvider {
 
             format!("{job_name}-{matrix_str}-{strategy_str}")
         } else {
-            job_name
+            job_name.clone()
         };
 
         Some(RunPart {
-            run_id: self.gh_data.run_id.clone(),
+            run_id: self.run_id.clone(),
             run_part_id,
-            job_name: self.gh_data.job.clone(),
+            job_name,
             metadata,
         })
     }
@@ -446,8 +443,8 @@ mod tests {
                 assert_eq!(github_actions_provider.base_ref, Some("main".into()));
                 assert_eq!(github_actions_provider.head_ref, None);
                 assert_eq!(github_actions_provider.event, RunEvent::Push);
-                assert_eq!(github_actions_provider.gh_data.job, "job");
-                assert_eq!(github_actions_provider.gh_data.run_id, "1234567890");
+                assert_eq!(github_actions_provider.job_name, "job");
+                assert_eq!(github_actions_provider.run_id, "1234567890");
                 assert_eq!(
                     github_actions_provider.sender.as_ref().unwrap().login,
                     "actor"
@@ -663,10 +660,8 @@ mod tests {
                 head_ref: Some("my-branch".into()),
                 base_ref: None,
                 sender: None,
-                gh_data: GhData {
-                    job: "my_job".into(),
-                    run_id: "123789".into(),
-                },
+                run_id: "123789".into(),
+                job_name: "my_job".into(),
                 event: RunEvent::Push,
                 repository_root_path: "/home/work/my-repo".into(),
                 is_head_repo_fork: false,
@@ -708,10 +703,8 @@ mod tests {
                     head_ref: Some("my-branch".into()),
                     base_ref: None,
                     sender: None,
-                    gh_data: GhData {
-                        job: "my_job".into(),
-                        run_id: "123789".into(),
-                    },
+                    run_id: "123789".into(),
+                    job_name: "my_job".into(),
                     event: RunEvent::Push,
                     repository_root_path: "/home/work/my-repo".into(),
                     is_head_repo_fork: false,
@@ -762,10 +755,8 @@ mod tests {
                     head_ref: Some("my-branch".into()),
                     base_ref: None,
                     sender: None,
-                    gh_data: GhData {
-                        job: "my_job".into(),
-                        run_id: "123789".into(),
-                    },
+                    run_id: "123789".into(),
+                    job_name: "my_job".into(),
                     event: RunEvent::Push,
                     repository_root_path: "/home/work/my-repo".into(),
                     is_head_repo_fork: false,
@@ -814,10 +805,8 @@ mod tests {
                     head_ref: Some("my-branch".into()),
                     base_ref: None,
                     sender: None,
-                    gh_data: GhData {
-                        job: "my_job".into(),
-                        run_id: "123789".into(),
-                    },
+                    run_id: "123789".into(),
+                    job_name: "my_job".into(),
                     event: RunEvent::Push,
                     repository_root_path: "/home/work/my-repo".into(),
                     is_head_repo_fork: false,
