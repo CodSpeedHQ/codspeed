@@ -7,7 +7,7 @@ use crate::cli::run::helpers::get_env_variable;
 use crate::executor::config::OrchestratorConfig;
 use crate::prelude::*;
 use crate::run_environment::interfaces::{
-    GlData, RepositoryProvider, RunEnvironment, RunEnvironmentMetadata, RunEvent, Sender,
+    RepositoryProvider, RunEnvironment, RunEnvironmentMetadata, RunEvent, Sender,
 };
 use crate::run_environment::provider::RunEnvironmentDetector;
 use crate::run_environment::{RunEnvironmentProvider, RunPart};
@@ -21,7 +21,8 @@ pub struct GitLabCIProvider {
     ref_: String,
     head_ref: Option<String>,
     base_ref: Option<String>,
-    gl_data: GlData,
+    run_id: String,
+    job_name: String,
     sender: Sender,
     event: RunEvent,
     repository_root_path: String,
@@ -106,12 +107,11 @@ impl TryFrom<&OrchestratorConfig> for GitLabCIProvider {
         };
 
         let run_id = get_env_variable("CI_JOB_ID")?;
-        let job = get_env_variable("CI_JOB_NAME")?;
+        let job_name = get_env_variable("CI_JOB_NAME")?;
 
         let gitlab_user_id = get_env_variable("GITLAB_USER_ID")?;
         let gitlab_user_login = get_env_variable("GITLAB_USER_LOGIN")?;
 
-        let gl_data = GlData { run_id, job };
         let sender = Sender {
             id: gitlab_user_id,
             login: gitlab_user_login,
@@ -125,7 +125,8 @@ impl TryFrom<&OrchestratorConfig> for GitLabCIProvider {
             ref_,
             head_ref,
             base_ref,
-            gl_data,
+            run_id,
+            job_name,
             sender,
             event,
             repository_root_path,
@@ -159,8 +160,6 @@ impl RunEnvironmentProvider for GitLabCIProvider {
             base_ref: self.base_ref.clone(),
             head_ref: self.head_ref.clone(),
             event: self.event.clone(),
-            gh_data: None,
-            gl_data: Some(self.gl_data.clone()),
             local_data: None,
             sender: Some(self.sender.clone()),
             owner: self.owner.clone(),
@@ -172,9 +171,9 @@ impl RunEnvironmentProvider for GitLabCIProvider {
 
     fn get_run_provider_run_part(&self) -> Option<RunPart> {
         Some(RunPart {
-            run_id: self.gl_data.run_id.clone(),
-            run_part_id: self.gl_data.job.clone(),
-            job_name: self.gl_data.job.clone(),
+            run_id: self.run_id.clone(),
+            run_part_id: self.job_name.clone(),
+            job_name: self.job_name.clone(),
             metadata: BTreeMap::new(),
         })
     }

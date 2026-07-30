@@ -181,8 +181,6 @@ impl RunEnvironmentProvider for CircleCIProvider {
             repository: self.repository.clone(),
             ref_: self.ref_.clone(),
             repository_root_path: self.repository_root_path.clone(),
-            gh_data: None,
-            gl_data: None,
             local_data: None,
             // CircleCI does not provide the sender information.
             sender: None,

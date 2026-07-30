@@ -13,11 +13,6 @@ expression: run_environment_metadata
     "id": "1234567890",
     "login": "actor"
   },
-  "ghData": null,
-  "glData": {
-    "runId": "1234567890",
-    "job": "job"
-  },
   "localData": null,
   "repositoryRootPath": "/builds/owner/repository"
 }
