@@ -1,5 +1,5 @@
 use crate::binary_pins::PinnedBinary;
-use crate::{prelude::*, request_client::REQUEST_CLIENT};
+use crate::{prelude::*, request_client::STREAMING_CLIENT};
 use reqwest_retry::{
     RetryDecision, RetryPolicy, Retryable, default_on_request_success, policies::ExponentialBackoff,
 };
@@ -8,12 +8,12 @@ use std::time::SystemTime;
 
 use url::Url;
 
-/// Number of whole-download retries on top of the per-request retries already
-/// performed by the middleware on [`REQUEST_CLIENT`]. The middleware only
-/// covers `send()` (until response headers are received), so body-read
-/// failures, hash mismatches from torn downloads, and outages longer than its
-/// backoff window still need retrying here.
-const DOWNLOAD_RETRY_COUNT: u32 = 3;
+/// Number of whole-download retries. This is the only retry path for
+/// downloads: [`STREAMING_CLIENT`] has no retry middleware, so each attempt is
+/// a single request and every failure mode — send errors, retryable HTTP
+/// statuses, body-read failures, and hash mismatches from torn downloads — is
+/// retried here.
+const DOWNLOAD_RETRY_COUNT: u32 = 5;
 
 /// Backoff policy for whole-download retries. Under `cfg(test)` the intervals
 /// are shrunk to milliseconds so retry tests don't sleep through the real
@@ -27,7 +27,7 @@ fn download_backoff() -> ExponentialBackoff {
     );
     #[cfg(not(test))]
     let builder = builder.retry_bounds(
-        std::time::Duration::from_secs(2),
+        std::time::Duration::from_secs(1),
         std::time::Duration::from_secs(30),
     );
     builder.build_with_max_retries(DOWNLOAD_RETRY_COUNT)
@@ -44,7 +44,7 @@ enum AttemptError {
 
 async fn download_file(url: &Url, path: &Path) -> Result<(), AttemptError> {
     debug!("Downloading file: {url}");
-    let response = REQUEST_CLIENT
+    let response = STREAMING_CLIENT
         .get(url.clone())
         .send()
         .await
@@ -268,7 +268,7 @@ mod tests {
 
     #[tokio::test]
     async fn recovers_from_aborted_connection() {
-        let (url, _) = spawn_scripted_server(vec![
+        let (url, request_count) = spawn_scripted_server(vec![
             ScriptedResponse::Abort,
             ScriptedResponse::Body(GOOD_BODY),
         ]);
@@ -279,5 +279,22 @@ mod tests {
             .expect("download should recover from an aborted connection");
 
         assert_eq!(std::fs::read(file.path()).unwrap(), GOOD_BODY);
+        assert_eq!(request_count.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn retries_server_errors_and_recovers() {
+        let (url, request_count) = spawn_scripted_server(vec![
+            ScriptedResponse::Status(500),
+            ScriptedResponse::Body(GOOD_BODY),
+        ]);
+        let file = NamedTempFile::new().unwrap();
+
+        download_and_verify(&url, &sha256::digest(GOOD_BODY), file.path())
+            .await
+            .expect("download should recover from a transient server error");
+
+        assert_eq!(std::fs::read(file.path()).unwrap(), GOOD_BODY);
+        assert_eq!(request_count.load(Ordering::SeqCst), 2);
     }
 }
