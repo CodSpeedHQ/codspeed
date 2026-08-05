@@ -28,6 +28,11 @@ pub static REQUEST_CLIENT: LazyLock<ClientWithMiddleware> = LazyLock::new(|| {
         .build()
 });
 
+/// Client without retry middleware for pinned binary downloads. The downloader
+/// retries complete attempts so response-body failures are covered too.
+pub static DOWNLOAD_CLIENT: LazyLock<reqwest::Client> =
+    LazyLock::new(|| ClientBuilder::new().user_agent(USER_AGENT).build().unwrap());
+
 /// Client without retry middleware for streaming uploads (can't be cloned)
 pub static STREAMING_CLIENT: LazyLock<reqwest::Client> =
     LazyLock::new(|| ClientBuilder::new().user_agent(USER_AGENT).build().unwrap());
