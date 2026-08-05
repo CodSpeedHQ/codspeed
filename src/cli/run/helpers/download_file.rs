@@ -1,50 +1,116 @@
 use crate::binary_pins::PinnedBinary;
 use crate::{prelude::*, request_client::DOWNLOAD_CLIENT};
+use reqwest_retry::{
+    RetryDecision, RetryPolicy, Retryable, default_on_request_success, policies::ExponentialBackoff,
+};
 use std::path::Path;
+use std::time::SystemTime;
 
 use url::Url;
 
-async fn download_file(url: &Url, path: &Path) -> Result<()> {
+const DOWNLOAD_RETRY_COUNT: u32 = 5;
+
+fn download_backoff() -> ExponentialBackoff {
+    let builder = ExponentialBackoff::builder();
+    #[cfg(test)]
+    let builder = builder.retry_bounds(
+        std::time::Duration::from_millis(1),
+        std::time::Duration::from_millis(5),
+    );
+    #[cfg(not(test))]
+    let builder = builder.retry_bounds(
+        std::time::Duration::from_secs(1),
+        std::time::Duration::from_secs(30),
+    );
+    builder.build_with_max_retries(DOWNLOAD_RETRY_COUNT)
+}
+
+enum AttemptError {
+    Fatal(Error),
+    Transient(Error),
+}
+
+async fn download_file(url: &Url, path: &Path) -> Result<(), AttemptError> {
     debug!("Downloading file: {url}");
     let response = DOWNLOAD_CLIENT
         .get(url.clone())
         .send()
         .await
-        .map_err(|e| anyhow!("Failed to download file: {e}"))?;
+        .map_err(|e| AttemptError::Transient(anyhow!("Failed to download file: {e}")))?;
+
     if !response.status().is_success() {
-        bail!("Failed to download file: {}", response.status());
+        let error = anyhow!("Failed to download file: {}", response.status());
+        return Err(match default_on_request_success(&response) {
+            Some(Retryable::Transient) => AttemptError::Transient(error),
+            _ => AttemptError::Fatal(error),
+        });
     }
-    let mut file = std::fs::File::create(path)
-        .map_err(|e| anyhow!("Failed to create file: {}, {}", path.display(), e))?;
+
     let content = response
         .bytes()
         .await
-        .map_err(|e| anyhow!("Failed to read response: {e}"))?;
-    std::io::copy(&mut content.as_ref(), &mut file)
-        .map_err(|e| anyhow!("Failed to write to file: {}, {}", path.display(), e))?;
+        .map_err(|e| AttemptError::Transient(anyhow!("Failed to read response: {e}")))?;
+    let mut file = std::fs::File::create(path).map_err(|e| {
+        AttemptError::Fatal(anyhow!("Failed to create file: {}, {}", path.display(), e))
+    })?;
+    std::io::copy(&mut content.as_ref(), &mut file).map_err(|e| {
+        AttemptError::Fatal(anyhow!(
+            "Failed to write to file: {}, {}",
+            path.display(),
+            e
+        ))
+    })?;
     Ok(())
 }
 
-/// Download a URL and verify its bytes against an expected SHA-256. Transient
-/// request failures are retried by the middleware on [`DOWNLOAD_CLIENT`]. A
-/// mismatch is not retried — the bytes arrived intact (a torn transfer fails
-/// earlier, on the body read), so it means the pin is wrong rather than the
-/// download. The partial file is removed and an error is returned.
-async fn download_and_verify(url: &Url, expected_sha256: &str, path: &Path) -> Result<()> {
+async fn download_and_verify_once(
+    url: &Url,
+    expected_sha256: &str,
+    path: &Path,
+) -> Result<(), AttemptError> {
     download_file(url, path).await?;
 
-    let actual = sha256::try_digest(path)
-        .with_context(|| format!("failed to compute sha256 of {}", path.display()))?;
+    let actual = sha256::try_digest(path).map_err(|e| {
+        AttemptError::Fatal(
+            anyhow!(e).context(format!("failed to compute sha256 of {}", path.display())),
+        )
+    })?;
 
     if actual != expected_sha256 {
         let _ = std::fs::remove_file(path);
-        bail!(
+        return Err(AttemptError::Fatal(anyhow!(
             "Hash mismatch for {url}: expected {expected_sha256}, got {actual}. The downloaded file has been deleted."
-        );
+        )));
     }
 
     debug!("Verified sha256 of {url}");
     Ok(())
+}
+
+async fn download_and_verify(url: &Url, expected_sha256: &str, path: &Path) -> Result<()> {
+    let policy = download_backoff();
+    let start = SystemTime::now();
+    let mut n_past_retries = 0;
+
+    loop {
+        let error = match download_and_verify_once(url, expected_sha256, path).await {
+            Ok(()) => return Ok(()),
+            Err(AttemptError::Fatal(error)) => return Err(error),
+            Err(AttemptError::Transient(error)) => error,
+        };
+
+        match policy.should_retry(start, n_past_retries) {
+            RetryDecision::Retry { execute_after } => {
+                let wait = execute_after
+                    .duration_since(SystemTime::now())
+                    .unwrap_or_default();
+                warn!("Downloading {url} failed: {error}. Retrying in {wait:?}.");
+                tokio::time::sleep(wait).await;
+                n_past_retries += 1;
+            }
+            RetryDecision::DoNotRetry => return Err(error),
+        }
+    }
 }
 
 /// Download a `PinnedBinary` and verify its bytes against its pinned SHA-256.
@@ -69,6 +135,11 @@ mod tests {
     enum ScriptedResponse {
         /// Respond 200 with the given body.
         Body(&'static [u8]),
+        /// Respond 200 with fewer bytes than declared by `Content-Length`.
+        TruncatedBody {
+            body: &'static [u8],
+            declared_length: usize,
+        },
         /// Respond with the given status code and an empty body.
         Status(u16),
         /// Close the connection without responding.
@@ -116,6 +187,16 @@ mod tests {
                         );
                         let _ = stream.write_all(body);
                     }
+                    ScriptedResponse::TruncatedBody {
+                        body,
+                        declared_length,
+                    } => {
+                        let _ = write!(
+                            stream,
+                            "HTTP/1.1 200 OK\r\nContent-Length: {declared_length}\r\nConnection: close\r\n\r\n"
+                        );
+                        let _ = stream.write_all(body);
+                    }
                     ScriptedResponse::Status(status) => {
                         let _ = write!(
                             stream,
@@ -144,6 +225,49 @@ mod tests {
 
         assert_eq!(std::fs::read(file.path()).unwrap(), GOOD_BODY);
         assert_eq!(request_count.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn recovers_from_truncated_body() {
+        let (url, request_count) = spawn_scripted_server(vec![
+            ScriptedResponse::TruncatedBody {
+                body: GOOD_BODY,
+                declared_length: GOOD_BODY.len() + 1,
+            },
+            ScriptedResponse::Body(GOOD_BODY),
+        ]);
+        let file = NamedTempFile::new().unwrap();
+
+        download_and_verify(&url, &sha256::digest(GOOD_BODY), file.path())
+            .await
+            .expect("download should recover from a truncated response body");
+
+        assert_eq!(std::fs::read(file.path()).unwrap(), GOOD_BODY);
+        assert_eq!(request_count.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn fails_after_exhausting_retries_on_truncated_bodies() {
+        let attempts = (DOWNLOAD_RETRY_COUNT + 1) as usize;
+        let (url, request_count) = spawn_scripted_server(
+            (0..attempts)
+                .map(|_| ScriptedResponse::TruncatedBody {
+                    body: GOOD_BODY,
+                    declared_length: GOOD_BODY.len() + 1,
+                })
+                .collect(),
+        );
+        let file = NamedTempFile::new().unwrap();
+
+        let error = download_and_verify(&url, &sha256::digest(GOOD_BODY), file.path())
+            .await
+            .expect_err("persistent truncated bodies should fail the download");
+
+        assert!(
+            error.to_string().contains("Failed to read response"),
+            "unexpected error: {error}"
+        );
+        assert_eq!(request_count.load(Ordering::SeqCst), attempts);
     }
 
     #[tokio::test]
