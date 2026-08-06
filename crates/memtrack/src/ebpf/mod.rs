@@ -7,4 +7,4 @@ mod spawn;
 mod tracker;
 
 pub use memtrack::{BpfVariant, MemtrackBpf, ResolvedSymbols, resolve_symbol_offsets};
-pub use tracker::Tracker;
+pub use tracker::{Tracker, TrackerOptions};
