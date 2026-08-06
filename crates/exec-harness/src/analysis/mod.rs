@@ -6,7 +6,6 @@ use crate::BenchmarkCommand;
 use crate::constants;
 use crate::uri;
 use instrument_hooks_bindings::InstrumentHooks;
-use std::path::PathBuf;
 use std::process::Command;
 
 mod ld_preload_check;
@@ -65,55 +64,8 @@ pub fn perform_with_valgrind(commands: Vec<BenchmarkCommand>) -> Result<()> {
 
         let status = child.wait().context("Failed to execute command")?;
 
-        bail_if_command_spawned_subprocesses_under_valgrind(child.id())?;
-
         if !status.success() {
             bail!("Command exited with non-zero status: {status}");
-        }
-    }
-
-    Ok(())
-}
-
-/// Checks if the benchmark process spawned subprocesses under valgrind by looking for <pid>.out
-/// files in the profile folder.
-///
-/// The presence of <pid>.out files where <pid> is greater than the benchmark process pid indicates
-/// that the benchmark process spawned subprocesses. This .out file will be almost empty, with a 0
-/// cost reported due to the disabled instrumentation.
-///
-/// We currently do not support measuring processes that spawn subprocesses under valgrind, because
-/// valgrind will not have its instrumentation in the new process.
-/// The LD_PRELOAD trick that we use to inject our instrumentation into the benchmark process only
-/// works for the first process.
-///
-/// TODO(COD-2163): Remove this once we support nested processes under valgrind
-fn bail_if_command_spawned_subprocesses_under_valgrind(pid: u32) -> Result<()> {
-    let Some(profile_folder) = std::env::var_os("CODSPEED_PROFILE_FOLDER") else {
-        debug!("CODSPEED_PROFILE_FOLDER is not set, skipping subprocess detection");
-        return Ok(());
-    };
-
-    let profile_folder = PathBuf::from(profile_folder);
-
-    // Bail if any <pid>.out where <pid> > pid of the benchmark process exists in the profile
-    // folder, which indicates that the benchmark process spawned subprocesses.
-    for entry in std::fs::read_dir(profile_folder)? {
-        let entry = entry?;
-        let file_name = entry.file_name();
-        let file_name = file_name.to_string_lossy();
-
-        if let Some(stripped) = file_name.strip_suffix(".out") {
-            if let Ok(subprocess_pid) = stripped.parse::<u32>() {
-                if subprocess_pid > pid {
-                    bail!(
-                        "The codspeed CLI in CPU Simulation mode does not support measuring processes that spawn other processes yet.\n\n\
-                         Please either:\n\
-                         - Use the walltime measurement mode, or\n\
-                         - Benchmark a process that does not create subprocesses"
-                    )
-                }
-            }
         }
     }
 

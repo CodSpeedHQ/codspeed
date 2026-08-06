@@ -95,6 +95,9 @@ pub struct OrchestratorConfig {
     pub cycle_estimation: bool,
     /// Signal the backend to exclude memory allocation time from simulation results.
     pub exclude_allocations: bool,
+    /// Inherit valgrind's instrumentation state across a traced exec, so the cost of
+    /// subprocesses spawned by a benchmark is measured too.
+    pub simulation_track_subprocess: bool,
 }
 
 /// Per-execution configuration passed to executors.
@@ -132,6 +135,9 @@ pub struct ExecutorConfig {
     pub cycle_estimation: bool,
     /// Signal the backend to exclude memory allocation time from simulation results.
     pub exclude_allocations: bool,
+    /// Inherit valgrind's instrumentation state across a traced exec, so the cost of
+    /// subprocesses spawned by a benchmark is measured too.
+    pub simulation_track_subprocess: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -203,6 +209,7 @@ impl OrchestratorConfig {
             fair_sched: self.fair_sched,
             cycle_estimation: self.cycle_estimation,
             exclude_allocations: self.exclude_allocations,
+            simulation_track_subprocess: self.simulation_track_subprocess,
         }
     }
 }
@@ -237,6 +244,7 @@ impl OrchestratorConfig {
             fair_sched: false,
             cycle_estimation: true,
             exclude_allocations: false,
+            simulation_track_subprocess: false,
         }
     }
 }
