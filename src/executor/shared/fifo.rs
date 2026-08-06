@@ -1,3 +1,4 @@
+use crate::executor::shared::proc_maps::{read_proc_maps, ProcMapping};
 use crate::prelude::*;
 use anyhow::Context;
 use futures::StreamExt;
@@ -7,7 +8,10 @@ use runner_shared::fifo::{RUNNER_ACK_FIFO, RUNNER_CTL_FIFO};
 use std::cmp::Ordering;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
-use std::{collections::HashSet, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    time::Duration,
+};
 use tokio::io::AsyncWriteExt;
 use tokio::net::unix::pid_t;
 use tokio::net::unix::pipe::Receiver as TokioPipeReader;
@@ -69,6 +73,11 @@ pub struct FifoBenchmarkData {
     /// Name and version of the integration
     pub integration: Option<(String, String)>,
     pub bench_pids: HashSet<pid_t>,
+    /// Executable file mappings snapshotted from `/proc/<pid>/maps` the first time
+    /// each benchmark pid announced itself over the FIFO (while it was still alive).
+    /// Backfills code mappings that perf's `MMAP2` records miss for processes that
+    /// exec()'d while sampling was disabled.
+    pub maps_by_pid: HashMap<pid_t, Vec<ProcMapping>>,
 }
 
 impl FifoBenchmarkData {
@@ -171,6 +180,7 @@ impl RunnerFifo {
     )> {
         let mut bench_order_by_timestamp = Vec::<(u64, String)>::new();
         let mut bench_pids = HashSet::<pid_t>::new();
+        let mut maps_by_pid = HashMap::<pid_t, Vec<ProcMapping>>::new();
         let mut markers = Vec::<MarkerType>::new();
 
         let mut integration = None;
@@ -207,7 +217,15 @@ impl RunnerFifo {
                 match &cmd {
                     FifoCommand::CurrentBenchmark { pid, uri } => {
                         bench_order_by_timestamp.push((get_current_time(), uri.to_string()));
-                        bench_pids.insert(*pid);
+                        // Snapshot the process's code mappings the first time we see it,
+                        // while it is still alive, to recover mappings perf drops for
+                        // processes that exec()'d while sampling was disabled.
+                        if bench_pids.insert(*pid) {
+                            let mappings = read_proc_maps(*pid);
+                            if !mappings.is_empty() {
+                                maps_by_pid.insert(*pid, mappings);
+                            }
+                        }
                         self.send_cmd(FifoCommand::Ack).await?;
                     }
                     FifoCommand::StartProfiler => {
@@ -278,6 +296,7 @@ impl RunnerFifo {
                     let fifo_data = FifoBenchmarkData {
                         integration,
                         bench_pids,
+                        maps_by_pid,
                     };
                     return Ok((marker_result, fifo_data, exit_status));
                 }
