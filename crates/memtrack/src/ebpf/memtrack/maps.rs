@@ -67,6 +67,50 @@ impl MemtrackBpf {
             "dropped_events",
         )
     }
+
+    pub fn ownership_maps(&self) -> Result<OwnershipMaps> {
+        let mm_owner = entries(with_skel!(self, skel => &skel.maps.mm_owner))?;
+        let pid_mm = entries(with_skel!(self, skel => &skel.maps.pid_mm))?;
+        Ok(OwnershipMaps {
+            mm_owner: mm_owner
+                .into_iter()
+                .map(|(mm, pid)| (mm, pid as u32))
+                .collect(),
+            pid_mm: pid_mm
+                .into_iter()
+                .map(|(pid, mm)| (pid as u32, mm))
+                .collect(),
+        })
+    }
+}
+
+/// Live ownership bindings: `mm_owner` (`mm_struct` pointer -> owning pid) and its
+/// inverse `pid_mm`, which foreign-actor rmap attribution validates against.
+pub struct OwnershipMaps {
+    pub mm_owner: Vec<(u64, u32)>,
+    pub pid_mm: Vec<(u32, u64)>,
+}
+
+/// Iteration is `BPF_MAP_GET_NEXT_KEY` followed by a separate lookup, so it is not
+/// atomic: a key deleted in between is skipped rather than reported.
+fn entries(map: &impl MapCore) -> Result<Vec<(u64, u64)>> {
+    let mut entries = Vec::new();
+    for key in map.keys() {
+        let value = map
+            .lookup(&key, libbpf_rs::MapFlags::ANY)
+            .context("Failed to read map entry")?;
+        if let Some(value) = value {
+            entries.push((le(&key), le(&value)));
+        }
+    }
+    Ok(entries)
+}
+
+fn le(bytes: &[u8]) -> u64 {
+    bytes
+        .iter()
+        .rev()
+        .fold(0, |acc, &b| acc << 8 | u64::from(b))
 }
 
 /// Read slot 0 of a single-entry `__u64` array map.

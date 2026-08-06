@@ -22,6 +22,8 @@ mod allocator;
 mod maps;
 mod tracking;
 
+pub use maps::OwnershipMaps;
+
 use crate::bpf_token::has_delegated_bpf_token;
 
 /// Which attach mechanism a loaded skeleton uses for its uprobes. See
