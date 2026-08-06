@@ -40,13 +40,18 @@ static __always_inline __u64* take_param(void* map) {
     return value;
 }
 
-#define SUBMIT_EVENT(evt_type, fill_data)                               \
+/* Submission is split into two classes:
+ *  - lifetime events (rss_stat, rmap, fork/exec/exit): emitted whenever the
+ *    pid is tracked, ignoring the enable toggle. The parser reconstructs
+ *    absolute per-process state from these, so it needs every event from
+ *    process birth — a delta stream that starts mid-life can never recover
+ *    the resident baseline faulted before enable.
+ *  - allocator events (malloc/free/mmap/...): high-volume and only meaningful
+ *    inside a measurement window, so they stay behind is_enabled().
+ */
+#define SUBMIT_EVENT_AS(owner_pid, evt_type, fill_data)                 \
     {                                                                   \
         struct task_ids ids = current_task_ids();                       \
-                                                                        \
-        if (!is_tracked(ids.tgid) || !is_enabled()) {                   \
-            return 0;                                                   \
-        }                                                               \
                                                                         \
         struct event* e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);  \
         if (!e) {                                                       \
@@ -59,7 +64,7 @@ static __always_inline __u64* take_param(void* map) {
         }                                                               \
                                                                         \
         e->header.timestamp = bpf_ktime_get_ns();                       \
-        e->header.pid = ids.tgid;                                       \
+        e->header.pid = owner_pid;                                      \
         e->header.tid = ids.tid;                                        \
         e->header.event_type = evt_type;                                \
                                                                         \
@@ -69,33 +74,47 @@ static __always_inline __u64* take_param(void* map) {
         return 0;                                                       \
     }
 
+#define SUBMIT_GATED_EVENT(evt_type, fill_data)           \
+    {                                                     \
+        if (!is_enabled()) {                              \
+            return 0;                                     \
+        }                                                 \
+                                                          \
+        struct task_ids owner = current_task_ids();       \
+        if (!is_tracked(owner.tgid)) {                    \
+            return 0;                                     \
+        }                                                 \
+                                                          \
+        SUBMIT_EVENT_AS(owner.tgid, evt_type, fill_data); \
+    }
+
 static __always_inline int submit_alloc_event(__u64 size, __u64 addr) {
-    SUBMIT_EVENT(EVENT_TYPE_MALLOC, {
+    SUBMIT_GATED_EVENT(EVENT_TYPE_MALLOC, {
         e->data.alloc.addr = addr;
         e->data.alloc.size = size;
     });
 }
 
 static __always_inline int submit_aligned_alloc_event(__u64 size, __u64 addr) {
-    SUBMIT_EVENT(EVENT_TYPE_ALIGNED_ALLOC, {
+    SUBMIT_GATED_EVENT(EVENT_TYPE_ALIGNED_ALLOC, {
         e->data.alloc.addr = addr;
         e->data.alloc.size = size;
     });
 }
 
 static __always_inline int submit_calloc_event(__u64 size, __u64 addr) {
-    SUBMIT_EVENT(EVENT_TYPE_CALLOC, {
+    SUBMIT_GATED_EVENT(EVENT_TYPE_CALLOC, {
         e->data.alloc.addr = addr;
         e->data.alloc.size = size;
     });
 }
 
 static __always_inline int submit_free_event(__u64 addr) {
-    SUBMIT_EVENT(EVENT_TYPE_FREE, { e->data.free.addr = addr; });
+    SUBMIT_GATED_EVENT(EVENT_TYPE_FREE, { e->data.free.addr = addr; });
 }
 
 static __always_inline int submit_realloc_event(__u64 old_addr, __u64 new_addr, __u64 size) {
-    SUBMIT_EVENT(EVENT_TYPE_REALLOC, {
+    SUBMIT_GATED_EVENT(EVENT_TYPE_REALLOC, {
         e->data.realloc.old_addr = old_addr;
         e->data.realloc.new_addr = new_addr;
         e->data.realloc.size = size;
@@ -103,7 +122,7 @@ static __always_inline int submit_realloc_event(__u64 old_addr, __u64 new_addr, 
 }
 
 static __always_inline int submit_mmap_event(__u64 addr, __u64 size, __u8 event_type) {
-    SUBMIT_EVENT(event_type, {
+    SUBMIT_GATED_EVENT(event_type, {
         e->data.mmap.addr = addr;
         e->data.mmap.size = size;
     });

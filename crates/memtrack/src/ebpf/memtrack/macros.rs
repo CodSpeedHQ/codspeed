@@ -145,3 +145,20 @@ macro_rules! attach_tracepoint {
         }
     };
 }
+
+/// Invokes `$cb!(<name>)` once per folio rmap fentry target. `<name>` is the
+/// kernel function base name; the BPF program is `fentry_<name>`, so a callback
+/// builds the program/method idents from `<name>` with `paste!`.
+macro_rules! for_each_rmap_prog {
+    ($cb:ident) => {
+        $cb!(folio_add_new_anon_rmap);
+        $cb!(folio_add_anon_rmap_ptes);
+        $cb!(folio_add_anon_rmap_pmd);
+        $cb!(folio_add_file_rmap_ptes);
+        $cb!(folio_add_file_rmap_pmd);
+        $cb!(folio_add_file_rmap_pud);
+        $cb!(folio_remove_rmap_ptes);
+        $cb!(folio_remove_rmap_pmd);
+        $cb!(folio_remove_rmap_pud);
+    };
+}

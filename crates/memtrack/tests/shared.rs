@@ -6,7 +6,7 @@ use runner_shared::artifacts::{MemtrackEvent as Event, MemtrackEventKind};
 use std::path::Path;
 use std::process::Command;
 
-type TrackResult = anyhow::Result<(Vec<Event>, std::thread::JoinHandle<()>)>;
+pub type TrackResult = anyhow::Result<(Vec<Event>, std::thread::JoinHandle<()>)>;
 
 /// Snapshot every tracked event, ordered by timestamp and deduplicated by
 /// `(addr, kind)` so repeated tracking of one allocation counts once.
@@ -18,10 +18,22 @@ type TrackResult = anyhow::Result<(Vec<Event>, std::thread::JoinHandle<()>)>;
 macro_rules! assert_events_snapshot {
     ($name:expr, $events:expr) => {{
         use itertools::Itertools;
+        use runner_shared::artifacts::MemtrackEventKind;
         use std::mem::discriminant;
 
         let formatted_events: Vec<String> = $events
             .iter()
+            .filter(|e| {
+                // Allocation snapshots track only allocator events; RSS and
+                // process-lifecycle events are asserted by dedicated tests.
+                !matches!(
+                    e.kind,
+                    MemtrackEventKind::Rss { .. }
+                        | MemtrackEventKind::Fork { .. }
+                        | MemtrackEventKind::Exec
+                        | MemtrackEventKind::Exit
+                )
+            })
             .sorted_by_key(|e| e.timestamp)
             .dedup_by(|a, b| a.addr == b.addr && discriminant(&a.kind) == discriminant(&b.kind))
             .map(|e| shared::describe_kind(&e.kind))
@@ -97,6 +109,10 @@ pub fn between_markers(events: &[Event]) -> Vec<Event> {
 
     events
         .iter()
+        // Drop Rss before slicing: the marker window's skip(2) is positional
+        // (it drops [marker-malloc, marker-free]), so a stray rss_stat event
+        // sorting between the pair would displace it and leak the marker free.
+        .filter(|e| !matches!(e.kind, MemtrackEventKind::Rss { .. }))
         .sorted_by_key(|e| e.timestamp)
         .dedup_by(|a, b| a.addr == b.addr && discriminant(&a.kind) == discriminant(&b.kind))
         .skip_while(|e| !is_marker(e))
@@ -147,6 +163,27 @@ pub fn track_binary(binary: &Path) -> TrackResult {
     track_command(Command::new(binary))
 }
 
+pub fn compile_c_source(
+    source_code: &str,
+    name: &str,
+    output_dir: &Path,
+) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
+    let source_path = output_dir.join(format!("{name}.c"));
+    let binary_path = output_dir.join(name);
+    std::fs::write(&source_path, source_code)?;
+
+    let output = Command::new("gcc")
+        .args(["-O0", "-o", binary_path.to_str().unwrap()])
+        .arg(&source_path)
+        .output()?;
+    if !output.status.success() {
+        error!("gcc stderr: {}", String::from_utf8_lossy(&output.stderr));
+        return Err("Failed to compile C fixture".into());
+    }
+
+    Ok(binary_path)
+}
+
 /// Track a command, collecting all memory events. No allocators are pre-attached:
 /// the exec-mapping watcher discovers them as the tracked tree maps executables.
 pub fn track_command(command: Command) -> TrackResult {
@@ -158,6 +195,11 @@ pub fn track_command_with_variant(command: Command, variant: BpfVariant) -> Trac
     track_command_with_tracker(command, Tracker::with_variant(variant)?)
 }
 
+/// Track a command with folio rmap hooks enabled, reconstructing per-process RSS.
+pub fn track_command_with_rmap(command: Command) -> TrackResult {
+    track_command_with_tracker(command, Tracker::new_without_allocators_with_rmap(true)?)
+}
+
 /// How many events of each kind-and-size a run saw. Addresses, timestamps, pids
 /// and event order all differ legitimately between runs of the same workload, so
 /// none of them can be compared across variants.
@@ -166,6 +208,19 @@ type EventProfile = std::collections::BTreeMap<String, usize>;
 fn event_profile(events: &[Event]) -> EventProfile {
     let mut profile = EventProfile::new();
     for event in events {
+        // Only allocator events are comparable: the variants differ solely in
+        // how uprobes attach, while RSS and lifecycle events carry per-run
+        // values (resident sizes, pids) that legitimately differ.
+        if !matches!(
+            event.kind,
+            MemtrackEventKind::Malloc { .. }
+                | MemtrackEventKind::Free
+                | MemtrackEventKind::Calloc { .. }
+                | MemtrackEventKind::Realloc { .. }
+                | MemtrackEventKind::AlignedAlloc { .. }
+        ) {
+            continue;
+        }
         *profile.entry(describe_kind(&event.kind)).or_default() += 1;
     }
     profile

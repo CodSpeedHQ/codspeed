@@ -95,8 +95,9 @@ fn track_command(
             }
         }))
     } else {
-        // Without IPC, nothing toggles the tracking_enabled map, so events would
-        // be dropped by the eBPF is_enabled() check. Enable it up front.
+        // Without IPC, nothing toggles the tracking_enabled map, so allocator
+        // events would be dropped by the eBPF is_enabled() check. Enable it up
+        // front.
         tracker.enable_tracking()?;
         None
     };
@@ -135,8 +136,8 @@ fn track_command(
     let status = session.wait().context("Failed to wait for command")?;
     debug!("Command exited with status: {status}");
 
-    // Stop event production before draining: the child has exited, so anything
-    // still arriving is already in the ring buffer.
+    // Stop allocator-event production before draining: the child has exited,
+    // so anything still arriving is already in the ring buffer.
     if let Err(e) = tracker.disable_tracking() {
         warn!("Failed to disable tracking: {e:#}");
     }

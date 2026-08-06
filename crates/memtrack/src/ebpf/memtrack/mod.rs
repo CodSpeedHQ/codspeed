@@ -1,8 +1,9 @@
 use crate::prelude::*;
-use libbpf_rs::Link;
 use libbpf_rs::skel::OpenSkel;
 use libbpf_rs::skel::SkelBuilder;
+use libbpf_rs::{AsRawLibbpf, Link};
 use std::collections::HashMap;
+use std::ffi::CString;
 use std::mem::MaybeUninit;
 use std::path::Path;
 
@@ -94,6 +95,27 @@ fn symbol_file_offset<'a>(
     Some((address - section.address() + sh_offset) as usize)
 }
 
+fn page_shift() -> Result<u32> {
+    let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+    ensure!(page_size > 0, "Failed to read system page size");
+    Ok((page_size as u32).trailing_zeros())
+}
+
+fn kernel_func_exists(btf: &libbpf_rs::btf::Btf, name: &str) -> bool {
+    let Ok(name) = CString::new(name) else {
+        return false;
+    };
+
+    let id = unsafe {
+        libbpf_rs::libbpf_sys::btf__find_by_name_kind(
+            btf.as_libbpf_object().as_ptr(),
+            name.as_ptr(),
+            libbpf_rs::libbpf_sys::BTF_KIND_FUNC,
+        )
+    };
+    id >= 0
+}
+
 /// Attach targets resolved from a library's symbol tables.
 pub struct ResolvedSymbols {
     offsets: HashMap<String, usize>,
@@ -108,38 +130,91 @@ impl ResolvedSymbols {
 pub struct MemtrackBpf {
     pub(super) skel: Skel,
     pub(super) probes: Vec<Link>,
+    track_rmap: bool,
+    btf_disabled_rmap_targets: Vec<&'static str>,
 }
 
 impl MemtrackBpf {
     /// Load the skeleton, picking the variant a BPF token is available for.
-    pub fn new() -> Result<Self> {
+    pub fn new_with_rmap(track_rmap: bool) -> Result<Self> {
         let variant = if has_delegated_bpf_token() {
             BpfVariant::Token
         } else {
             BpfVariant::Legacy
         };
-        Self::with_variant(variant)
+        Self::with_variant(variant, track_rmap)
     }
 
-    /// Load a specific variant rather than the one [`Self::new`] would detect.
-    /// Either attaches given host privileges; the token only matters when
-    /// `bpf()` is called from an unprivileged user namespace.
-    pub fn with_variant(variant: BpfVariant) -> Result<Self> {
-        // Both variants expose `rodata_data` under the same field names, but as
-        // distinct generated types, so this can't be a function over the two.
+    /// Load a specific variant rather than the one [`Self::new_with_rmap`]
+    /// would detect. Either attaches given host privileges; the token only
+    /// matters when `bpf()` is called from an unprivileged user namespace.
+    pub fn with_variant(variant: BpfVariant, track_rmap: bool) -> Result<Self> {
+        let page_shift = page_shift()?;
+        let mut btf_disabled_rmap_targets = Vec::new();
+        // Only the rmap targets are probed against BTF, so skip the vmlinux
+        // load entirely when they are not going to be attached.
+        let btf = if track_rmap {
+            Some(libbpf_rs::btf::Btf::from_vmlinux().context("Failed to load vmlinux BTF")?)
+        } else {
+            None
+        };
+
+        // Both variants expose `rodata_data` and `progs` under the same field
+        // names, but as distinct generated types, so this can't be a function
+        // over the two.
         macro_rules! open_and_load {
             ($builder:expr, $skel:path) => {{
                 let open_object = Box::leak(Box::new(MaybeUninit::uninit()));
                 let mut open_skel = $builder
                     .open(open_object)
                     .context("Failed to open memtrack BPF skeleton")?;
-                if let (Some((dev, ino)), Some(rodata)) = (
-                    current_pidns_ids(),
-                    open_skel.maps.rodata_data.as_deref_mut(),
-                ) {
-                    rodata.target_pidns_dev = dev;
-                    rodata.target_pidns_ino = ino;
+
+                {
+                    let rodata = open_skel
+                        .maps
+                        .rodata_data
+                        .as_deref_mut()
+                        .context("rodata map missing")?;
+                    rodata.page_shift = page_shift;
+                    if let Some((dev, ino)) = current_pidns_ids() {
+                        rodata.target_pidns_dev = dev;
+                        rodata.target_pidns_ino = ino;
+                    }
                 }
+
+                // Autoload is decided before load(), so an fentry whose target
+                // the kernel lacks has to be turned off here or the whole
+                // skeleton fails to load.
+                match &btf {
+                    None => {
+                        macro_rules! disable_rmap_prog {
+                            ($name:ident) => {
+                                paste::paste! {
+                                    open_skel.progs.[<fentry_ $name>].set_autoload(false);
+                                }
+                            };
+                        }
+                        for_each_rmap_prog!(disable_rmap_prog);
+                    }
+                    Some(btf) => {
+                        macro_rules! disable_missing_kernel_func {
+                            ($name:ident) => {
+                                paste::paste! {
+                                    if !kernel_func_exists(btf, stringify!($name)) {
+                                        open_skel.progs.[<fentry_ $name>].set_autoload(false);
+                                        btf_disabled_rmap_targets.push(stringify!($name));
+                                        warn!(
+                                            "Kernel function {} not present in BTF, disabling rmap fentry",
+                                            stringify!($name)
+                                        );
+                                    }
+                                }
+                            };
+                        }
+                        for_each_rmap_prog!(disable_missing_kernel_func);
+                    }
+                }
+
                 $skel(Box::new(
                     open_skel
                         .load()
@@ -160,6 +235,8 @@ impl MemtrackBpf {
         Ok(Self {
             skel,
             probes: Vec::new(),
+            track_rmap,
+            btf_disabled_rmap_targets,
         })
     }
 
