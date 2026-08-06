@@ -5,6 +5,19 @@
 
 
 
+## [5.0.2] - 2026-08-06
+
+### <!-- 1 -->🐛 Bug Fixes
+- Retry complete pinned binary downloads (#499) by @art049 in [#499](https://github.com/CodSpeedHQ/runner/pull/499)
+- Accept --exclude-allocations and --cycle-estimation without a value by @not-matthias
+
+### <!-- 3 -->📚 Documentation
+- Drop stale "defaults to true" wording for allocation exclusion by @not-matthias
+
+### <!-- 6 -->🧪 Testing
+- Align exclude_allocations fixtures with the real default by @not-matthias in [#490](https://github.com/CodSpeedHQ/runner/pull/490)
+
+
 ## [5.0.1] - 2026-07-29
 
 ### <!-- 1 -->🐛 Bug Fixes
@@ -1442,6 +1455,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[5.0.2]: https://github.com/CodSpeedHQ/runner/compare/v5.0.1..v5.0.2
 [5.0.1]: https://github.com/CodSpeedHQ/runner/compare/v5.0.0..v5.0.1
 [5.0.0]: https://github.com/CodSpeedHQ/runner/compare/v4.19.1..v5.0.0
 [4.19.1]: https://github.com/CodSpeedHQ/runner/compare/v4.19.0..v4.19.1
