@@ -223,7 +223,7 @@ jobs:
       - run: pip install -r requirements.txt
 
       # Run benchmarks with CodSpeed
-      - uses: CodSpeedHQ/action@v4
+      - uses: CodSpeedHQ/action@v5
         with:
           mode: instrumentation
           run: pytest tests/ --codspeed
