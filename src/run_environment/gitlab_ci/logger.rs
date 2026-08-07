@@ -112,7 +112,14 @@ impl Log for GitLabCILogger {
         }
 
         if let Some(announcement) = get_announcement_event(record) {
-            println!("{}", style(announcement).green());
+            match announcement.title {
+                Some(title) => println!(
+                    "{}: {}",
+                    style(title).bold().green(),
+                    style(announcement.message).green()
+                ),
+                None => println!("{}", style(announcement.message).green()),
+            }
             return;
         }
 
