@@ -18,8 +18,8 @@ mod tests {
     use crate::executor::ExecutorName;
     use crate::instruments::InstrumentName;
     use crate::run_environment::{
-        GhData, LocalData, RepositoryProvider, RunEnvironment, RunEnvironmentMetadata, RunEvent,
-        RunPart, Sender,
+        LocalData, RepositoryProvider, RunEnvironment, RunEnvironmentMetadata, RunEvent, RunPart,
+        Sender,
     };
     use crate::system::SystemInfo;
     use crate::upload::{LATEST_UPLOAD_METADATA_VERSION, Runner, UploadMetadata};
@@ -50,15 +50,10 @@ mod tests {
                 owner: "CodSpeedHQ".into(),
                 repository: "codspeed-node".into(),
                 event: RunEvent::PullRequest,
-                gh_data: Some(GhData {
-                    run_id: "7044765741".into(),
-                    job: "codspeed".into(),
-                }),
                 sender: Some(Sender {
                     id: "19605940".into(),
                     login: "adriencaccia".into(),
                 }),
-                gl_data: None,
                 local_data: None,
                 repository_root_path: "/home/runner/work/codspeed-node/codspeed-node/".into(),
             },
@@ -78,7 +73,7 @@ mod tests {
             hash,
             // Caution: when changing this value, we need to ensure that
             // the related backend snapshot remains the same
-            @"0afc09ee58a610d400aa6b3fbdddf628608ed2e11aed39585a50abe96e1c9284"
+            @"b6e221583869b0a49498d71538432a5396b08fec7783081dcdf23c9e037a9365"
         );
         assert_json_snapshot!(upload_metadata);
     }
@@ -130,9 +125,7 @@ mod tests {
                 owner: "GuillaumeLagrange".into(),
                 repository: "local-runs".into(),
                 event: RunEvent::Local,
-                gh_data: None,
                 sender: None,
-                gl_data: None,
                 local_data: Some(LocalData {
                     expected_run_parts_count: 1,
                 }),
@@ -151,7 +144,7 @@ mod tests {
             hash,
             // Caution: when changing this value, we need to ensure that
             // the related backend snapshot remains the same
-            @"26c83ef306f189fe5b725043577dbc09a204bbd1c973dd7d1e974ff88235dd84"
+            @"5c960260ea5b5ceaafa20ea220e566743e20b65106d0fd672a844a63bba3835a"
         );
         assert_json_snapshot!(upload_metadata);
     }

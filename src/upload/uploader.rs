@@ -155,6 +155,9 @@ async fn retrieve_upload_data(
                         RunEnvironment::GitlabCi => {
                             "Check that the CI job is correctly authenticated. View more at https://codspeed.io/docs/integrations/ci/gitlab-ci/configuration#authentication"
                         }
+                        RunEnvironment::Circleci => {
+                            "Check that the CI job is correctly authenticated. View more at https://codspeed.io/docs/integrations/ci/circleci/configuration#authentication"
+                        }
                         RunEnvironment::Buildkite => {
                             "Check that CODSPEED_TOKEN is set and has the correct value"
                         }

@@ -1,0 +1,13 @@
+---
+source: src/run_environment/circleci/provider.rs
+expression: run_part
+---
+{
+  "runId": "8d8f0b2a-1f3e-4b6a-9c2d-0f1e2a3b4c5d",
+  "runPartId": "benchmarks-0",
+  "jobName": "benchmarks",
+  "metadata": {
+    "node-index": 0,
+    "node-total": 1
+  }
+}

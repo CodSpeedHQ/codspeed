@@ -13,11 +13,6 @@ expression: run_environment_metadata
     "id": "19605940",
     "login": "adriencaccia"
   },
-  "ghData": {
-    "runId": "6957110437",
-    "job": "log-env"
-  },
-  "glData": null,
   "localData": null,
   "repositoryRootPath": "/home/runner/work/adrien-python-test/adrien-python-test/"
 }
