@@ -86,7 +86,6 @@ pub fn wrap_with_sudo(mut cmd_builder: CommandBuilder) -> Result<CommandBuilder>
     if is_root_user() {
         Ok(cmd_builder)
     } else if is_sudo_available() {
-        debug!("Wrapping with sudo: {}", cmd_builder.as_command_line());
         validate_sudo_access()?;
         cmd_builder.wrap(
             "sudo",

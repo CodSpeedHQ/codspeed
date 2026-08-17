@@ -4,7 +4,11 @@ use crate::system::{SupportedOs, SystemInfo};
 use std::path::Path;
 use std::process::Command;
 
-const METADATA_FILENAME: &str = "./tmp/codspeed-cache-metadata.txt";
+/// Path of the cache metadata file, relative to the cache directory.
+///
+/// Lives under `tmp/` because restoring the cache copies the whole directory
+/// onto `/`, so every entry has to be a path that makes sense at the root.
+const METADATA_FILENAME: &str = "tmp/codspeed-cache-metadata.txt";
 
 pub fn is_system_compatible(system_info: &SystemInfo) -> bool {
     matches!(system_info.os, SupportedOs::Linux(ref distro) if distro.is_supported())
