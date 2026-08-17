@@ -4,7 +4,7 @@ pub mod rolling_buffer;
 use std::{
     env,
     sync::{Arc, Mutex},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use crate::prelude::*;
@@ -30,19 +30,37 @@ pub static SPINNER: LazyLock<Arc<Mutex<Option<ProgressBar>>>> =
     LazyLock::new(|| Arc::new(Mutex::new(None)));
 pub static IS_TTY: LazyLock<bool> =
     LazyLock::new(|| std::io::IsTerminal::is_terminal(&std::io::stdout()));
-static CURRENT_GROUP_NAME: LazyLock<Arc<Mutex<Option<String>>>> =
+static CURRENT_GROUP: LazyLock<Arc<Mutex<Option<ActiveGroup>>>> =
     LazyLock::new(|| Arc::new(Mutex::new(None)));
+
+/// The group currently being rendered.
+///
+/// `started_at` is tracked here rather than read back from the spinner's
+/// `elapsed()`: a group may have no spinner at all (non-TTY output), or have had
+/// it taken over by the rolling buffer, and its closing line still needs the
+/// right duration.
+struct ActiveGroup {
+    name: String,
+    started_at: Instant,
+    /// Opened groups render as a bare header: no spinner, no closing line.
+    opened: bool,
+}
 
 /// Log records deferred while the rolling buffer owns the terminal.
 /// Flushed in `draw_frame` before each redraw.
 static DEFERRED_LOGS: LazyLock<Mutex<Vec<DeferredLog>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 
-/// A snapshot of a log record that can be stored across the rolling-buffer
-/// lifetime (the original `log::Record` borrows data and cannot be kept).
-struct DeferredLog {
-    level: log::Level,
-    message: String,
-    target: String,
+/// Output deferred while the rolling buffer owns the terminal (the original
+/// `log::Record` borrows data and cannot be kept).
+enum DeferredLog {
+    /// A log record, formatted at flush time.
+    Record {
+        level: log::Level,
+        message: String,
+        target: String,
+    },
+    /// An already-formatted line, such as a group header or closing line.
+    Line(String),
 }
 
 /// Hide the progress bar temporarily, execute `f`, then redraw the progress bar.
@@ -94,42 +112,28 @@ impl Log for LocalLogger {
                     let opened = matches!(group_event, GroupEvent::StartOpened(_));
                     let name = name.clone();
 
-                    let header = format_group_header(&name);
-                    eprintln!();
-                    eprintln!("{header}");
-                    eprintln!();
+                    // A group left open by a missing `end_group!` would otherwise
+                    // keep its spinner ticking under this group's header.
+                    close_current_group();
+
+                    write_group_line("");
+                    write_group_line(&format_group_header(&name));
+                    write_group_line("");
+
+                    if let Ok(mut current) = CURRENT_GROUP.lock() {
+                        *current = Some(ActiveGroup {
+                            name: name.clone(),
+                            started_at: Instant::now(),
+                            opened,
+                        });
+                    }
 
                     // Opened groups don't get a spinner or closing checkmark
                     if !opened {
-                        // Store current group name for completion message
-                        if let Ok(mut current) = CURRENT_GROUP_NAME.lock() {
-                            *current = Some(name.clone());
-                        }
-
-                        install_spinner(&name);
+                        install_group_spinner(&name);
                     }
                 }
-                GroupEvent::End => {
-                    if *IS_TTY {
-                        let mut spinner = SPINNER.lock().unwrap();
-                        if let Some(pb) = spinner.as_mut() {
-                            let elapsed = pb.elapsed();
-                            pb.finish_and_clear();
-
-                            // Show completion message with checkmark
-                            if let Ok(mut current) = CURRENT_GROUP_NAME.lock() {
-                                if let Some(name) = current.take() {
-                                    let elapsed_str = format_elapsed(elapsed);
-                                    eprintln!(
-                                        "{} {}",
-                                        format_checkmark(&name, true),
-                                        style(elapsed_str).dim(),
-                                    );
-                                }
-                            }
-                        }
-                    }
-                }
+                GroupEvent::End => close_current_group(),
             }
 
             return;
@@ -148,7 +152,7 @@ impl Log for LocalLogger {
             if let Ok(guard) = ROLLING_BUFFER.try_lock() {
                 if guard.as_ref().is_some_and(|rb| rb.is_active()) {
                     if let Ok(mut deferred) = DEFERRED_LOGS.try_lock() {
-                        deferred.push(DeferredLog {
+                        deferred.push(DeferredLog::Record {
                             level: record.level(),
                             message: format!("{}", record.args()),
                             target: record.target().to_string(),
@@ -165,6 +169,62 @@ impl Log for LocalLogger {
     fn flush(&self) {
         std::io::stdout().flush().unwrap();
     }
+}
+
+/// Write a structural group line (blank separator, header or closing line).
+///
+/// Group lines go through the same path as log records: deferred while the
+/// rolling buffer owns the terminal, otherwise written with the spinner
+/// suspended. Writing them directly would drop them into the region another
+/// renderer is redrawing.
+fn write_group_line(line: &str) {
+    {
+        use rolling_buffer::ROLLING_BUFFER;
+        if let Ok(guard) = ROLLING_BUFFER.try_lock() {
+            if guard.as_ref().is_some_and(|rb| rb.is_active()) {
+                if let Ok(mut deferred) = DEFERRED_LOGS.try_lock() {
+                    deferred.push(DeferredLog::Line(line.to_string()));
+                    return;
+                }
+            }
+        }
+    }
+
+    suspend_progress_bar(|| eprintln!("{line}"));
+}
+
+/// Close the group currently being rendered, if any: clear its spinner and print
+/// the closing line with the elapsed time.
+///
+/// Runs whether or not the output is a TTY, and whether or not a spinner is
+/// still installed, so a group always gets a visible end.
+fn close_current_group() {
+    // Take the spinner out of the slot rather than just finishing it: a finished
+    // `ProgressBar` left behind is still suspended and redrawn by every
+    // subsequent log record, clearing lines it no longer owns.
+    if let Ok(mut spinner) = SPINNER.lock() {
+        if let Some(pb) = spinner.take() {
+            pb.finish_and_clear();
+        }
+    }
+
+    let group = match CURRENT_GROUP.lock() {
+        Ok(mut current) => current.take(),
+        Err(_) => return,
+    };
+    let Some(group) = group else {
+        return;
+    };
+    if group.opened {
+        return;
+    }
+
+    let elapsed = format_elapsed(group.started_at.elapsed());
+    write_group_line(&format!(
+        "{} {}",
+        format_checkmark(&group.name, true),
+        style(elapsed).dim(),
+    ));
 }
 
 /// Format a group header with styled prefix
@@ -284,7 +344,14 @@ pub(crate) fn flush_deferred_logs(term: &console::Term) {
         term.clear_to_end_of_screen().ok();
     }
     for log in &logs {
-        let formatted = format_log(log.level, &log.message, &log.target);
+        let formatted = match log {
+            DeferredLog::Record {
+                level,
+                message,
+                target,
+            } => format_log(*level, message, target),
+            DeferredLog::Line(line) => line.clone(),
+        };
         term.write_line(&formatted).ok();
     }
 }
@@ -335,13 +402,33 @@ fn create_spinner(message: &str) -> ProgressBar {
 }
 
 /// Install a spinner into the global slot so log records suspend it.
+///
+/// On non-TTY output there is nothing to animate, so the message is printed once
+/// instead.
 fn install_spinner(message: &str) {
-    if *IS_TTY {
-        let spinner = create_spinner(message);
-        SPINNER.lock().unwrap().replace(spinner);
-    } else {
-        eprintln!("{message}...");
+    if install_spinner_if_tty(message) {
+        return;
     }
+    eprintln!("{message}...");
+}
+
+/// Install a group's spinner. Unlike [`install_spinner`], nothing is printed on
+/// non-TTY output: the group header already announced the name, and the closing
+/// line reports it again with the elapsed time.
+fn install_group_spinner(message: &str) {
+    install_spinner_if_tty(message);
+}
+
+/// Install a spinner if the output is a TTY. Returns whether one was installed.
+fn install_spinner_if_tty(message: &str) -> bool {
+    if !*IS_TTY {
+        return false;
+    }
+    let spinner = create_spinner(message);
+    if let Ok(mut slot) = SPINNER.lock() {
+        slot.replace(spinner);
+    }
+    true
 }
 
 /// Start a standalone spinner with a message (no group header or checkmark).
