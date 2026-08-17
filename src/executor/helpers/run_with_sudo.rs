@@ -1,4 +1,4 @@
-use crate::executor::helpers::command::CommandBuilder;
+use crate::executor::helpers::command::{CommandBuilder, as_command_line};
 use crate::{local_logger::suspend_progress_bar, prelude::*};
 use std::{
     ffi::OsStr,
@@ -116,15 +116,16 @@ where
     builder.args(argv);
     debug!("Running command with sudo: {}", builder.as_command_line());
     let mut cmd = wrap_with_sudo(builder)?.build();
+    let command_line = as_command_line(&cmd);
     let output = cmd
         .stdout(Stdio::piped())
         .output()
-        .map_err(|_| anyhow!("Failed to execute command with sudo: {cmd:?}"))?;
+        .map_err(|_| anyhow!("Failed to execute command with sudo: {command_line}"))?;
 
     if !output.status.success() {
         info!("stdout: {}", String::from_utf8_lossy(&output.stdout));
         error!("stderr: {}", String::from_utf8_lossy(&output.stderr));
-        bail!("Failed to execute command with sudo: {cmd:?}");
+        bail!("Failed to execute command with sudo: {command_line}");
     }
 
     Ok(())
