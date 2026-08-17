@@ -28,8 +28,15 @@ pub(crate) const TICK_INTERVAL_MS: u64 = 300;
 
 pub static SPINNER: LazyLock<Arc<Mutex<Option<ProgressBar>>>> =
     LazyLock::new(|| Arc::new(Mutex::new(None)));
+/// Whether the console output is a terminal.
+///
+/// Probes stderr, not stdout: everything that consults this flag renders to
+/// stderr (the spinner, the rolling buffer, log records) or reads from it (the
+/// samply install prompt). Probing stdout picks the wrong branch whenever only
+/// one of the two streams is redirected, which is how cursor-based frames end up
+/// baked into a redirected CI transcript.
 pub static IS_TTY: LazyLock<bool> =
-    LazyLock::new(|| std::io::IsTerminal::is_terminal(&std::io::stdout()));
+    LazyLock::new(|| std::io::IsTerminal::is_terminal(&std::io::stderr()));
 static CURRENT_GROUP: LazyLock<Arc<Mutex<Option<ActiveGroup>>>> =
     LazyLock::new(|| Arc::new(Mutex::new(None)));
 
