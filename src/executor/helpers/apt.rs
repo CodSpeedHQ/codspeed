@@ -45,6 +45,12 @@ impl CacheManifest {
         Self { packages }
     }
 
+    /// Take in the packages of `other`, which win on conflict. A cache directory holds the files
+    /// of every tool installed into it, so its manifest has to describe all of them.
+    fn merge(&mut self, other: Self) {
+        self.packages.extend(other.packages);
+    }
+
     fn serialize(&self) -> String {
         self.packages
             .iter()
@@ -329,7 +335,9 @@ fn save_to_cache(system_info: &SystemInfo, cache_dir: &Path, packages: &[&str]) 
 
     // Create metadata file containing the cached packages and their versions
     let metadata_path = cache_dir.join(METADATA_FILENAME);
-    let metadata_content = CacheManifest::of_installed_packages(packages).serialize();
+    let mut manifest = read_manifest(system_info, cache_dir).unwrap_or_default();
+    manifest.merge(CacheManifest::of_installed_packages(packages));
+    let metadata_content = manifest.serialize();
     if let Ok(()) = std::fs::create_dir_all(metadata_path.parent().unwrap()) {
         if let Ok(()) = std::fs::write(&metadata_path, metadata_content)
             .context("Failed to write metadata file")
