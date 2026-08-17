@@ -147,7 +147,12 @@ impl Log for LocalLogger {
         }
 
         if let Some(JsonEvent(json_string)) = get_json_event(record) {
-            println!("{json_string}");
+            // Suspend the spinner so the write doesn't land in the line it is
+            // redrawing. Unlike records and group lines this is *not* deferred
+            // while the rolling buffer is active: deferred output is flushed
+            // through the buffer's stderr terminal, which would move
+            // machine-readable JSON off stdout.
+            suspend_progress_bar(|| println!("{json_string}"));
             return;
         }
 
