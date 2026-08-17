@@ -1,0 +1,5 @@
+---
+source: src/local_logger/tests.rs
+expression: "strip(&format_group_closing(\"Running the benchmarks\",\nDuration::from_secs(95)))"
+---
+  ✓  Running the benchmarks 1m 35s

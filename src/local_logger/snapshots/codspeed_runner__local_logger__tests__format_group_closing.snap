@@ -1,0 +1,5 @@
+---
+source: src/local_logger/tests.rs
+expression: "strip(&format_group_closing(\"Uploading results\", Duration::from_millis(1700)))"
+---
+  ✓  Uploading results 1.7s

@@ -215,23 +215,32 @@ fn close_current_group() {
         }
     }
 
-    let group = match CURRENT_GROUP.lock() {
-        Ok(mut current) => current.take(),
-        Err(_) => return,
-    };
-    let Some(group) = group else {
-        return;
-    };
-    if group.opened {
-        return;
+    if let Some(line) = take_current_group_closing_line() {
+        write_group_line(&line);
     }
+}
 
-    let elapsed = format_elapsed(group.started_at.elapsed());
-    write_group_line(&format!(
+/// Take the group currently being rendered and return the line that closes it,
+/// or `None` when there is nothing to close or the group is an opened one.
+fn take_current_group_closing_line() -> Option<String> {
+    let group = CURRENT_GROUP.lock().ok()?.take()?;
+    if group.opened {
+        return None;
+    }
+    Some(format_group_closing(
+        &group.name,
+        group.started_at.elapsed(),
+    ))
+}
+
+/// Format the line that closes a group: a checkmark, the group name and how long
+/// the group took.
+fn format_group_closing(name: &str, elapsed: Duration) -> String {
+    format!(
         "{} {}",
-        format_checkmark(&group.name, true),
-        style(elapsed).dim(),
-    ));
+        format_checkmark(name, true),
+        style(format_elapsed(elapsed)).dim(),
+    )
 }
 
 /// Format a group header with styled prefix
@@ -461,3 +470,6 @@ pub fn clean_logger() {
         spinner.finish_and_clear();
     }
 }
+
+#[cfg(test)]
+mod tests;

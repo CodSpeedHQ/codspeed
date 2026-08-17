@@ -1,0 +1,5 @@
+---
+source: src/local_logger/tests.rs
+expression: "strip(&format_group_closing(\"Setting up the environment\",\nDuration::from_millis(42)))"
+---
+  ✓  Setting up the environment 42ms
