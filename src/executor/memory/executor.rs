@@ -2,7 +2,7 @@ use crate::executor::ExecutorName;
 use crate::executor::ExecutorSupport;
 use crate::executor::PrivilegeStatus;
 use crate::executor::ToolStatus;
-use crate::executor::helpers::command::CommandBuilder;
+use crate::executor::helpers::command::{CommandBuilder, as_command_line};
 use crate::executor::helpers::env::{build_path_env, get_base_injected_env};
 use crate::executor::helpers::get_bench_command::get_bench_command;
 use crate::executor::helpers::run_command_with_log_pipe::run_command_with_log_pipe_and_callback;
@@ -166,7 +166,7 @@ impl Executor for MemoryExecutor {
 
         let (ipc, cmd_builder, _env_file) = Self::build_memtrack_command(execution_context)?;
         let cmd = cmd_builder.build();
-        debug!("cmd: {cmd:?}");
+        debug!("cmd: {}", as_command_line(&cmd));
 
         let runner_fifo = RunnerFifo::new()?;
         let on_process_started = |mut child: std::process::Child| async move {

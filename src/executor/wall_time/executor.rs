@@ -7,7 +7,7 @@ use crate::executor::Executor;
 use crate::executor::ExecutorConfig;
 use crate::executor::ToolStatus;
 use crate::executor::config::WalltimeProfiler;
-use crate::executor::helpers::command::CommandBuilder;
+use crate::executor::helpers::command::{CommandBuilder, as_command_line};
 use crate::executor::helpers::env::{build_path_env, get_base_injected_env};
 use crate::executor::helpers::get_bench_command::get_bench_command;
 use crate::executor::helpers::run_command_with_log_pipe::run_command_with_log_pipe;
@@ -155,7 +155,7 @@ impl Executor for WallTimeExecutor {
                     cmd_builder
                 };
                 let cmd = cmd_builder.build();
-                debug!("cmd: {cmd:?}");
+                debug!("cmd: {}", as_command_line(&cmd));
                 run_command_with_log_pipe(cmd).await
             }
         };
@@ -205,7 +205,7 @@ async fn run_with_profiler(
         .wrap_command(cmd_builder, config, profile_folder, requires_sudo)
         .await?;
     let cmd = wrapped.build();
-    debug!("cmd: {cmd:?}");
+    debug!("cmd: {}", as_command_line(&cmd));
 
     let mut runner_fifo = RunnerFifo::new()?;
 

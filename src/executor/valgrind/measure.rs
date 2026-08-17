@@ -1,6 +1,7 @@
 use crate::executor::ExecutorConfig;
 use crate::executor::RunnerMode;
 use crate::executor::config::SimulationTool;
+use crate::executor::helpers::command::as_command_line;
 use crate::executor::helpers::env::{build_path_env, get_base_injected_env};
 use crate::executor::helpers::get_bench_command::get_bench_command;
 use crate::executor::helpers::run_command_with_log_pipe::run_command_with_log_pipe;
@@ -189,7 +190,7 @@ pub async fn measure(
         mongo_tracer.apply_run_command_transformations(&mut cmd)?;
     }
 
-    debug!("cmd: {cmd:?}");
+    debug!("cmd: {}", as_command_line(&cmd));
     let status = run_command_with_log_pipe(cmd)
         .await
         .map_err(|e| anyhow!("failed to execute the benchmark process. {e}"))?;

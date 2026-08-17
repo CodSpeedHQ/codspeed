@@ -140,6 +140,22 @@ impl CommandBuilder {
     }
 }
 
+/// Render an already-built [`Command`] as a shell command line.
+///
+/// `Command`'s `Debug` implementation quotes every argument with Rust string
+/// escaping, so a command containing quotes comes out as `bash -c 'echo \'hi\''`:
+/// close enough to a shell command line to look pasteable, but not actually
+/// valid. This quotes for the shell instead.
+pub fn as_command_line(command: &Command) -> String {
+    let mut parts: Vec<String> = vec![command.get_program().to_string_lossy().into_owned()];
+    parts.extend(
+        command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned()),
+    );
+    shell_words::join(parts)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,6 +165,31 @@ mod tests {
         let mut builder = CommandBuilder::new("ls");
         builder.arg("-la").wrap("sudo", ["-n"]);
         assert_eq!(builder.as_command_line(), "sudo -n ls -la");
+    }
+
+    #[test]
+    fn test_built_command_as_command_line() {
+        let mut builder = CommandBuilder::new("ls");
+        builder.arg("-la");
+        assert_eq!(as_command_line(&builder.build()), "ls -la");
+    }
+
+    /// The quoted form has to survive a round trip through the shell, which
+    /// `Command`'s `Debug` output does not.
+    #[test]
+    fn test_built_command_as_command_line_quotes_for_the_shell() {
+        let mut builder = CommandBuilder::new("bash");
+        builder.args(["-c", "echo 'hello world'"]);
+        let command = builder.build();
+
+        assert_eq!(
+            as_command_line(&command),
+            r#"bash -c 'echo '\''hello world'\'''"#
+        );
+        assert_eq!(
+            shell_words::split(&as_command_line(&command)).unwrap(),
+            vec!["bash", "-c", "echo 'hello world'"]
+        );
     }
 
     #[test]
