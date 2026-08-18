@@ -5,6 +5,21 @@
 
 
 
+## [5.1.0] - 2026-08-18
+
+### <!-- 0 -->🚀 Features
+- Support CircleCI for GitHub repositories by @fargito
+
+### <!-- 1 -->🐛 Bug Fixes
+- Only use the rolling buffer for the local provider by @fargito
+
+### <!-- 2 -->🏗️ Refactor
+- Drop ghData and glData from the run environment metadata by @fargito in [#482](https://github.com/CodSpeedHQ/runner/pull/482)
+
+### <!-- 3 -->📚 Documentation
+- Bump action version to v5 (#488) by @adriencaccia in [#488](https://github.com/CodSpeedHQ/runner/pull/488)
+
+
 ## [5.0.2] - 2026-08-06
 
 ### <!-- 1 -->🐛 Bug Fixes
@@ -1455,6 +1470,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[5.1.0]: https://github.com/CodSpeedHQ/runner/compare/v5.0.2..v5.1.0
 [5.0.2]: https://github.com/CodSpeedHQ/runner/compare/v5.0.1..v5.0.2
 [5.0.1]: https://github.com/CodSpeedHQ/runner/compare/v5.0.0..v5.0.1
 [5.0.0]: https://github.com/CodSpeedHQ/runner/compare/v4.19.1..v5.0.0
