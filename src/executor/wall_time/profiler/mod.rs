@@ -4,7 +4,6 @@
 //! (perf, samply, instruments, ...) and produces a unified set of artifacts
 //! in the profile folder.
 
-mod linux_sysctl;
 pub mod perf;
 pub mod samply;
 

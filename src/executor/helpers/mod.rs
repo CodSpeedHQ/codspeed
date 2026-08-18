@@ -11,6 +11,7 @@ pub mod harvest_perf_maps_for_pids;
 pub mod homebrew;
 pub mod introspected_golang;
 pub mod introspected_nodejs;
+pub mod linux_sysctl;
 pub mod profile_folder;
 pub mod run_command_with_log_pipe;
 pub mod run_with_env;

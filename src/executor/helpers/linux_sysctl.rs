@@ -18,7 +18,7 @@ pub fn ensure_linux_profiling_sysctls() -> Result<()> {
 }
 
 #[cfg(target_os = "linux")]
-fn ensure_sysctl(name: &str, target_value: i64) -> Result<()> {
+pub(crate) fn ensure_sysctl(name: &str, target_value: i64) -> Result<()> {
     if sysctl_read(name)? == target_value {
         return Ok(());
     }
