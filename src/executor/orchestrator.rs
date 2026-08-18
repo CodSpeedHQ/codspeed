@@ -150,15 +150,14 @@ impl Orchestrator {
 
             let ctx = ExecutionContext::new(config, profile_folder);
 
-            let rolling_buffer_label =
-                (!self.config.show_full_output).then_some(part.label.as_str());
+            let display_label = (!self.config.show_full_output).then_some(part.label.as_str());
 
             run_executor(
                 executor.as_mut(),
                 self,
                 &ctx,
                 setup_cache_dir,
-                rolling_buffer_label,
+                display_label,
             )
             .await?;
 

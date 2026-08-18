@@ -3,6 +3,8 @@ use git2::Repository;
 use simplelog::SharedLogger;
 use uuid::Uuid;
 
+use crate::local_logger::rolling_buffer::RollingBufferGuard;
+
 use crate::api_client::{
     CodSpeedAPIClient, GetOrCreateProjectRepositoryPayload, GetOrCreateProjectRepositoryVars,
     SessionAndRepositoryOverview, SessionAndRepositoryOverviewError,
@@ -340,6 +342,10 @@ impl RunEnvironmentProvider for LocalProvider {
 
     fn get_logger(&self) -> Box<dyn SharedLogger> {
         get_local_logger()
+    }
+
+    fn start_command_display(&self, label: &str) -> Option<RollingBufferGuard> {
+        RollingBufferGuard::activate(label)
     }
 
     fn get_run_environment(&self) -> RunEnvironment {

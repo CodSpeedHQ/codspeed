@@ -14,7 +14,6 @@ mod valgrind;
 mod wall_time;
 
 use crate::instruments::mongo_tracer::{MongoTracer, install_mongodb_tracer};
-use crate::local_logger::rolling_buffer::{activate_rolling_buffer, deactivate_rolling_buffer};
 use crate::prelude::*;
 use crate::runner_mode::RunnerMode;
 use crate::system::SystemInfo;
@@ -158,7 +157,7 @@ pub async fn run_executor(
     orchestrator: &Orchestrator,
     execution_context: &ExecutionContext,
     setup_cache_dir: Option<&Path>,
-    rolling_buffer_label: Option<&str>,
+    display_label: Option<&str>,
 ) -> Result<()> {
     match executor.support_level(&orchestrator.system_info) {
         ExecutorSupport::Unsupported => {
@@ -199,12 +198,11 @@ pub async fn run_executor(
                 None
             };
 
-        if let Some(label) = rolling_buffer_label {
-            activate_rolling_buffer(label);
-        }
+        let display_guard =
+            display_label.and_then(|label| orchestrator.provider.start_command_display(label));
         let run_result = executor.run(execution_context, &mongo_tracer).await;
-        if rolling_buffer_label.is_some() {
-            deactivate_rolling_buffer();
+        if let Some(guard) = display_guard {
+            guard.finish_with(run_result.is_ok());
         }
         run_result?;
 
