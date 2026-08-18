@@ -13,6 +13,7 @@ use crate::upload::{
 };
 
 use super::interfaces::{RepositoryProvider, RunEnvironment, RunEnvironmentMetadata, RunPart};
+use crate::local_logger::rolling_buffer::RollingBufferGuard;
 
 pub trait RunEnvironmentDetector {
     /// Detects if the runner is currently executed within this run environment.
@@ -32,6 +33,16 @@ static OIDC_AUDIENCE: &str = "codspeed.io";
 pub trait RunEnvironmentProvider {
     /// Returns the logger for the RunEnvironment.
     fn get_logger(&self) -> Box<dyn SharedLogger>;
+
+    /// Start the live display of a benchmark command's output, titled `label`.
+    /// The returned guard scopes the display to the command's execution.
+    ///
+    /// This only affects the on-screen rendering: the raw output is always
+    /// persisted to the runner log file. Returning `None` displays the output
+    /// verbatim, which is what CI job logs expect.
+    fn start_command_display(&self, _label: &str) -> Option<RollingBufferGuard> {
+        None
+    }
 
     /// Returns the repository provider for this RunEnvironment
     fn get_repository_provider(&self) -> RepositoryProvider;

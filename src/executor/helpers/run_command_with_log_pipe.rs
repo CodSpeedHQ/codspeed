@@ -1,6 +1,5 @@
 use crate::executor::EXECUTOR_TARGET;
-use crate::local_logger::rolling_buffer::ROLLING_BUFFER;
-use crate::local_logger::suspend_progress_bar;
+use crate::local_logger::write_command_output;
 use crate::prelude::*;
 use std::future::Future;
 use std::io::{Read, Write};
@@ -26,19 +25,6 @@ where
     F: FnOnce(std::process::Child) -> Fut,
     Fut: Future<Output = anyhow::Result<ExitStatus>>,
 {
-    /// Write text to the rolling buffer if active, otherwise write raw bytes to the writer.
-    fn write_to_rolling_buffer_or_output(text: &str, raw_bytes: &[u8], writer: &mut impl Write) {
-        if let Ok(mut guard) = ROLLING_BUFFER.lock() {
-            if let Some(rb) = guard.as_mut() {
-                if rb.is_active() {
-                    rb.push_lines(text);
-                    return;
-                }
-            }
-        }
-        suspend_progress_bar(|| writer.write_all(raw_bytes).unwrap());
-    }
-
     fn log_tee(
         mut reader: impl Read,
         mut writer: impl Write,
@@ -55,7 +41,7 @@ where
                 if !line_buffer.is_empty() {
                     let text = String::from_utf8_lossy(&line_buffer);
                     trace!(target: EXECUTOR_TARGET, "{prefix}{text}");
-                    write_to_rolling_buffer_or_output(&text, &line_buffer, &mut writer);
+                    write_command_output(&text, &line_buffer, &mut writer);
                 }
                 break;
             }
@@ -71,7 +57,7 @@ where
                 let to_flush = &line_buffer[..=last_newline_pos];
                 let text = String::from_utf8_lossy(to_flush);
                 trace!(target: EXECUTOR_TARGET, "{prefix}{text}");
-                write_to_rolling_buffer_or_output(&text, to_flush, &mut writer);
+                write_command_output(&text, to_flush, &mut writer);
 
                 // Keep the remainder in the buffer
                 line_buffer = line_buffer[last_newline_pos + 1..].to_vec();

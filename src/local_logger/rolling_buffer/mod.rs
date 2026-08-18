@@ -1,31 +1,35 @@
 use std::collections::VecDeque;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use super::{
     CODSPEED_U8_COLOR_CODE, IS_TTY, SPINNER, SPINNER_TICKS, TICK_INTERVAL_MS, format_checkmark,
-    icons::Icon,
+    format_cross, icons::Icon,
 };
 use console::{Term, style};
-use std::sync::LazyLock;
 
 const INDENT: &str = "    ";
 
-/// Global shared rolling buffer, set by `activate_rolling_buffer` and
-/// consumed by `log_tee` in `run_command_with_log_pipe`.
-pub(crate) static ROLLING_BUFFER: LazyLock<Mutex<Option<RollingBuffer>>> =
-    LazyLock::new(|| Mutex::new(None));
+/// Currently active rolling buffer, installed by [`RollingBufferGuard::activate`]
+/// and fed through [`super::write_command_output`].
+static ACTIVE_BUFFER: LazyLock<Mutex<Option<RollingBuffer>>> = LazyLock::new(|| Mutex::new(None));
 
-/// Stop signal for the tick thread.
+/// Push command output into the active rolling buffer.
 ///
-/// The rolling buffer manages its own background tick thread rather than using
-/// `ProgressBar` because it renders a multi-line frame (title + bordered log box)
-/// via direct terminal cursor manipulation. `ProgressBar` only manages a single
-/// line and would conflict with the rolling buffer's cursor movements.
-static TICK_STOP: AtomicBool = AtomicBool::new(false);
+/// Returns `false` when no buffer is active so the caller can fall back to
+/// plain output.
+pub(super) fn try_push(text: &str) -> bool {
+    if let Ok(mut guard) = ACTIVE_BUFFER.lock() {
+        if let Some(rb) = guard.as_mut() {
+            rb.push_lines(text);
+            return true;
+        }
+    }
+    false
+}
 
-pub struct RollingBuffer {
+struct RollingBuffer {
     lines: VecDeque<String>,
     max_lines: usize,
     total_lines: usize,
@@ -69,7 +73,7 @@ impl RollingBuffer {
         }
     }
 
-    pub fn is_active(&self) -> bool {
+    fn is_active(&self) -> bool {
         self.active
     }
 
@@ -89,7 +93,7 @@ impl RollingBuffer {
         }
     }
 
-    pub fn push_lines(&mut self, text: &str) {
+    fn push_lines(&mut self, text: &str) {
         if !self.active {
             return;
         }
@@ -190,10 +194,14 @@ impl RollingBuffer {
         frame
     }
 
-    /// Render the finished frame (checkmark title instead of spinner).
-    fn render_finished_frame(&self) -> Vec<String> {
+    /// Render the finished frame (result mark title instead of spinner).
+    fn render_finished_frame(&self, success: bool) -> Vec<String> {
         let mut frame = Vec::new();
-        frame.push(format_checkmark(&self.title, false));
+        frame.push(if success {
+            format_checkmark(&self.title, false)
+        } else {
+            format_cross(&self.title)
+        });
         frame.push(self.render_top_delimiter());
         for line in &self.lines {
             frame.push(self.render_content_line(line));
@@ -256,16 +264,16 @@ impl RollingBuffer {
         self.draw_frame(&frame);
     }
 
-    /// Finish the rolling display, replacing the spinner title with a checkmark
-    /// and leaving the last content lines visible on screen.
-    pub fn finish(&mut self) {
+    /// Finish the rolling display, replacing the spinner title with a result
+    /// mark and leaving the last content lines visible on screen.
+    fn finish(&mut self, success: bool) {
         if self.finished || self.rendered_count == 0 {
             self.finished = true;
             return;
         }
         self.finished = true;
 
-        let frame = self.render_finished_frame();
+        let frame = self.render_finished_frame(success);
         self.draw_frame(&frame);
         self.rendered_count = 0;
     }
@@ -274,63 +282,106 @@ impl RollingBuffer {
 impl Drop for RollingBuffer {
     fn drop(&mut self) {
         if !self.finished {
-            self.finish();
+            self.finish(true);
         }
     }
 }
 
-/// Activate a rolling buffer for the current executor run.
+/// Scope guard for the rolling-buffer display of one executor run.
 ///
-/// Suspends the group spinner and installs a shared rolling buffer that
-/// `run_command_with_log_pipe` will automatically pick up. Starts a background
-/// tick thread to keep the spinner animating.
-pub fn activate_rolling_buffer(title: &str) {
-    if !*IS_TTY {
-        return;
-    }
-    let rb = RollingBuffer::new(title);
-    if !rb.is_active() {
-        return;
-    }
-    // Suspend the group spinner so it doesn't interfere with rolling output
-    if let Ok(mut spinner) = SPINNER.lock() {
-        if let Some(pb) = spinner.take() {
-            pb.suspend(|| eprintln!());
-            pb.finish_and_clear();
-        }
-    }
-    *ROLLING_BUFFER.lock().unwrap() = Some(rb);
+/// While alive, benchmark command output is rendered inside a live frame
+/// (title + bordered log box) and `LocalLogger` records are deferred so they
+/// don't corrupt it. Dropping the guard finalizes the frame, stops the tick
+/// thread, and restores normal output.
+pub struct RollingBufferGuard {
+    /// Stop signal for the tick thread.
+    ///
+    /// The guard manages its own background tick thread rather than using
+    /// `ProgressBar` because the frame is multi-line and drawn via direct
+    /// cursor manipulation; `ProgressBar` only manages a single line and would
+    /// conflict with the frame's cursor movements.
+    tick_stop: Arc<AtomicBool>,
+}
 
-    // Start a background thread that redraws periodically to animate the spinner
-    TICK_STOP.store(false, Ordering::Relaxed);
-    std::thread::spawn(|| {
-        while !TICK_STOP.load(Ordering::Relaxed) {
-            std::thread::sleep(Duration::from_millis(TICK_INTERVAL_MS));
-            if TICK_STOP.load(Ordering::Relaxed) {
-                break;
+impl RollingBufferGuard {
+    /// Activate a rolling buffer titled `title`.
+    ///
+    /// Returns `None` when stderr is not an interactive terminal able to host
+    /// the frame; command output then falls through to plain display.
+    pub(crate) fn activate(title: &str) -> Option<Self> {
+        if !*IS_TTY {
+            return None;
+        }
+        let rb = RollingBuffer::new(title);
+        if !rb.is_active() {
+            return None;
+        }
+
+        // Suspend the group spinner so it doesn't interfere with rolling output
+        if let Ok(mut spinner) = SPINNER.lock() {
+            if let Some(pb) = spinner.take() {
+                pb.suspend(|| eprintln!());
+                pb.finish_and_clear();
             }
-            if let Ok(mut guard) = ROLLING_BUFFER.try_lock() {
-                if let Some(rb) = guard.as_mut() {
-                    if rb.finished {
+        }
+
+        super::set_rolling_buffer_active(true);
+        match ACTIVE_BUFFER.lock() {
+            Ok(mut slot) => *slot = Some(rb),
+            Err(_) => {
+                super::set_rolling_buffer_active(false);
+                return None;
+            }
+        }
+
+        // Background thread redrawing the title periodically to animate the spinner
+        let tick_stop = Arc::new(AtomicBool::new(false));
+        std::thread::spawn({
+            let tick_stop = Arc::clone(&tick_stop);
+            move || {
+                while !tick_stop.load(Ordering::Relaxed) {
+                    std::thread::sleep(Duration::from_millis(TICK_INTERVAL_MS));
+                    if tick_stop.load(Ordering::Relaxed) {
                         break;
                     }
-                    rb.redraw_title();
+                    if let Ok(mut guard) = ACTIVE_BUFFER.try_lock() {
+                        if let Some(rb) = guard.as_mut() {
+                            if rb.finished {
+                                break;
+                            }
+                            rb.redraw_title();
+                        }
+                    }
                 }
             }
+        });
+
+        Some(Self { tick_stop })
+    }
+
+    /// Finalize the frame, marking the title with a checkmark or a cross
+    /// according to `success`.
+    pub(crate) fn finish_with(self, success: bool) {
+        self.finalize(success);
+    }
+
+    fn finalize(&self, success: bool) {
+        // Stop the tick thread first so it cannot redraw over the final frame
+        self.tick_stop.store(true, Ordering::Relaxed);
+
+        if let Ok(mut guard) = ACTIVE_BUFFER.lock() {
+            if let Some(rb) = guard.as_mut() {
+                rb.finish(success);
+            }
+            *guard = None;
         }
-    });
+        super::set_rolling_buffer_active(false);
+    }
 }
-
-/// Finish and deactivate the current rolling buffer.
-pub fn deactivate_rolling_buffer() {
-    // Stop the tick thread first
-    TICK_STOP.store(true, Ordering::Relaxed);
-
-    if let Ok(mut guard) = ROLLING_BUFFER.lock() {
-        if let Some(rb) = guard.as_mut() {
-            rb.finish();
-        }
-        *guard = None;
+impl Drop for RollingBufferGuard {
+    fn drop(&mut self) {
+        // Idempotent fallback for scope exits that bypass `finish_with`.
+        self.finalize(true);
     }
 }
 

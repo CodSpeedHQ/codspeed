@@ -3,7 +3,10 @@ pub mod rolling_buffer;
 
 use std::{
     env,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 
@@ -36,6 +39,24 @@ static CURRENT_GROUP_NAME: LazyLock<Arc<Mutex<Option<String>>>> =
 /// Log records deferred while the rolling buffer owns the terminal.
 /// Flushed in `draw_frame` before each redraw.
 static DEFERRED_LOGS: LazyLock<Mutex<Vec<DeferredLog>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+
+/// Set while a rolling buffer owns the terminal region. `LocalLogger` then
+/// defers its records (see [`DEFERRED_LOGS`]) instead of printing directly,
+/// as any direct stderr output would corrupt the frame.
+static ROLLING_BUFFER_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+fn set_rolling_buffer_active(active: bool) {
+    ROLLING_BUFFER_ACTIVE.store(active, Ordering::Relaxed);
+}
+
+/// Write a chunk of benchmark command output to the terminal: into the rolling
+/// buffer when one is active, otherwise verbatim to `writer`.
+pub(crate) fn write_command_output(text: &str, raw_bytes: &[u8], writer: &mut impl Write) {
+    if rolling_buffer::try_push(text) {
+        return;
+    }
+    suspend_progress_bar(|| writer.write_all(raw_bytes).unwrap());
+}
 
 /// A snapshot of a log record that can be stored across the rolling-buffer
 /// lifetime (the original `log::Record` borrows data and cannot be kept).
@@ -143,20 +164,15 @@ impl Log for LocalLogger {
         // When the rolling buffer is active it owns the terminal region and uses
         // cursor manipulation to redraw.  Any direct stderr output would corrupt
         // the display, so we defer log records and flush them before each redraw.
-        {
-            use rolling_buffer::ROLLING_BUFFER;
-            if let Ok(guard) = ROLLING_BUFFER.try_lock() {
-                if guard.as_ref().is_some_and(|rb| rb.is_active()) {
-                    if let Ok(mut deferred) = DEFERRED_LOGS.try_lock() {
-                        deferred.push(DeferredLog {
-                            level: record.level(),
-                            message: format!("{}", record.args()),
-                            target: record.target().to_string(),
-                        });
-                    }
-                    return;
-                }
+        if ROLLING_BUFFER_ACTIVE.load(Ordering::Relaxed) {
+            if let Ok(mut deferred) = DEFERRED_LOGS.try_lock() {
+                deferred.push(DeferredLog {
+                    level: record.level(),
+                    message: format!("{}", record.args()),
+                    target: record.target().to_string(),
+                });
             }
+            return;
         }
 
         suspend_progress_bar(|| print_record(record));
@@ -186,6 +202,15 @@ pub(crate) fn format_checkmark(label: &str, dim: bool) -> String {
     format!(
         "  {}  {}",
         style(Icon::Checkmark.to_string()).green().bold(),
+        label
+    )
+}
+
+/// Format a failure cross with a label.
+pub(crate) fn format_cross(label: &str) -> String {
+    format!(
+        "  {}  {}",
+        style(Icon::Error.to_string()).red().bold(),
         label
     )
 }
