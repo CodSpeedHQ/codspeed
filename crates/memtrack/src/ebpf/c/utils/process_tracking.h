@@ -44,4 +44,14 @@ static __always_inline void track_child(__u32 child_pid, __u32 parent_pid) {
     bpf_map_update_elem(&pids_ppid, &child_pid, &parent_pid, BPF_ANY);
 }
 
+/* Returns 1 only for the caller that removed the pid: threads of a dying group
+ * race here, and the winner is the one allowed to report the group's death. */
+static __always_inline int untrack_pid(__u32 pid) {
+    if (bpf_map_delete_elem(&tracked_pids, &pid) != 0) {
+        return 0;
+    }
+    bpf_map_delete_elem(&pids_ppid, &pid);
+    return 1;
+}
+
 #endif /* __PROCESS_TRACKING_H__ */

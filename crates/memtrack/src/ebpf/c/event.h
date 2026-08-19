@@ -13,6 +13,7 @@
 #define EVENT_TYPE_EXEC 10
 #define EVENT_TYPE_EXIT 11
 #define EVENT_TYPE_RSS 12
+#define EVENT_TYPE_RMAP 13
 
 /* Common header shared by all event types */
 struct event_header {
@@ -59,6 +60,12 @@ struct event {
             int32_t member;
             uint64_t size;
         } rss;
+
+        struct {
+            int32_t member; /* MM_* counter index */
+            int64_t delta;
+            uint64_t addr;
+        } rmap;
     } data;
 };
 

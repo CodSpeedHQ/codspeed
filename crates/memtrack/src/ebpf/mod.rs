@@ -6,5 +6,5 @@ mod proc_fs;
 mod spawn;
 mod tracker;
 
-pub use memtrack::{BpfVariant, MemtrackBpf, ResolvedSymbols, resolve_symbol_offsets};
+pub use memtrack::{BpfVariant, MemtrackBpf, ResolvedSymbols, RmapSupport, resolve_symbol_offsets};
 pub use tracker::Tracker;

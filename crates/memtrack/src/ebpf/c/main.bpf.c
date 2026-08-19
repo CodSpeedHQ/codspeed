@@ -8,9 +8,13 @@
 #include "allocator.h"
 #include "attach.h"
 #include "event.h"
+#include "process_tracking.bpf.h"
+#include "rmap.bpf.h"
 #include "rss.bpf.h"
 #include "utils/event_helpers.h"
+#include "utils/folio.h"
 #include "utils/map_helpers.h"
+#include "utils/mm_ownership.h"
 #include "utils/process_tracking.h"
 
 char LICENSE[] SEC("license") = "GPL";

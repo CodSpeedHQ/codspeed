@@ -18,13 +18,19 @@ impl Tracker {
     /// Create a new tracker. The exec-mapping watcher discovers and attaches
     /// allocator probes as the tracked process tree maps executable files.
     pub fn new() -> Result<Self> {
-        Self::with_bpf(MemtrackBpf::new()?)
+        let track_rmap = Self::track_rmap_from_env();
+        Self::with_bpf(MemtrackBpf::new_with_rmap(track_rmap)?)
     }
 
     /// Like [`Tracker::new`], but pinned to a specific BPF variant instead of
     /// the detected one.
     pub fn with_variant(variant: BpfVariant) -> Result<Self> {
-        Self::with_bpf(MemtrackBpf::with_variant(variant)?)
+        let track_rmap = Self::track_rmap_from_env();
+        Self::with_bpf(MemtrackBpf::with_variant(variant, track_rmap)?)
+    }
+
+    fn track_rmap_from_env() -> bool {
+        std::env::var("CODSPEED_MEMTRACK_TRACK_RMAP").is_ok_and(|v| v == "1")
     }
 
     fn with_bpf(mut bpf: MemtrackBpf) -> Result<Self> {
@@ -75,8 +81,8 @@ impl Tracker {
     }
 
     /// Enable allocator-event tracking in the BPF program. Lifetime events
-    /// (rss_stat, fork/exec/exit) are emitted for tracked pids regardless of
-    /// this toggle.
+    /// (rss_stat, rmap, fork/exec/exit) are emitted for tracked pids
+    /// regardless of this toggle.
     pub fn enable_tracking(&self) -> Result<()> {
         self.bpf.lock().enable_tracking()
     }
