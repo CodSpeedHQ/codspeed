@@ -22,6 +22,7 @@ mod maps;
 mod rmap;
 mod tracking;
 
+pub use maps::OwnershipMaps;
 pub use rmap::RmapSupport;
 
 use crate::bpf_token::has_delegated_bpf_token;

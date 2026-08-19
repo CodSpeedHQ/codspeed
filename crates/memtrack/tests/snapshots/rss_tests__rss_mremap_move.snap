@@ -1,0 +1,30 @@
+---
+source: crates/memtrack/tests/rss_tests.rs
+expression: summary
+---
+{
+  "report": {
+    "MaxRssKb:": 32,
+    "RssAnon:": 32,
+    "RssFile:": 0,
+    "RssShmem:": 0
+  },
+  "rss_stat": [
+    {
+      "pid": "[pid]",
+      "file_mib": 0,
+      "anon_mib": 32,
+      "shmem_mib": 0,
+      "max_rss_mib": 32
+    }
+  ],
+  "rmap": [
+    {
+      "pid": "[pid]",
+      "file_mib": 0,
+      "anon_mib": 32,
+      "shmem_mib": 0,
+      "max_rss_mib": 32
+    }
+  ]
+}

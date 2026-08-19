@@ -1,6 +1,6 @@
 use crate::ebpf::attach_worker::AttachWorker;
 use crate::ebpf::spawn::{resume, spawn_stopped, wrap_stopped};
-use crate::ebpf::{BpfVariant, MemtrackBpf};
+use crate::ebpf::{BpfVariant, MemtrackBpf, OwnershipMaps};
 use crate::prelude::*;
 use crate::session::Session;
 use parking_lot::Mutex;
@@ -12,6 +12,7 @@ use std::sync::mpsc;
 pub struct Tracker {
     bpf: Arc<Mutex<MemtrackBpf>>,
     worker: Mutex<Option<AttachWorker>>,
+    allocators: bool,
 }
 
 impl Tracker {
@@ -19,39 +20,54 @@ impl Tracker {
     /// allocator probes as the tracked process tree maps executable files.
     pub fn new() -> Result<Self> {
         let track_rmap = Self::track_rmap_from_env();
-        Self::with_bpf(MemtrackBpf::new_with_rmap(track_rmap)?)
+        Self::build(MemtrackBpf::new_with_rmap(track_rmap)?, true)
     }
 
     /// Like [`Tracker::new`], but pinned to a specific BPF variant instead of
     /// the detected one.
     pub fn with_variant(variant: BpfVariant) -> Result<Self> {
         let track_rmap = Self::track_rmap_from_env();
-        Self::with_bpf(MemtrackBpf::with_variant(variant, track_rmap)?)
+        Self::build(MemtrackBpf::with_variant(variant, track_rmap)?, true)
     }
 
     fn track_rmap_from_env() -> bool {
         std::env::var("CODSPEED_MEMTRACK_TRACK_RMAP").is_ok_and(|v| v == "1")
     }
 
-    fn with_bpf(mut bpf: MemtrackBpf) -> Result<Self> {
+    /// Track per-process RSS (rss_stat tracepoint and, when `track_rmap`, folio
+    /// rmap fentries) without allocator probes; no exec-mapping watcher or
+    /// attach worker runs.
+    pub fn new_without_allocators_with_rmap(track_rmap: bool) -> Result<Self> {
+        Self::build(MemtrackBpf::new_with_rmap(track_rmap)?, false)
+    }
+
+    fn build(mut bpf: MemtrackBpf, allocators: bool) -> Result<Self> {
         Self::bump_memlock_rlimit()?;
 
         bpf.attach_tracepoints()?;
-        bpf.attach_exec_watcher()?;
+        if allocators {
+            bpf.attach_exec_watcher()?;
+        }
 
         let bpf = Arc::new(Mutex::new(bpf));
-        let worker = AttachWorker::start(bpf.clone())?;
+        let worker = if allocators {
+            Some(AttachWorker::start(bpf.clone())?)
+        } else {
+            None
+        };
 
         Ok(Self {
             bpf,
-            worker: Mutex::new(Some(worker)),
+            worker: Mutex::new(worker),
+            allocators,
         })
     }
 
     /// Spawn `cmd` under tracking: the target is wrapped so it stops itself
-    /// before exec'ing, its pid is armed while stopped, then it is resumed.
-    /// The watcher observes the target's own `execve` mappings — no allocation
-    /// escapes untracked.
+    /// before exec'ing, its pid is armed while stopped, then it is resumed. When
+    /// the tracker runs an exec-mapping watcher, arming the pid before resume
+    /// ensures no allocation mapping escapes untracked; spawning after
+    /// [`Self::finish`] is an error in that mode.
     ///
     /// `uid_gid` drops the child's privileges (a `Command`'s uid/gid cannot be
     /// read back, so it cannot be preserved through the wrap).
@@ -63,11 +79,12 @@ impl Tracker {
 
         let child = spawn_stopped(&mut wrapped)?;
         let pid = child.id() as i32;
-        self.worker
-            .lock()
-            .as_ref()
-            .context("tracker already finished")?
-            .set_root_pid(pid);
+        match self.worker.lock().as_ref() {
+            Some(worker) => worker.set_root_pid(pid),
+            // No watcher to arm means exec mappings would be missed.
+            None if self.allocators => bail!("tracker already finished"),
+            None => {}
+        }
 
         let (tx, rx) = mpsc::channel();
         let poller = {
@@ -98,15 +115,18 @@ impl Tracker {
         self.bpf.lock().dropped_events_count()
     }
 
-    /// Stop the attach worker and surface any fatal error it recorded,
+    /// Only meaningful while the BPF object is alive; teardown frees the maps.
+    pub fn ownership_maps(&self) -> Result<OwnershipMaps> {
+        self.bpf.lock().ownership_maps()
+    }
+
+    /// Stop the attach worker, if any, and surface any fatal error it recorded,
     /// including missed exec mappings (incomplete allocator coverage).
     pub fn finish(&self) -> Result<()> {
-        let worker = self
-            .worker
-            .lock()
-            .take()
-            .context("tracker already finished")?;
-        worker.finish()
+        match self.worker.lock().take() {
+            Some(worker) => worker.finish(),
+            None => Ok(()),
+        }
     }
 
     /// Detach all attached probes. Called explicitly at teardown because the

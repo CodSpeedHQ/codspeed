@@ -1,0 +1,42 @@
+---
+source: crates/memtrack/tests/rss_tests.rs
+expression: summary
+---
+{
+  "report": {
+    "ChildRssAnonKb:": 64,
+    "ParentRssAnonKb:": 32
+  },
+  "rss_stat": [
+    {
+      "pid": "[pid]",
+      "file_mib": 0,
+      "anon_mib": 32,
+      "shmem_mib": 0,
+      "max_rss_mib": 32
+    },
+    {
+      "pid": "[pid]",
+      "file_mib": 0,
+      "anon_mib": 64,
+      "shmem_mib": 0,
+      "max_rss_mib": 64
+    }
+  ],
+  "rmap": [
+    {
+      "pid": "[pid]",
+      "file_mib": 0,
+      "anon_mib": 32,
+      "shmem_mib": 0,
+      "max_rss_mib": 32
+    },
+    {
+      "pid": "[pid]",
+      "file_mib": 0,
+      "anon_mib": 64,
+      "shmem_mib": 0,
+      "max_rss_mib": 64
+    }
+  ]
+}
