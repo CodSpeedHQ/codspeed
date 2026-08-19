@@ -12,6 +12,7 @@
 #define EVENT_TYPE_FORK 9
 #define EVENT_TYPE_EXEC 10
 #define EVENT_TYPE_EXIT 11
+#define EVENT_TYPE_RSS 12
 
 /* Common header shared by all event types */
 struct event_header {
@@ -53,6 +54,11 @@ struct event {
         struct {
             uint32_t parent_pid;
         } fork;
+
+        struct {
+            int32_t member;
+            uint64_t size;
+        } rss;
     } data;
 };
 

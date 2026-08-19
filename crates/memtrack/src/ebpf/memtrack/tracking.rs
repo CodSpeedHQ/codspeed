@@ -3,6 +3,7 @@ use crate::prelude::*;
 use paste::paste;
 
 impl MemtrackBpf {
+    attach_tracepoint!(rss_stat);
     attach_tracepoint!(task_newtask);
     attach_tracepoint!(sched_process_exec);
     attach_tracepoint!(sched_process_exit);
@@ -11,6 +12,9 @@ impl MemtrackBpf {
         self.attach_task_newtask()?;
         self.attach_sched_process_exec()?;
         self.attach_sched_process_exit()?;
+        if let Err(e) = self.attach_rss_stat() {
+            warn!("Failed to attach rss_stat tracepoint, RSS collection disabled: {e:#}");
+        }
         Ok(())
     }
 

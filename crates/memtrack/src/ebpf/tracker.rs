@@ -75,7 +75,8 @@ impl Tracker {
     }
 
     /// Enable allocator-event tracking in the BPF program. Lifetime events
-    /// (fork/exec/exit) are emitted for tracked pids regardless of this toggle.
+    /// (rss_stat, fork/exec/exit) are emitted for tracked pids regardless of
+    /// this toggle.
     pub fn enable_tracking(&self) -> Result<()> {
         self.bpf.lock().enable_tracking()
     }
