@@ -74,12 +74,13 @@ impl Tracker {
         Ok(Session::new(child, rx, poller))
     }
 
-    /// Enable event tracking in the BPF program
+    /// Enable allocator-event tracking in the BPF program. Lifetime events
+    /// (fork/exec/exit) are emitted for tracked pids regardless of this toggle.
     pub fn enable_tracking(&self) -> Result<()> {
         self.bpf.lock().enable_tracking()
     }
 
-    /// Disable event tracking in the BPF program
+    /// Disable allocator-event tracking in the BPF program
     pub fn disable_tracking(&self) -> Result<()> {
         self.bpf.lock().disable_tracking()
     }

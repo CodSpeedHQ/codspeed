@@ -78,6 +78,11 @@ pub enum MemtrackEventKind {
     Brk {
         size: u64,
     },
+    Fork {
+        parent_pid: pid_t,
+    },
+    Exec,
+    Exit,
 }
 
 pub struct MemtrackEventStream<R: Read> {

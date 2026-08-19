@@ -3,10 +3,14 @@ use crate::prelude::*;
 use paste::paste;
 
 impl MemtrackBpf {
-    attach_tracepoint!(sched_fork);
+    attach_tracepoint!(task_newtask);
+    attach_tracepoint!(sched_process_exec);
+    attach_tracepoint!(sched_process_exit);
 
     pub fn attach_tracepoints(&mut self) -> Result<()> {
-        self.attach_sched_fork()?;
+        self.attach_task_newtask()?;
+        self.attach_sched_process_exec()?;
+        self.attach_sched_process_exit()?;
         Ok(())
     }
 

@@ -9,6 +9,9 @@
 #define EVENT_TYPE_MMAP 6
 #define EVENT_TYPE_MUNMAP 7
 #define EVENT_TYPE_BRK 8
+#define EVENT_TYPE_FORK 9
+#define EVENT_TYPE_EXEC 10
+#define EVENT_TYPE_EXIT 11
 
 /* Common header shared by all event types */
 struct event_header {
@@ -45,6 +48,11 @@ struct event {
             uint64_t addr; /* address of mapping */
             uint64_t size; /* size of mapping */
         } mmap;
+
+        /* Process lifecycle events (fork carries the parent; exec/exit have no payload) */
+        struct {
+            uint32_t parent_pid;
+        } fork;
     } data;
 };
 

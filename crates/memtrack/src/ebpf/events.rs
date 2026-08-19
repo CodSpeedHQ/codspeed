@@ -74,6 +74,14 @@ pub fn parse_event(data: &[u8]) -> Option<MemtrackEvent> {
                     size: event.data.mmap.size,
                 },
             ),
+            EVENT_TYPE_FORK => (
+                0,
+                MemtrackEventKind::Fork {
+                    parent_pid: event.data.fork.parent_pid as i32,
+                },
+            ),
+            EVENT_TYPE_EXEC => (0, MemtrackEventKind::Exec),
+            EVENT_TYPE_EXIT => (0, MemtrackEventKind::Exit),
             unknown => {
                 panic!("Unknown event type: {unknown}");
             }
@@ -118,6 +126,12 @@ impl AttachRequest {
 mod tests {
     use super::*;
 
+    fn event_bytes(event: &bindings::event) -> &[u8] {
+        unsafe {
+            std::slice::from_raw_parts(event as *const _ as *const u8, std::mem::size_of_val(event))
+        }
+    }
+
     #[test]
     fn test_parse_realloc_event() {
         // Create a mock event with realloc data
@@ -130,12 +144,7 @@ mod tests {
         event.data.realloc.new_addr = 0x2000;
         event.data.realloc.size = 256;
 
-        let bytes = unsafe {
-            std::slice::from_raw_parts(
-                &event as *const _ as *const u8,
-                std::mem::size_of_val(&event),
-            )
-        };
+        let bytes = event_bytes(&event);
 
         // Parse and validate:
         let parsed = parse_event(bytes).unwrap();
@@ -164,12 +173,7 @@ mod tests {
         event.data.alloc.addr = 0x1000;
         event.data.alloc.size = 128;
 
-        let bytes = unsafe {
-            std::slice::from_raw_parts(
-                &event as *const _ as *const u8,
-                std::mem::size_of_val(&event),
-            )
-        };
+        let bytes = event_bytes(&event);
 
         // Parse and validate:
         let parsed = parse_event(bytes).unwrap();
@@ -183,6 +187,28 @@ mod tests {
                 assert_eq!(size, 128);
             }
             _ => panic!("Expected Malloc event kind"),
+        }
+    }
+
+    #[test]
+    fn test_parse_fork_event() {
+        let mut event: bindings::event = unsafe { std::mem::zeroed() };
+        event.header.event_type = bindings::EVENT_TYPE_FORK as u8;
+        event.header.timestamp = 12345678;
+        event.header.pid = 1001;
+        event.header.tid = 2000;
+        event.data.fork.parent_pid = 1000;
+
+        let bytes = event_bytes(&event);
+
+        let parsed = parse_event(bytes).unwrap();
+        assert_eq!(parsed.pid, 1001);
+
+        match parsed.kind {
+            MemtrackEventKind::Fork { parent_pid } => {
+                assert_eq!(parent_pid, 1000);
+            }
+            _ => panic!("Expected Fork event kind"),
         }
     }
 }
