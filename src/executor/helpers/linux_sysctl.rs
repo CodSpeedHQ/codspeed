@@ -17,14 +17,19 @@ pub fn ensure_linux_profiling_sysctls() -> Result<()> {
     Ok(())
 }
 
+/// Sets a sysctl, returning the value it held before, or `None` when it was
+/// already at `target_value` and nothing was written.
 #[cfg(target_os = "linux")]
-pub(crate) fn ensure_sysctl(name: &str, target_value: i64) -> Result<()> {
-    if sysctl_read(name)? == target_value {
-        return Ok(());
+pub(crate) fn ensure_sysctl(name: &str, target_value: i64) -> Result<Option<i64>> {
+    let current_value = sysctl_read(name)?;
+    if current_value == target_value {
+        return Ok(None);
     }
 
     let assignment = format!("{name}={target_value}");
-    run_with_sudo("sysctl", ["-w", assignment.as_str()])
+    run_with_sudo("sysctl", ["-w", assignment.as_str()])?;
+
+    Ok(Some(current_value))
 }
 
 #[cfg(target_os = "linux")]

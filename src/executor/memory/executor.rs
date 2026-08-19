@@ -8,6 +8,7 @@ use crate::executor::helpers::get_bench_command::get_bench_command;
 use crate::executor::helpers::run_command_with_log_pipe::run_command_with_log_pipe_and_callback;
 use crate::executor::helpers::run_with_env::prefix_command_with_env;
 use crate::executor::helpers::run_with_sudo::is_root_user;
+use crate::executor::memory::tunables::MemoryTunables;
 use crate::executor::shared::fifo::RunnerFifo;
 use crate::executor::{ExecutionContext, Executor};
 use crate::instruments::mongo_tracer::MongoTracer;
@@ -159,6 +160,8 @@ impl Executor for MemoryExecutor {
         execution_context: &ExecutionContext,
         _mongo_tracer: &Option<MongoTracer>,
     ) -> Result<()> {
+        let _tunables = MemoryTunables::apply();
+
         // Create the results/ directory inside the profile folder to avoid having memtrack create it with wrong permissions
         std::fs::create_dir_all(execution_context.profile_folder.join("results"))?;
 
