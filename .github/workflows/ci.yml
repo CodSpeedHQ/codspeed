@@ -85,14 +85,15 @@ jobs:
         run: cargo run -- exec -m walltime --skip-upload --warmup-time 0s --max-rounds 5 -- ls -la
 
   bpf-tests:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-22.04, ubuntu-latest, ubuntu-24.04-arm, ubuntu-26.04, ubuntu-26.04-arm]
         # Each memtrack integration test binary runs its cases serially
         # (eBPF tracker can't overlap with itself in one process), so we
         # shard at the test-binary level to parallelize across jobs.
-        test: [c_tests, cpp_tests, rust_tests, spawn_tests, dlopen_tests]
+        test: [c_tests, cpp_tests, rust_tests, spawn_tests, dlopen_tests, rss_tests]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -100,7 +101,7 @@ jobs:
           submodules: true
       - uses: ./.github/actions/install-rust
         with:
-          cache-key: ${{ matrix.test }}
+          cache-key: ${{ matrix.os }}-${{ matrix.test }}
       - uses: ./.github/actions/install-bpf-deps
 
       - name: Install additional allocators
@@ -109,7 +110,18 @@ jobs:
       - name: Run tests
         env:
           RUST_LOG: debug
-        run: sudo -E $(which cargo) test --lib --test ${{ matrix.test }} -- --test-threads 1 --nocapture
+        # Ubuntu 26.04 ships sudo-rs, which ignores `-E`; pass the env the
+        # rustup shims and the test gate need through `env` instead.
+        run: |
+          sudo env \
+            "HOME=$HOME" \
+            "PATH=$PATH" \
+            "CARGO_HOME=${CARGO_HOME:-$HOME/.cargo}" \
+            "RUSTUP_HOME=${RUSTUP_HOME:-$HOME/.rustup}" \
+            "CARGO_INCREMENTAL=$CARGO_INCREMENTAL" \
+            "RUST_LOG=$RUST_LOG" \
+            "GITHUB_ACTIONS=$GITHUB_ACTIONS" \
+            $(which cargo) test --lib --test ${{ matrix.test }} -- --test-threads 1 --nocapture
         working-directory: crates/memtrack
 
       # Since we ran the tests with sudo, the build artifacts will have root ownership
