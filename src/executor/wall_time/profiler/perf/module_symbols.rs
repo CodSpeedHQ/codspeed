@@ -1,4 +1,5 @@
 use super::elf_helper;
+use crate::executor::helpers::debug_file;
 use log::trace;
 use object::{Object, ObjectSymbol, ObjectSymbolTable};
 use runner_shared::module_symbols::SYMBOLS_MAP_SUFFIX;
@@ -96,7 +97,7 @@ impl ModuleSymbols {
         let mut symbols = Self::extract_symbols_from_object(&object);
 
         // Merge symbols from a separate debug file if available
-        if let Some(debug_path) = elf_helper::find_debug_file(&object, path.as_ref()) {
+        if let Some(debug_path) = debug_file::find_debug_file(&object, path.as_ref()) {
             trace!(
                 "Merging symbols from debug file {:?} for {:?}",
                 debug_path,
@@ -287,7 +288,7 @@ mod tests {
         // the debug file under a naive fallback. Merging must pick up .symtab
         // symbols like `_int_malloc` that only live in the debug file —
         // this is the coverage needed for full libc symbolication.
-        let (_dir, binary, _debug_file) = elf_helper::setup_debuglink_tmpdir(
+        let (_dir, binary, _debug_file) = debug_file::setup_debuglink_tmpdir(
             Path::new("testdata/perf_map/libc.so.6"),
             Path::new("testdata/perf_map/libc.so.6.debug"),
         );

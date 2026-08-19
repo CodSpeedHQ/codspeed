@@ -2,6 +2,7 @@ pub mod apt;
 #[cfg(target_os = "linux")]
 pub mod capabilities;
 pub mod command;
+pub mod debug_file;
 pub mod detect_executable;
 pub mod env;
 pub mod get_bench_command;
