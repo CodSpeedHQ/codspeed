@@ -57,21 +57,25 @@ macro_rules! attach_uprobe_uretprobe {
     ($name:ident, $prog_entry:ident, $prog_return:ident) => {
         paste! {
             fn [<try_ $name>](&mut self, lib_path: &Path, offset: usize) -> Result<()> {
-                let link = attach_one!(self, $prog_entry, lib_path, offset, false)
-                    .context(format!(
-                        "Failed to attach uprobe at offset {:#x} in {}",
-                        offset,
-                        lib_path.display()
-                    ))?;
-                self.probes.push(link);
+                if self.claim_site(stringify!($prog_entry), lib_path, offset, false) {
+                    let link = attach_one!(self, $prog_entry, lib_path, offset, false)
+                        .context(format!(
+                            "Failed to attach uprobe at offset {:#x} in {}",
+                            offset,
+                            lib_path.display()
+                        ))?;
+                    self.probes.push(link);
+                }
 
-                let link = attach_one!(self, $prog_return, lib_path, offset, true)
-                    .context(format!(
-                        "Failed to attach uretprobe at offset {:#x} in {}",
-                        offset,
-                        lib_path.display()
-                    ))?;
-                self.probes.push(link);
+                if self.claim_site(stringify!($prog_return), lib_path, offset, true) {
+                    let link = attach_one!(self, $prog_return, lib_path, offset, true)
+                        .context(format!(
+                            "Failed to attach uretprobe at offset {:#x} in {}",
+                            offset,
+                            lib_path.display()
+                        ))?;
+                    self.probes.push(link);
+                }
 
                 Ok(())
             }
@@ -102,13 +106,15 @@ macro_rules! attach_uprobe {
     ($name:ident, $prog:ident) => {
         paste! {
             fn [<try_ $name>](&mut self, lib_path: &Path, offset: usize) -> Result<()> {
-                let link = attach_one!(self, $prog, lib_path, offset, false)
-                    .context(format!(
-                        "Failed to attach uprobe at offset {:#x} in {}",
-                        offset,
-                        lib_path.display()
-                    ))?;
-                self.probes.push(link);
+                if self.claim_site(stringify!($prog), lib_path, offset, false) {
+                    let link = attach_one!(self, $prog, lib_path, offset, false)
+                        .context(format!(
+                            "Failed to attach uprobe at offset {:#x} in {}",
+                            offset,
+                            lib_path.display()
+                        ))?;
+                    self.probes.push(link);
+                }
                 Ok(())
             }
 
