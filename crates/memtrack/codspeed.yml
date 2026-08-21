@@ -1,0 +1,25 @@
+$schema: https://raw.githubusercontent.com/CodSpeedHQ/codspeed/refs/heads/main/schemas/codspeed.schema.json
+
+# Walltime benchmarks measuring codspeed-memtrack's own overhead (eBPF probe
+# attach + tracking) across a few representative workloads, not the memory
+# usage of the tracked command.
+#
+# The warmup/max times are generous because a single tracked run already pays a
+# fixed BPF load + uprobe attach cost, which is far above the defaults tuned
+# for near-instant commands.
+options:
+  warmup-time: "5s"
+  max-time: "60s"
+
+benchmarks:
+  # Read-only, low-allocation baseline.
+  - name: "memtrack track ls"
+    exec: codspeed-memtrack track "ls -la /usr/lib/x86_64-linux-gnu" --output /tmp/codspeed-memtrack-bench
+
+  # Allocation- and I/O-heavy: many small file reads.
+  - name: "memtrack track tar"
+    exec: codspeed-memtrack track "tar -cf /tmp/memtrack-bench.tar /usr/lib/x86_64-linux-gnu" --output /tmp/codspeed-memtrack-bench
+
+  # I/O-heavy with minimal allocation.
+  - name: "memtrack track dd"
+    exec: codspeed-memtrack track "dd if=/dev/zero of=/tmp/memtrack-bench-dd.bin bs=1M count=64" --output /tmp/codspeed-memtrack-bench
