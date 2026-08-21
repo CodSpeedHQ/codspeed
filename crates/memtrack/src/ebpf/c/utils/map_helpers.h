@@ -28,6 +28,14 @@
         __type(value, value_type);               \
     } name SEC(".maps")
 
+#define BPF_PERCPU_ARRAY_MAP(name, value_type, max_ents) \
+    struct {                                             \
+        __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);         \
+        __uint(max_entries, max_ents);                   \
+        __type(key, __u32);                              \
+        __type(value, value_type);                       \
+    } name SEC(".maps")
+
 #define BPF_RINGBUF(name, size)             \
     struct {                                \
         __uint(type, BPF_MAP_TYPE_RINGBUF); \

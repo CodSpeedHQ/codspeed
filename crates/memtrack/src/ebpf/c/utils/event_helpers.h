@@ -8,16 +8,36 @@
 BPF_RINGBUF(events, 256 * 1024 * 1024);
 BPF_ARRAY_MAP(dropped_events, __u64, 1);
 
-/* Wake the consumer only once this much unconsumed data has accumulated.
- * Per-event wakeups dominate submission cost at high event rates; batching
- * them behind a data watermark amortizes the wakeup to ~1 per thousand
- * events. The userspace poller's poll timeout flushes the tail that never
- * reaches the watermark. */
+/* Wake the consumer once this much data has been submitted. Per-event wakeups
+ * dominate submission cost at high event rates; batching them behind a data
+ * watermark amortizes the wakeup to ~1 per thousand events. The userspace
+ * poller's poll timeout flushes a tail that never reaches the watermark. */
 #define WAKEUP_DATA_SIZE (64 * 1024)
 
-static __always_inline long wake_flags(void) {
-    long avail = bpf_ringbuf_query(&events, BPF_RB_AVAIL_DATA);
-    return avail >= WAKEUP_DATA_SIZE ? BPF_RB_FORCE_WAKEUP : BPF_RB_NO_WAKEUP;
+/* Bytes submitted per CPU since the last forced wakeup.
+ *
+ * Counting what this CPU produced, rather than asking the ring buffer how much
+ * is unconsumed, keeps the decision on the producer side: bpf_ringbuf_query()
+ * reads the consumer position, a cache line the polling thread on another CPU
+ * writes continuously, so querying it per event costs a cross-CPU miss on every
+ * event. */
+BPF_PERCPU_ARRAY_MAP(submitted_bytes, __u64, 1);
+
+static __always_inline long wake_flags(__u64 event_size) {
+    __u32 zero = 0;
+    __u64* pending = bpf_map_lookup_elem(&submitted_bytes, &zero);
+    if (!pending) {
+        /* Can't track the watermark, so don't risk a stalled consumer. */
+        return BPF_RB_FORCE_WAKEUP;
+    }
+
+    *pending += event_size;
+    if (*pending < WAKEUP_DATA_SIZE) {
+        return BPF_RB_NO_WAKEUP;
+    }
+
+    *pending = 0;
+    return BPF_RB_FORCE_WAKEUP;
 }
 
 /* Per-thread scratch for the allocator entry/exit hand-off.
@@ -144,7 +164,7 @@ static __always_inline struct memtrack_task_state* take_slot(enum arg_slot slot)
                                                                         \
         fill_data;                                                      \
                                                                         \
-        bpf_ringbuf_submit(e, wake_flags());                  \
+        bpf_ringbuf_submit(e, wake_flags(sizeof(*e)));                  \
         return 0;                                                       \
     }
 
