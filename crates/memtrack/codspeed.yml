@@ -12,9 +12,11 @@ options:
   max-time: "60s"
 
 benchmarks:
-  # Read-only, low-allocation baseline.
+  # Read-only, low-allocation baseline. The tracked command string is run
+  # through `bash -c`, so output can be redirected away: otherwise every round
+  # dumps the whole listing into the runner log.
   - name: "memtrack track ls"
-    exec: codspeed-memtrack track "ls -la /usr/lib/x86_64-linux-gnu" --output /tmp/codspeed-memtrack-bench
+    exec: codspeed-memtrack track "ls -la /usr/lib/x86_64-linux-gnu > /dev/null" --output /tmp/codspeed-memtrack-bench
 
   # Allocation- and I/O-heavy: many small file reads.
   - name: "memtrack track tar"
@@ -22,4 +24,4 @@ benchmarks:
 
   # I/O-heavy with minimal allocation.
   - name: "memtrack track dd"
-    exec: codspeed-memtrack track "dd if=/dev/zero of=/tmp/memtrack-bench-dd.bin bs=1M count=64" --output /tmp/codspeed-memtrack-bench
+    exec: codspeed-memtrack track "dd if=/dev/zero of=/tmp/memtrack-bench-dd.bin bs=1M count=64 2> /dev/null" --output /tmp/codspeed-memtrack-bench
