@@ -1,6 +1,6 @@
-use super::elf_helper::find_debug_file;
 use super::loaded_module::LoadedModule;
 use super::module_symbols::ModuleSymbols;
+use crate::executor::helpers::debug_file::find_debug_file;
 use crate::prelude::*;
 use addr2line::{fallible_iterator::FallibleIterator, gimli};
 use object::{Object, ObjectSection};
@@ -265,10 +265,11 @@ mod tests {
         #[case] binary: &str,
         #[case] debug_file: &str,
     ) {
-        let (_dir, binary, _debug_file) = super::super::elf_helper::setup_debuglink_tmpdir(
-            Path::new(binary),
-            Path::new(debug_file),
-        );
+        let (_dir, binary, _debug_file) =
+            crate::executor::helpers::debug_file::setup_debuglink_tmpdir(
+                Path::new(binary),
+                Path::new(debug_file),
+            );
 
         let module_symbols = ModuleSymbols::from_elf(&binary).unwrap();
         assert!(!module_symbols.symbols().is_empty());

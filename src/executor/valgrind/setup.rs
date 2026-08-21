@@ -4,11 +4,16 @@ use crate::binary_pins::{
 };
 use crate::cli::run::helpers::download_pinned_file;
 use crate::executor::helpers::apt;
+use crate::executor::helpers::debug_file;
 use crate::executor::{ToolInstallStatus, ToolStatus};
 use crate::prelude::*;
 use crate::system::{LinuxDistribution, SupportedOs, SystemInfo};
 use semver::Version;
-use std::{env, path::Path, process::Command};
+use std::{
+    env,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 fn get_codspeed_valgrind_target(system_info: &SystemInfo) -> Result<ValgrindTarget> {
     let SupportedOs::Linux(distro) = &system_info.os else {
@@ -173,6 +178,53 @@ fn classify_valgrind_version(version: String) -> ToolInstallStatus {
     ToolInstallStatus::Installed { version }
 }
 
+/// Path of the system libc, following the Debian multiarch layout.
+fn system_libc_path(system_info: &SystemInfo) -> Option<PathBuf> {
+    let triplet = match system_info.arch.as_str() {
+        "x86_64" => "x86_64-linux-gnu",
+        "aarch64" => "aarch64-linux-gnu",
+        arch => {
+            debug!("No known multiarch triplet for {arch}");
+            return None;
+        }
+    };
+    Some(PathBuf::from(format!("/lib/{triplet}/libc.so.6")))
+}
+
+/// Whether a separate debug file can be resolved for `binary`, through the same
+/// build-id and `.gnu_debuglink` lookup that GDB and valgrind perform.
+fn has_debug_symbols(binary: &Path) -> bool {
+    let data = match std::fs::read(binary) {
+        Ok(data) => data,
+        Err(e) => {
+            debug!("Failed to read {}: {e}", binary.display());
+            return false;
+        }
+    };
+    let object = match object::File::parse(data.as_slice()) {
+        Ok(object) => object,
+        Err(e) => {
+            debug!("Failed to parse {} as ELF: {e}", binary.display());
+            return false;
+        }
+    };
+
+    match debug_file::find_debug_file(&object, binary) {
+        Some(debug_path) => {
+            debug!(
+                "Resolved debug file for {}: {}",
+                binary.display(),
+                debug_path.display()
+            );
+            true
+        }
+        None => {
+            debug!("No debug file found for {}", binary.display());
+            false
+        }
+    }
+}
+
 fn is_valgrind_installed(system_info: &SystemInfo) -> bool {
     if !matches!(
         get_valgrind_status().status,
@@ -181,14 +233,12 @@ fn is_valgrind_installed(system_info: &SystemInfo) -> bool {
         return false;
     }
 
-    // `libc6-dbg` is only relevant on apt-based systems; on others (e.g. NixOS)
-    // `dpkg` is absent and would spuriously report it as missing.
-    if apt::is_system_compatible(system_info) {
-        apt::is_package_installed("libc6-dbg")
-    } else {
-        debug!("Skipping libc6-dbg check on non-apt-based system");
-        true
+    if !apt::is_system_compatible(system_info) {
+        debug!("Skipping libc debug symbol check on non-apt-based system");
+        return true;
     }
+
+    system_libc_path(system_info).is_some_and(|libc| has_debug_symbols(&libc))
 }
 
 pub async fn install_valgrind(

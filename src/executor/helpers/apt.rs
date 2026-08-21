@@ -87,14 +87,6 @@ where
     Ok(())
 }
 
-/// Returns whether a package is currently installed according to `dpkg`.
-pub fn is_package_installed(package: &str) -> bool {
-    Command::new("dpkg")
-        .args(["-s", package])
-        .output()
-        .is_ok_and(|output| output.status.success())
-}
-
 pub fn install(system_info: &SystemInfo, packages: &[&str]) -> Result<()> {
     if !is_system_compatible(system_info) {
         bail!(
