@@ -5,6 +5,21 @@
 
 
 
+## [5.2.0] - 2026-08-24
+
+### <!-- 0 -->🚀 Features
+- Collect RSS via rss_stat and folio-rmap reconstruction (#453) by @not-matthias in [#453](https://github.com/CodSpeedHQ/runner/pull/453)
+- Add opt-in per-thread dumps and subprocess measurement by @GuillaumeLagrange
+
+### <!-- 1 -->🐛 Bug Fixes
+- Detect cached libc debug symbols by file, not dpkg state (#509) by @GuillaumeLagrange in [#509](https://github.com/CodSpeedHQ/runner/pull/509)
+
+### <!-- 7 -->⚙️ Internals
+- Bump pinned valgrind-codspeed to 3.26.0-0codspeed7 (#515) by @adriencaccia in [#515](https://github.com/CodSpeedHQ/runner/pull/515)
+- Small fixes for simulation subprocess tracking (#513) by @not-matthias in [#513](https://github.com/CodSpeedHQ/runner/pull/513)
+- Stop skipping rustup wrapper for valgrind by @GuillaumeLagrange in [#493](https://github.com/CodSpeedHQ/runner/pull/493)
+
+
 ## [5.1.0] - 2026-08-18
 
 ### <!-- 0 -->🚀 Features
@@ -1470,6 +1485,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[5.2.0]: https://github.com/CodSpeedHQ/runner/compare/v5.1.0..v5.2.0
 [5.1.0]: https://github.com/CodSpeedHQ/runner/compare/v5.0.2..v5.1.0
 [5.0.2]: https://github.com/CodSpeedHQ/runner/compare/v5.0.1..v5.0.2
 [5.0.1]: https://github.com/CodSpeedHQ/runner/compare/v5.0.0..v5.0.1
