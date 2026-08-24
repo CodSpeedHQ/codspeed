@@ -256,16 +256,7 @@ mod walltime {
     use crate::executor::wall_time::executor::WallTimeExecutor;
 
     async fn get_walltime_executor() -> (SemaphorePermit<'static>, WallTimeExecutor) {
-        static WALLTIME_INIT: OnceCell<()> = OnceCell::const_new();
         static WALLTIME_SEMAPHORE: OnceCell<Semaphore> = OnceCell::const_new();
-
-        WALLTIME_INIT
-            .get_or_init(|| async {
-                let executor = WallTimeExecutor::new(None);
-                let system_info = SystemInfo::new().unwrap();
-                executor.setup(&system_info, None).await.unwrap();
-            })
-            .await;
 
         // We can't execute multiple walltime executors in parallel because perf isn't thread-safe (yet). We have to
         // use a semaphore to limit concurrent access.
@@ -274,7 +265,11 @@ mod walltime {
             .await;
         let permit = semaphore.acquire().await.unwrap();
 
-        (permit, WallTimeExecutor::new(None))
+        let executor = WallTimeExecutor::new(None);
+        let system_info = SystemInfo::new().unwrap();
+        executor.setup(&system_info, None).await.unwrap();
+
+        (permit, executor)
     }
 
     fn walltime_config(command: &str, enable_profiler: bool) -> ExecutorConfig {

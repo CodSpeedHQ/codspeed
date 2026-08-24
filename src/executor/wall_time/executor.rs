@@ -10,6 +10,7 @@ use crate::executor::config::WalltimeProfiler;
 use crate::executor::helpers::command::CommandBuilder;
 use crate::executor::helpers::env::{build_path_env, get_base_injected_env};
 use crate::executor::helpers::get_bench_command::get_bench_command;
+use crate::executor::helpers::linux_sysctl::{LinuxSysctl, ensure_linux_profiling_sysctls};
 use crate::executor::helpers::run_command_with_log_pipe::run_command_with_log_pipe;
 use crate::executor::helpers::run_command_with_log_pipe::run_command_with_log_pipe_and_callback;
 use crate::executor::helpers::run_with_env::wrap_with_env;
@@ -37,6 +38,8 @@ pub struct WallTimeExecutor {
     /// Stashed by [`Executor::run`] and consumed by [`Executor::teardown`] to
     /// hand the run's outputs to [`Profiler::finalize`].
     benchmark_state: OnceCell<(FifoBenchmarkData, ExecutionTimestamps)>,
+
+    profiling_sysctls: OnceCell<Vec<LinuxSysctl>>,
 }
 
 fn select_profiler(profiler_override: Option<WalltimeProfiler>) -> Option<Box<dyn Profiler>> {
@@ -52,6 +55,7 @@ impl WallTimeExecutor {
         Self {
             profiler: select_profiler(profiler_override),
             benchmark_state: OnceCell::new(),
+            profiling_sysctls: OnceCell::new(),
         }
     }
 
@@ -107,8 +111,16 @@ impl Executor for WallTimeExecutor {
     }
 
     async fn setup(&self, system_info: &SystemInfo, setup_cache_dir: Option<&Path>) -> Result<()> {
-        if let Some(profiler) = &self.profiler {
-            profiler.setup(system_info, setup_cache_dir).await?;
+        let Some(profiler) = &self.profiler else {
+            return Ok(());
+        };
+
+        profiler.setup(system_info, setup_cache_dir).await?;
+        if self.profiling_sysctls.get().is_none() {
+            let sysctls = ensure_linux_profiling_sysctls()?;
+            self.profiling_sysctls
+                .set(sysctls)
+                .map_err(|_| anyhow!("profiling sysctls were initialized concurrently"))?;
         }
         Ok(())
     }
@@ -134,6 +146,7 @@ impl Executor for WallTimeExecutor {
         let Self {
             profiler,
             benchmark_state,
+            ..
         } = self;
 
         let status = match profiler.as_mut() {

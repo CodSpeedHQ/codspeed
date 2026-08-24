@@ -8,7 +8,6 @@ use crate::executor::helpers::detect_executable::command_has_executable;
 use crate::executor::helpers::env::is_codspeed_debug_enabled;
 use crate::executor::helpers::env::suppress_go_perf_unwinding_warning;
 use crate::executor::helpers::harvest_perf_maps_for_pids::harvest_perf_maps_for_pids;
-use crate::executor::helpers::linux_sysctl::ensure_linux_profiling_sysctls;
 use crate::executor::helpers::run_with_sudo::wrap_with_sudo;
 use crate::executor::shared::fifo::FifoBenchmarkData;
 use crate::executor::wall_time::profiler::NO_BENCHMARKS_DETECTED_WARNING;
@@ -83,7 +82,7 @@ impl Profiler for PerfProfiler {
         setup_cache_dir: Option<&Path>,
     ) -> anyhow::Result<()> {
         setup::install_perf(system_info, setup_cache_dir).await?;
-        ensure_linux_profiling_sysctls()
+        Ok(())
     }
 
     async fn wrap_command(

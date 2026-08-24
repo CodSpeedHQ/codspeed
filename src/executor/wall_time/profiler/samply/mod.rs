@@ -4,7 +4,6 @@ use crate::cli::InternalCommands;
 use crate::cli::samply::SamplyArgs;
 use crate::executor::ExecutorConfig;
 use crate::executor::helpers::command::CommandBuilder;
-use crate::executor::helpers::linux_sysctl::ensure_linux_profiling_sysctls;
 use crate::executor::helpers::run_with_sudo::wrap_with_sudo;
 use crate::executor::shared::fifo::FifoBenchmarkData;
 use crate::executor::wall_time::profiler::Profiler;
@@ -58,8 +57,6 @@ impl Profiler for SamplyProfiler {
         _system_info: &SystemInfo,
         _setup_cache_dir: Option<&Path>,
     ) -> anyhow::Result<()> {
-        ensure_linux_profiling_sysctls()?;
-
         // samply can't profile Apple-signed bash. Only do the brew dance if the
         // bash that samply would actually exec (the first `bash` on PATH) is
         // signed; if a compatible (ad-hoc-signed) bash is already first on PATH,

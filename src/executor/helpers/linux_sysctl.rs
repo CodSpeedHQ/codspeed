@@ -1,25 +1,62 @@
-use crate::prelude::*;
-
-#[cfg(target_os = "linux")]
 use crate::executor::helpers::run_with_sudo::run_with_sudo;
-#[cfg(any(test, target_os = "linux"))]
+use crate::prelude::*;
 use anyhow::Context;
-#[cfg(target_os = "linux")]
 use std::process::Command;
 
-pub fn ensure_linux_profiling_sysctls() -> Result<()> {
-    #[cfg(target_os = "linux")]
-    {
-        ensure_sysctl("kernel.kptr_restrict", 0)?;
-        ensure_sysctl("kernel.perf_event_paranoid", -1)?;
+/// Restores a sysctl to its initial value when dropped.
+#[derive(Debug)]
+#[must_use = "the sysctl is restored when this guard is dropped"]
+pub(crate) struct LinuxSysctl {
+    name: &'static str,
+    previous: Option<i64>,
+}
+
+impl LinuxSysctl {
+    pub(crate) fn set(name: &'static str, target_value: i64) -> Result<Self> {
+        let previous = ensure_sysctl(name, target_value)?;
+
+        Ok(Self { name, previous })
     }
 
-    Ok(())
+    pub(crate) fn is_changed(&self) -> bool {
+        self.previous.is_some()
+    }
+}
+
+impl Drop for LinuxSysctl {
+    fn drop(&mut self) {
+        let Some(value) = self.previous else {
+            return;
+        };
+
+        if let Err(error) = ensure_sysctl(self.name, value) {
+            warn!("Failed to restore {}={value}: {error}", self.name);
+        }
+    }
+}
+
+pub fn ensure_linux_profiling_sysctls() -> Result<Vec<LinuxSysctl>> {
+    if !cfg!(target_os = "linux") {
+        return Ok(Vec::new());
+    }
+
+    let mut sysctls = Vec::new();
+
+    for (name, target_value) in [
+        ("kernel.kptr_restrict", 0),
+        ("kernel.perf_event_paranoid", -1),
+    ] {
+        let sysctl = LinuxSysctl::set(name, target_value)?;
+        if sysctl.is_changed() {
+            sysctls.push(sysctl);
+        }
+    }
+
+    Ok(sysctls)
 }
 
 /// Sets a sysctl, returning the value it held before, or `None` when it was
 /// already at `target_value` and nothing was written.
-#[cfg(target_os = "linux")]
 pub(crate) fn ensure_sysctl(name: &str, target_value: i64) -> Result<Option<i64>> {
     let current_value = sysctl_read(name)?;
     if current_value == target_value {
@@ -32,7 +69,6 @@ pub(crate) fn ensure_sysctl(name: &str, target_value: i64) -> Result<Option<i64>
     Ok(Some(current_value))
 }
 
-#[cfg(target_os = "linux")]
 fn sysctl_read(name: &str) -> Result<i64> {
     let output = Command::new("sysctl").arg(name).output()?;
     let output = String::from_utf8(output.stdout)?;
@@ -40,7 +76,6 @@ fn sysctl_read(name: &str) -> Result<i64> {
     parse_sysctl_value(&output)
 }
 
-#[cfg(any(test, target_os = "linux"))]
 fn parse_sysctl_value(output: &str) -> Result<i64> {
     let (_, value) = output
         .split_once('=')
