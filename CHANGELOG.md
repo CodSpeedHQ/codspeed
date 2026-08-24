@@ -5,6 +5,12 @@
 
 
 
+## [5.2.1] - 2026-08-24
+
+### <!-- 0 -->🚀 Features
+- Bump go-runner to 1.3.0 (#516) by @adriencaccia in [#516](https://github.com/CodSpeedHQ/runner/pull/516)
+
+
 ## [5.2.0] - 2026-08-24
 
 ### <!-- 0 -->🚀 Features
@@ -1485,6 +1491,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[5.2.1]: https://github.com/CodSpeedHQ/runner/compare/v5.2.0..v5.2.1
 [5.2.0]: https://github.com/CodSpeedHQ/runner/compare/v5.1.0..v5.2.0
 [5.1.0]: https://github.com/CodSpeedHQ/runner/compare/v5.0.2..v5.1.0
 [5.0.2]: https://github.com/CodSpeedHQ/runner/compare/v5.0.1..v5.0.2
