@@ -78,6 +78,19 @@ pub enum MemtrackEventKind {
     Brk {
         size: u64,
     },
+    Fork {
+        parent_pid: pid_t,
+    },
+    Exec,
+    Exit,
+    Rss {
+        member: i32,
+        size: u64,
+    },
+    Rmap {
+        member: i32,
+        delta: i64,
+    },
 }
 
 pub struct MemtrackEventStream<R: Read> {
@@ -115,6 +128,16 @@ mod tests {
                 timestamp: 200,
                 addr: 0x20,
                 kind: MemtrackEventKind::Free,
+            },
+            MemtrackEvent {
+                pid: 1,
+                tid: 11,
+                timestamp: 300,
+                addr: 0,
+                kind: MemtrackEventKind::Rss {
+                    member: 1,
+                    size: 40960,
+                },
             },
         ];
 

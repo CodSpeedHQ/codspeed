@@ -13,7 +13,7 @@ fn generate_events(n: usize) -> Vec<MemtrackEvent> {
     let mut events = Vec::with_capacity(n);
     for _ in 0..n {
         let size = rng.gen_range(8..8192);
-        let kind = match rng.gen_range(0..8) {
+        let kind = match rng.gen_range(0..10) {
             0 => MemtrackEventKind::Malloc { size },
             1 => MemtrackEventKind::Free,
             2 => MemtrackEventKind::Realloc {
@@ -25,6 +25,14 @@ fn generate_events(n: usize) -> Vec<MemtrackEvent> {
             5 => MemtrackEventKind::Mmap { size },
             6 => MemtrackEventKind::Munmap { size },
             7 => MemtrackEventKind::Brk { size },
+            8 => MemtrackEventKind::Rss {
+                member: rng.gen_range(0..4),
+                size,
+            },
+            9 => MemtrackEventKind::Rmap {
+                member: rng.gen_range(0..4),
+                delta: rng.gen_range(-1024..1024),
+            },
             _ => unreachable!(),
         };
 

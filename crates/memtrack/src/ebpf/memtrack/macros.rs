@@ -145,3 +145,26 @@ macro_rules! attach_tracepoint {
         }
     };
 }
+
+/// Invokes `$cb!` with each folio rmap kernel function base name; callbacks
+/// build the `fentry_<name>` program/method idents from it with `paste!`.
+/// The PUD pair is a separate group because it appears in a later release than
+/// the core set; see `RmapSupport` for the floor each level needs.
+macro_rules! for_each_rmap_core_prog {
+    ($cb:ident) => {
+        $cb!(folio_add_new_anon_rmap);
+        $cb!(folio_add_anon_rmap_ptes);
+        $cb!(folio_add_anon_rmap_pmd);
+        $cb!(folio_add_file_rmap_ptes);
+        $cb!(folio_add_file_rmap_pmd);
+        $cb!(folio_remove_rmap_ptes);
+        $cb!(folio_remove_rmap_pmd);
+    };
+}
+
+macro_rules! for_each_rmap_pud_prog {
+    ($cb:ident) => {
+        $cb!(folio_add_file_rmap_pud);
+        $cb!(folio_remove_rmap_pud);
+    };
+}

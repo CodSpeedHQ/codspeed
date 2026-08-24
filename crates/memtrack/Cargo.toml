@@ -46,7 +46,7 @@ bindgen = "0.72"
 tempfile = { workspace = true }
 rstest = { workspace = true }
 test-log = { workspace = true }
-insta = { workspace = true }
+insta = { workspace = true, features = ["json", "redactions"] }
 test-with = { workspace = true }
 
 [package.metadata.dist]

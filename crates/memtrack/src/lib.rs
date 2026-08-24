@@ -3,6 +3,7 @@ mod bpf_token;
 #[cfg(feature = "ebpf")]
 mod ebpf;
 mod ipc;
+mod kernel;
 pub mod prelude;
 #[cfg(feature = "ebpf")]
 mod session;
@@ -13,6 +14,7 @@ pub use ipc::{
     IpcCommand as MemtrackIpcCommand, IpcMessage as MemtrackIpcMessage,
     IpcResponse as MemtrackIpcResponse, MemtrackIpcClient, MemtrackIpcServer,
 };
+pub use kernel::KernelVersion;
 
 #[cfg(feature = "ebpf")]
 pub use ebpf::*;
