@@ -9,13 +9,13 @@ use simplelog::SharedLogger;
 use std::collections::BTreeMap;
 use std::{env, fs};
 
-use crate::api_client::CodSpeedAPIClient;
+use crate::api_client::{Authentication, CodSpeedAPIClient};
 use crate::cli::run::helpers::{find_repository_root, get_env_variable};
 use crate::executor::config::OrchestratorConfig;
 use crate::prelude::*;
 use crate::request_client::OIDC_CLIENT;
 use crate::run_environment::interfaces::{
-    RepositoryProvider, RunEnvironmentMetadata, RunEvent, Sender,
+    GITHUB_ACTIONS_OIDC_DOCS_URL, RepositoryProvider, RunEnvironmentMetadata, RunEvent, Sender,
 };
 use crate::run_environment::provider::{RunEnvironmentDetector, RunEnvironmentProvider};
 use crate::run_environment::{RunEnvironment, RunPart};
@@ -289,11 +289,11 @@ impl RunEnvironmentProvider for GitHubActionsProvider {
     fn check_oidc_configuration(&mut self, api_client: &CodSpeedAPIClient) -> Result<()> {
         // Check if a static token is already set
         if api_client.token().is_some() {
-            announcement!(
+            announcement!(format!(
                 "You can now authenticate your CI workflows using OpenID Connect (OIDC) tokens instead of `CODSPEED_TOKEN` secrets.\n\
                 This makes integrating and authenticating jobs safer and simpler.\n\
-                Learn more at https://codspeed.io/docs/integrations/ci/github-actions/configuration#oidc-recommended\n"
-            );
+                Learn more at {GITHUB_ACTIONS_OIDC_DOCS_URL}\n"
+            ));
 
             return Ok(());
         }
@@ -313,15 +313,15 @@ impl RunEnvironmentProvider for GitHubActionsProvider {
                 bail!(
                     "Unable to retrieve OIDC token for authentication.\n\
                     Make sure your workflow has the `id-token: write` permission set.\n\
-                    See https://codspeed.io/docs/integrations/ci/github-actions/configuration#oidc-recommended"
+                    See {GITHUB_ACTIONS_OIDC_DOCS_URL}"
                 )
             }
 
-            announcement!(
+            announcement!(format!(
                 "You can now authenticate your CI workflows using OpenID Connect (OIDC).\n\
                 This makes integrating and authenticating jobs safer and simpler.\n\
-                Learn more at https://codspeed.io/docs/integrations/ci/github-actions/configuration#oidc-recommended\n"
-            );
+                Learn more at {GITHUB_ACTIONS_OIDC_DOCS_URL}\n"
+            ));
 
             return Ok(());
         }
@@ -366,14 +366,14 @@ impl RunEnvironmentProvider for GitHubActionsProvider {
                 Err(_) => None,
             };
 
-            if token.is_some() {
+            if let Some(token) = token {
                 debug!("Successfully retrieved OIDC token for authentication.");
-                api_client.set_token(token);
+                api_client.set_authentication(Authentication::Oidc(token));
             } else if self.is_repository_private {
                 bail!(
                     "Unable to retrieve OIDC token for authentication. \n\
                     Make sure your workflow has the `id-token: write` permission set. \n\
-                    See https://codspeed.io/docs/integrations/ci/github-actions/configuration#oidc-recommended"
+                    See {GITHUB_ACTIONS_OIDC_DOCS_URL}"
                 )
             } else {
                 warn!("Failed to retrieve OIDC token for authentication.");

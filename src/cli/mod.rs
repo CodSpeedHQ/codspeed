@@ -16,7 +16,7 @@ pub(crate) use shared::*;
 use std::path::PathBuf;
 
 use crate::{
-    api_client::CodSpeedAPIClient,
+    api_client::{Authentication, CodSpeedAPIClient},
     config::{CodSpeedConfig, ConfigOverrides},
     executor::helpers::command::CommandBuilder,
     local_logger::{CODSPEED_U8_COLOR_CODE, init_local_logger},
@@ -254,14 +254,18 @@ fn load_config(cli: &Cli) -> Result<CodSpeedConfig> {
 ///   2. `--oauth-token` / `CODSPEED_OAUTH_TOKEN` and the persisted CLI
 ///      token from the selected profile.
 fn build_api_client(cli: &Cli, config: &CodSpeedConfig) -> CodSpeedAPIClient {
-    let explicit = match &cli.command {
+    let run_token = match &cli.command {
         Commands::Run(args) => args.shared.token.clone(),
         Commands::Exec(args) => args.shared.token.clone(),
         _ => None,
     };
-    let token = match explicit {
-        Some(token) => Some(token),
-        None => config.auth.token.clone(),
+    let authentication = match run_token {
+        Some(token) => Authentication::RunToken(token),
+        None => config
+            .auth
+            .token
+            .clone()
+            .map_or(Authentication::Tokenless, Authentication::CliLogin),
     };
-    CodSpeedAPIClient::new(token, config.api_url.clone())
+    CodSpeedAPIClient::new(authentication, config.api_url.clone())
 }

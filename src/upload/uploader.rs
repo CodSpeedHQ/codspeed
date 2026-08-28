@@ -148,24 +148,25 @@ async fn retrieve_upload_data(
                     .map(|body| body.error)
                     .unwrap_or(text);
                 if status == StatusCode::UNAUTHORIZED {
-                    let additional_message = match upload_metadata.run_environment {
+                    let run_environment = &upload_metadata.run_environment;
+                    let additional_message = match run_environment {
                         RunEnvironment::GithubActions => {
-                            "Check that the workflow is correctly authenticated. View more at https://codspeed.io/docs/integrations/ci/github-actions/configuration#authentication"
+                            "Check that the workflow is correctly authenticated."
                         }
-                        RunEnvironment::GitlabCi => {
-                            "Check that the CI job is correctly authenticated. View more at https://codspeed.io/docs/integrations/ci/gitlab-ci/configuration#authentication"
-                        }
-                        RunEnvironment::Circleci => {
-                            "Check that the CI job is correctly authenticated. View more at https://codspeed.io/docs/integrations/ci/circleci/configuration#authentication"
+                        RunEnvironment::GitlabCi | RunEnvironment::Circleci => {
+                            "Check that the CI job is correctly authenticated."
                         }
                         RunEnvironment::Buildkite => {
-                            "Check that CODSPEED_TOKEN is set and has the correct value"
+                            "Check that CODSPEED_TOKEN is set and has the correct value."
                         }
                         RunEnvironment::Local => {
-                            "Run `codspeed auth login` to authenticate the CLI"
+                            "Run `codspeed auth login` to authenticate the CLI."
                         }
                     };
                     error_message.push_str(&format!("\n\n{additional_message}"));
+                    if let Some(url) = run_environment.authentication_docs_url() {
+                        error_message.push_str(&format!(" View more at {url}"));
+                    }
                 }
 
                 debug!(

@@ -33,6 +33,49 @@ pub enum RunEnvironment {
     Local,
 }
 
+impl fmt::Display for RunEnvironment {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = match self {
+            RunEnvironment::GithubActions => "GitHub Actions",
+            RunEnvironment::GitlabCi => "GitLab CI",
+            RunEnvironment::Buildkite => "Buildkite",
+            RunEnvironment::Circleci => "CircleCI",
+            RunEnvironment::Local => "Local",
+        };
+        write!(f, "{name}")
+    }
+}
+
+/// Authentication documentation, defined once so the messages that quote these
+/// pages cannot drift apart.
+pub const GITHUB_ACTIONS_AUTHENTICATION_DOCS_URL: &str =
+    "https://codspeed.io/docs/integrations/ci/github-actions/configuration#authentication";
+pub const GITHUB_ACTIONS_OIDC_DOCS_URL: &str =
+    "https://codspeed.io/docs/integrations/ci/github-actions/configuration#oidc-recommended";
+pub const GITLAB_CI_AUTHENTICATION_DOCS_URL: &str =
+    "https://codspeed.io/docs/integrations/ci/gitlab-ci/configuration#authentication";
+pub const CIRCLECI_AUTHENTICATION_DOCS_URL: &str =
+    "https://codspeed.io/docs/integrations/ci/circleci/configuration#authentication";
+pub const CIRCLECI_OIDC_DOCS_URL: &str =
+    "https://codspeed.io/docs/integrations/ci/circleci/configuration#oidc-recommended";
+pub const BUILDKITE_DOCS_URL: &str = "https://codspeed.io/docs/integrations/ci/buildkite";
+
+impl RunEnvironment {
+    /// The authentication section of this run environment's documentation.
+    ///
+    /// Buildkite covers its token as a setup step rather than in a section, so
+    /// its guide page stands in. Local runs have nothing to link.
+    pub fn authentication_docs_url(&self) -> Option<&'static str> {
+        match self {
+            RunEnvironment::GithubActions => Some(GITHUB_ACTIONS_AUTHENTICATION_DOCS_URL),
+            RunEnvironment::GitlabCi => Some(GITLAB_CI_AUTHENTICATION_DOCS_URL),
+            RunEnvironment::Circleci => Some(CIRCLECI_AUTHENTICATION_DOCS_URL),
+            RunEnvironment::Buildkite => Some(BUILDKITE_DOCS_URL),
+            RunEnvironment::Local => None,
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct RunEnvironmentMetadata {

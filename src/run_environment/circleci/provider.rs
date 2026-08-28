@@ -5,13 +5,16 @@ use async_trait::async_trait;
 use serde_json::Value;
 use simplelog::SharedLogger;
 
-use crate::api_client::CodSpeedAPIClient;
+use crate::api_client::{Authentication, CodSpeedAPIClient};
 use crate::cli::run::helpers::{
     GitRemote, find_repository_root, get_env_variable, parse_git_remote,
 };
 use crate::executor::config::OrchestratorConfig;
 use crate::prelude::*;
-use crate::run_environment::interfaces::{RepositoryProvider, RunEnvironmentMetadata, RunEvent};
+use crate::run_environment::interfaces::{
+    CIRCLECI_AUTHENTICATION_DOCS_URL, CIRCLECI_OIDC_DOCS_URL, RepositoryProvider,
+    RunEnvironmentMetadata, RunEvent,
+};
 use crate::run_environment::provider::{RunEnvironmentDetector, RunEnvironmentProvider};
 use crate::run_environment::{RunEnvironment, RunPart};
 
@@ -222,11 +225,11 @@ impl RunEnvironmentProvider for CircleCIProvider {
     fn check_oidc_configuration(&mut self, api_client: &CodSpeedAPIClient) -> Result<()> {
         if api_client.token().is_some() {
             if !self.is_forked_pull_request {
-                announcement!(
+                announcement!(format!(
                     "You can now authenticate your CircleCI jobs using OpenID Connect (OIDC) tokens instead of `CODSPEED_TOKEN` secrets.\n\
                     This makes integrating and authenticating jobs safer and simpler.\n\
-                    Learn more at https://codspeed.io/docs/integrations/ci/circleci/configuration#oidc-recommended\n"
-                );
+                    Learn more at {CIRCLECI_OIDC_DOCS_URL}\n"
+                ));
             }
 
             return Ok(());
@@ -236,7 +239,7 @@ impl RunEnvironmentProvider for CircleCIProvider {
             bail!(
                 "Pull requests opened from a fork cannot authenticate with OIDC on CircleCI.\n\
                 Set `CODSPEED_TOKEN` for this job instead.\n\
-                See https://codspeed.io/docs/integrations/ci/circleci/configuration#authentication"
+                See {CIRCLECI_AUTHENTICATION_DOCS_URL}"
             );
         }
 
@@ -245,7 +248,7 @@ impl RunEnvironmentProvider for CircleCIProvider {
                 "{error}\n\
                 Unable to mint an OIDC token for authentication. \
                 Set `CODSPEED_TOKEN` for this job instead.\n\
-                See https://codspeed.io/docs/integrations/ci/circleci/configuration#oidc-recommended"
+                See {CIRCLECI_OIDC_DOCS_URL}"
             );
         }
 
@@ -266,7 +269,7 @@ impl RunEnvironmentProvider for CircleCIProvider {
         let token = oidc::mint_token(self.get_oidc_audience())?;
 
         debug!("Minted an OIDC token to authenticate the upload");
-        api_client.set_token(Some(token));
+        api_client.set_authentication(Authentication::Oidc(token));
 
         Ok(())
     }
@@ -498,7 +501,9 @@ mod tests {
 
     fn api_client(token: Option<&str>) -> CodSpeedAPIClient {
         CodSpeedAPIClient::new(
-            token.map(str::to_string),
+            token.map_or(Authentication::Tokenless, |token| {
+                Authentication::RunToken(token.to_string())
+            }),
             "https://gql.codspeed.io/".to_string(),
         )
     }

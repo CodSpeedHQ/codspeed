@@ -174,6 +174,18 @@ impl Orchestrator {
         Ok(())
     }
 
+    fn log_authentication(&self, api_client: &CodSpeedAPIClient) {
+        let run_environment = self.provider.get_run_environment();
+
+        info!(
+            "Authentication: {}",
+            api_client.authentication().label(&run_environment)
+        );
+        if let Some(url) = run_environment.authentication_docs_url() {
+            info!("Learn more at {url}");
+        }
+    }
+
     /// Resolve the profile folder for a given run part.
     ///
     /// - Single run part + user-specified folder: use as-is
@@ -256,6 +268,11 @@ impl Orchestrator {
         for (run_part_index, (ctx, executor_name)) in completed_runs.iter_mut().enumerate() {
             // OIDC tokens can expire quickly, so refresh just before each upload
             self.provider.set_oidc_token(api_client).await?;
+
+            if run_part_index == 0 {
+                // After the mint, so this names the token the upload actually uses
+                self.log_authentication(api_client);
+            }
 
             if total_runs > 1 {
                 info!("Uploading results {}/{total_runs}", run_part_index + 1);

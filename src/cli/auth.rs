@@ -2,8 +2,9 @@ use std::io::Read;
 use std::time::Duration;
 
 use crate::api_client::{
-    CodSpeedAPIClient, RepositoryOverviewPayload, SessionAndRepositoryOverviewError,
-    SessionAndRepositoryOverviewVars, SessionError, SessionPayload,
+    Authentication, CodSpeedAPIClient, RepositoryOverviewPayload,
+    SessionAndRepositoryOverviewError, SessionAndRepositoryOverviewVars, SessionError,
+    SessionPayload,
 };
 use crate::cli::run::helpers::{
     ParsedRepository, find_repository_root, parse_repository_from_remote,
@@ -111,7 +112,8 @@ async fn login(
     };
 
     // Validate the token before persisting
-    let api_client_with_token = api_client.with_token(token.clone());
+    let api_client_with_token =
+        api_client.with_authentication(Authentication::CliLogin(token.clone()));
     api_client_with_token
         .session()
         .await

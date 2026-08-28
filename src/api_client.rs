@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use crate::executor::ExecutorName;
 use crate::prelude::*;
-use crate::run_environment::RepositoryProvider;
+use crate::run_environment::{RepositoryProvider, RunEnvironment};
 use console::style;
 use gql_client::{Client as GQLClient, ClientConfig};
 use nestify::nest;
@@ -12,50 +12,87 @@ pub struct CodSpeedAPIClient {
     gql_client: GQLClient,
     unauthenticated_gql_client: GQLClient,
     api_url: String,
-    /// The token this client authenticates with. Exposed so downstream
-    /// consumers (the uploader's `Authorization` header, the executor's
-    /// `CODSPEED_OAUTH_TOKEN` env injection) don't have to thread the
-    /// token separately from the client.
-    token: Option<String>,
+    authentication: Authentication,
 }
 
-impl CodSpeedAPIClient {
-    /// Build a client authenticated with `token` (when `Some`).
-    ///
-    /// The CLI resolves the effective token at construction time, so
-    /// callers downstream (the uploader, the executor's env injection,
-    /// every GraphQL caller) just consume it from the client through
-    /// [`Self::token`] and don't have to thread the token separately.
-    pub fn new(token: Option<String>, api_url: String) -> Self {
-        Self {
-            gql_client: build_gql_api_client(token.as_deref(), api_url.clone()),
-            unauthenticated_gql_client: build_gql_api_client(None, api_url.clone()),
-            api_url,
-            token,
+/// How the runner authenticates the uploads of a run, and the token it does so
+/// with.
+///
+/// The runner cannot always tell which kind of token it was handed: GitLab CI
+/// passes the OIDC token it issues through `CODSPEED_TOKEN`, exactly where a
+/// static CodSpeed token would be, and only the API can tell the two apart. So
+/// these variants name where the token came from, not what it turned out to be.
+///
+/// Deliberately not `Debug`: every variant but one holds a credential.
+#[derive(Clone)]
+pub enum Authentication {
+    /// An OIDC token the runner minted from the run environment. Replaced before
+    /// every upload, since a token expires an hour after it is minted.
+    Oidc(String),
+    /// The token the run was given through `--token` / `CODSPEED_TOKEN`.
+    RunToken(String),
+    /// A token obtained through `codspeed auth login`: either the one persisted
+    /// for the selected profile, or one passed through `--oauth-token` /
+    /// `CODSPEED_OAUTH_TOKEN`.
+    CliLogin(String),
+    /// No token at all. CodSpeed matches the upload to the job by looking for the
+    /// run hash the runner prints, which only works for public repositories.
+    Tokenless,
+}
+
+impl Authentication {
+    pub fn token(&self) -> Option<&str> {
+        match self {
+            Authentication::Oidc(token)
+            | Authentication::RunToken(token)
+            | Authentication::CliLogin(token) => Some(token),
+            Authentication::Tokenless => None,
         }
     }
 
-    /// Returns a client that uses `token` for authentication, regardless of
-    /// the token this client was built with.
-    pub fn with_token(&self, token: String) -> Self {
-        Self::new(Some(token), self.api_url.clone())
+    /// How to name it in the runner output.
+    pub fn label(&self, run_environment: &RunEnvironment) -> String {
+        match self {
+            Authentication::Oidc(_) => format!("OIDC token minted by {run_environment}"),
+            Authentication::RunToken(_) => "token from `CODSPEED_TOKEN`".to_owned(),
+            Authentication::CliLogin(_) => "token from `codspeed auth login`".to_owned(),
+            Authentication::Tokenless => {
+                "tokenless, supported for public repositories only".to_owned()
+            }
+        }
+    }
+}
+
+impl CodSpeedAPIClient {
+    pub fn new(authentication: Authentication, api_url: String) -> Self {
+        Self {
+            gql_client: build_gql_api_client(authentication.token(), api_url.clone()),
+            unauthenticated_gql_client: build_gql_api_client(None, api_url.clone()),
+            api_url,
+            authentication,
+        }
     }
 
-    /// The token this client currently authenticates with, if any.
-    ///
-    /// Note: this is not necessarily the token the client was built with —
-    /// in CI with OIDC, [`Self::set_token`] is called before each upload to
-    /// rotate the credentials. See [`crate::run_environment::RunEnvironmentProvider::refresh_token`].
+    /// A copy of this client, authenticating differently.
+    pub fn with_authentication(&self, authentication: Authentication) -> Self {
+        Self::new(authentication, self.api_url.clone())
+    }
+
     pub fn token(&self) -> Option<&str> {
-        self.token.as_deref()
+        self.authentication.token()
     }
 
-    /// Replace the token this client uses for authenticated GraphQL
-    /// requests and that the uploader pulls for its `Authorization`
-    /// header. The single mutation point for the credentials.
-    pub fn set_token(&mut self, token: Option<String>) {
-        self.gql_client = build_gql_api_client(token.as_deref(), self.api_url.clone());
-        self.token = token;
+    /// How this client authenticates. Not necessarily how it was built: with
+    /// OIDC the token is rotated before every upload, in
+    /// [`crate::run_environment::RunEnvironmentProvider::set_oidc_token`].
+    pub fn authentication(&self) -> &Authentication {
+        &self.authentication
+    }
+
+    /// The single mutation point for the credentials.
+    pub fn set_authentication(&mut self, authentication: Authentication) {
+        self.gql_client = build_gql_api_client(authentication.token(), self.api_url.clone());
+        self.authentication = authentication;
     }
 }
 
@@ -560,6 +597,6 @@ impl CodSpeedAPIClient {
     /// Create a test API client with a custom URL for use in tests
     #[cfg(test)]
     pub fn create_test_client_with_url(api_url: String) -> Self {
-        Self::new(None, api_url)
+        Self::new(Authentication::Tokenless, api_url)
     }
 }
