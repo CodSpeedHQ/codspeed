@@ -1,7 +1,7 @@
 use super::debug_info::debug_info_by_path;
 use super::loaded_module::LoadedModule;
+use super::naming;
 use crate::executor::valgrind::helpers::ignored_objects_path::get_objects_path_to_ignore;
-use crate::executor::wall_time::profiler::perf::naming;
 use crate::prelude::*;
 use libc::pid_t;
 use rayon::prelude::*;

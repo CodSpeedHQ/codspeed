@@ -1,4 +1,4 @@
-use super::module_symbols::{ModuleSymbols, Symbol};
+use crate::executor::shared::module_artifacts::module_symbols::{ModuleSymbols, Symbol};
 use crate::prelude::*;
 use linux_perf_data::jitdump::{JitDumpReader, JitDumpRecord};
 use runner_shared::unwind_data::{ProcessUnwindData, UnwindData};
