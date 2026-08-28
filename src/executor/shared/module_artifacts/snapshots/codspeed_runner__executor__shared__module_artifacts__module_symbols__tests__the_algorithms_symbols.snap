@@ -1,5 +1,5 @@
 ---
-source: src/executor/wall_time/perf/module_symbols.rs
+source: src/executor/shared/module_artifacts/module_symbols.rs
 expression: module_symbols
 ---
 ModuleSymbols {
