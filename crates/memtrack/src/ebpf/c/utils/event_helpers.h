@@ -2,6 +2,7 @@
 #define __EVENT_HELPERS_H__
 
 #include "../event.h"
+#include "../stack_capture.bpf.h"
 #include "map_helpers.h"
 #include "process_tracking.h"
 
@@ -88,36 +89,44 @@ static __always_inline __u64* take_param(void* map) {
         SUBMIT_EVENT_AS(owner.tgid, evt_type, fill_data); \
     }
 
-static __always_inline int submit_alloc_event(__u64 size, __u64 addr) {
+static __always_inline int submit_alloc_event(__u64 size, __u64 addr, __u64 stack_hash) {
     SUBMIT_GATED_EVENT(EVENT_TYPE_MALLOC, {
         e->data.alloc.addr = addr;
         e->data.alloc.size = size;
+        e->data.alloc.stack_hash = stack_hash;
     });
 }
 
-static __always_inline int submit_aligned_alloc_event(__u64 size, __u64 addr) {
+static __always_inline int submit_aligned_alloc_event(__u64 size, __u64 addr, __u64 stack_hash) {
     SUBMIT_GATED_EVENT(EVENT_TYPE_ALIGNED_ALLOC, {
         e->data.alloc.addr = addr;
         e->data.alloc.size = size;
+        e->data.alloc.stack_hash = stack_hash;
     });
 }
 
-static __always_inline int submit_calloc_event(__u64 size, __u64 addr) {
+static __always_inline int submit_calloc_event(__u64 size, __u64 addr, __u64 stack_hash) {
     SUBMIT_GATED_EVENT(EVENT_TYPE_CALLOC, {
         e->data.alloc.addr = addr;
         e->data.alloc.size = size;
+        e->data.alloc.stack_hash = stack_hash;
     });
 }
 
-static __always_inline int submit_free_event(__u64 addr) {
-    SUBMIT_GATED_EVENT(EVENT_TYPE_FREE, { e->data.free.addr = addr; });
+static __always_inline int submit_free_event(__u64 addr, __u64 stack_hash) {
+    SUBMIT_GATED_EVENT(EVENT_TYPE_FREE, {
+        e->data.free.addr = addr;
+        e->data.free.stack_hash = stack_hash;
+    });
 }
 
-static __always_inline int submit_realloc_event(__u64 old_addr, __u64 new_addr, __u64 size) {
+static __always_inline int submit_realloc_event(__u64 old_addr, __u64 new_addr, __u64 size,
+                                                __u64 stack_hash) {
     SUBMIT_GATED_EVENT(EVENT_TYPE_REALLOC, {
         e->data.realloc.old_addr = old_addr;
         e->data.realloc.new_addr = new_addr;
         e->data.realloc.size = size;
+        e->data.realloc.stack_hash = stack_hash;
     });
 }
 

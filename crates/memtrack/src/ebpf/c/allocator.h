@@ -9,6 +9,7 @@
     BPF_HASH_MAP(name##_arg, __u64, __u64, 10000);   \
     SEC(UPROBE_SEC)                                  \
     int uprobe_##name(struct pt_regs* ctx) {         \
+        stash_stack_hash(capture_stack(ctx));        \
         return store_param(&name##_arg, arg_expr);   \
     }                                                \
     SEC(URETPROBE_SEC)                               \
@@ -17,6 +18,7 @@
         if (!arg_ptr) {                              \
             return 0;                                \
         }                                            \
+        __u64 stack_hash = take_stack_hash();        \
         __u64 ret_val = PT_REGS_RC(ctx);             \
         if (ret_val == 0) {                          \
             return 0;                                \
@@ -32,6 +34,7 @@
         if (arg0 == 0) {                         \
             return 0;                            \
         }                                        \
+        __u64 stack_hash = capture_stack(ctx);   \
         submit_block;                            \
     }
 
@@ -50,6 +53,8 @@
             return 0;                                                         \
         }                                                                     \
                                                                               \
+        stash_stack_hash(capture_stack(ctx));                                 \
+                                                                              \
         struct name##_args_t args = {.arg0 = arg0_expr, .arg1 = arg1_expr};   \
                                                                               \
         bpf_map_update_elem(&name##_args, &tid, &args, BPF_ANY);              \
@@ -63,6 +68,7 @@
         if (!args) {                                                          \
             return 0;                                                         \
         }                                                                     \
+        __u64 stack_hash = take_stack_hash();                                 \
                                                                               \
         struct name##_args_t a = *args;                                       \
         bpf_map_delete_elem(&name##_args, &tid);                              \
@@ -77,20 +83,22 @@
         submit_block;                                                         \
     }
 
-UPROBE_ARG_RET(malloc, PT_REGS_PARM1(ctx), { return submit_alloc_event(arg0, ret_val); })
+UPROBE_ARG_RET(malloc, PT_REGS_PARM1(ctx),
+               { return submit_alloc_event(arg0, ret_val, stack_hash); })
 
-UPROBE_RET(free, PT_REGS_PARM1(ctx), { return submit_free_event(arg0); })
+UPROBE_RET(free, PT_REGS_PARM1(ctx), { return submit_free_event(arg0, stack_hash); })
 
 UPROBE_ARG_RET(calloc, PT_REGS_PARM1(ctx) * PT_REGS_PARM2(ctx),
-               { return submit_calloc_event(arg0, ret_val); })
+               { return submit_calloc_event(arg0, ret_val, stack_hash); })
 
 UPROBE_ARGS_RET(realloc, PT_REGS_PARM2(ctx), PT_REGS_PARM1(ctx),
-                { return submit_realloc_event(arg1, ret_val, arg0); })
+                { return submit_realloc_event(arg1, ret_val, arg0, stack_hash); })
 
 UPROBE_ARG_RET(aligned_alloc, PT_REGS_PARM2(ctx),
-               { return submit_aligned_alloc_event(arg0, ret_val); })
+               { return submit_aligned_alloc_event(arg0, ret_val, stack_hash); })
 
-UPROBE_ARG_RET(memalign, PT_REGS_PARM2(ctx), { return submit_aligned_alloc_event(arg0, ret_val); })
+UPROBE_ARG_RET(memalign, PT_REGS_PARM2(ctx),
+               { return submit_aligned_alloc_event(arg0, ret_val, stack_hash); })
 
 /*
  * posix_memalign(void** memptr, size_t alignment, size_t size)
@@ -115,6 +123,8 @@ int uprobe_posix_memalign(struct pt_regs* ctx) {
         return 0;
     }
 
+    stash_stack_hash(capture_stack(ctx));
+
     struct posix_memalign_args_t args = {.memptr = PT_REGS_PARM1(ctx), .size = PT_REGS_PARM3(ctx)};
     bpf_map_update_elem(&posix_memalign_args, &tid, &args, BPF_ANY);
     return 0;
@@ -127,6 +137,7 @@ int uretprobe_posix_memalign(struct pt_regs* ctx) {
     if (!args) {
         return 0;
     }
+    __u64 stack_hash = take_stack_hash();
 
     struct posix_memalign_args_t a = *args;
     bpf_map_delete_elem(&posix_memalign_args, &tid);
@@ -140,7 +151,7 @@ int uretprobe_posix_memalign(struct pt_regs* ctx) {
         return 0;
     }
 
-    return submit_aligned_alloc_event(a.size, addr);
+    return submit_aligned_alloc_event(a.size, addr, stack_hash);
 }
 
 struct mmap_args {
