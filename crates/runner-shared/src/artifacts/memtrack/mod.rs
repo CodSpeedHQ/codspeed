@@ -41,7 +41,7 @@ impl MemtrackArtifact {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MemtrackEvent {
     pub pid: pid_t,
     pub tid: pid_t,
@@ -51,23 +51,34 @@ pub struct MemtrackEvent {
     pub kind: MemtrackEventKind,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type")]
 pub enum MemtrackEventKind {
     Malloc {
         size: u64,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        stack_hash: u64,
     },
-    Free,
+    Free {
+        #[serde(default, skip_serializing_if = "is_zero")]
+        stack_hash: u64,
+    },
     Realloc {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         old_addr: Option<u64>,
         size: u64,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        stack_hash: u64,
     },
     Calloc {
         size: u64,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        stack_hash: u64,
     },
     AlignedAlloc {
         size: u64,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        stack_hash: u64,
     },
     Fork {
         parent_pid: pid_t,
@@ -97,6 +108,31 @@ pub enum MemtrackEventKind {
     Brk {
         size: u64,
     },
+
+    Stack {
+        #[serde(flatten)]
+        record: Box<StackRecord>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StackRecord {
+    pub hash: u64,
+    /// User stack pointer the copy starts at.
+    pub sp: u64,
+    /// Registers by DWARF number for the capturing architecture; 33 entries on x86_64.
+    pub regs: Vec<u64>,
+    /// Raw stack bytes read upward from `sp`.
+    #[serde(with = "serde_bytes")]
+    pub bytes: Vec<u8>,
+    /// In-kernel frame-pointer walk, innermost first; empty when unavailable.
+    pub fp_chain: Vec<u64>,
+    /// The copy filled its budget, so stack above it was not captured.
+    pub truncated: bool,
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 pub struct MemtrackEventStream<R: Read> {
@@ -126,14 +162,17 @@ mod tests {
                 tid: 11,
                 timestamp: 100,
                 addr: 0x10,
-                kind: MemtrackEventKind::Malloc { size: 64 },
+                kind: MemtrackEventKind::Malloc {
+                    size: 64,
+                    stack_hash: 0,
+                },
             },
             MemtrackEvent {
                 pid: 1,
                 tid: 12,
                 timestamp: 200,
                 addr: 0x20,
-                kind: MemtrackEventKind::Free,
+                kind: MemtrackEventKind::Free { stack_hash: 0 },
             },
             MemtrackEvent {
                 pid: 1,
@@ -173,18 +212,44 @@ mod tests {
         }
 
         let kinds = [
-            MemtrackEventKind::Malloc { size: 7 },
-            MemtrackEventKind::Free,
+            MemtrackEventKind::Malloc {
+                size: 7,
+                stack_hash: 0,
+            },
+            MemtrackEventKind::Malloc {
+                size: 7,
+                stack_hash: 0xCAFE_BABE,
+            },
+            MemtrackEventKind::Free { stack_hash: 0 },
+            MemtrackEventKind::Free { stack_hash: 0xFEED },
             MemtrackEventKind::Realloc {
                 old_addr: Some(0x1000),
                 size: 42,
+                stack_hash: 0,
             },
             MemtrackEventKind::Realloc {
                 old_addr: None,
                 size: 42,
+                stack_hash: 0x1234,
             },
-            MemtrackEventKind::Calloc { size: 9 },
-            MemtrackEventKind::AlignedAlloc { size: 9 },
+            MemtrackEventKind::Calloc {
+                size: 9,
+                stack_hash: 0,
+            },
+            MemtrackEventKind::AlignedAlloc {
+                size: 9,
+                stack_hash: 0,
+            },
+            MemtrackEventKind::Stack {
+                record: Box::new(StackRecord {
+                    hash: 0xDEAD_BEEF,
+                    sp: 0x7FFF_0000,
+                    regs: vec![0; 33],
+                    bytes: vec![1, 2, 3, 4],
+                    fp_chain: vec![0x1000, 0x2000],
+                    truncated: false,
+                }),
+            },
         ];
 
         for kind in kinds {
@@ -193,7 +258,7 @@ mod tests {
                 tid: 42,
                 timestamp: 0xDEAD,
                 addr: 0xBEEF,
-                kind,
+                kind: kind.clone(),
             };
             let shadow = Shadow {
                 pid: -7,
@@ -218,7 +283,10 @@ mod tests {
                 tid: 1,
                 timestamp: i,
                 addr: i,
-                kind: MemtrackEventKind::Malloc { size: i },
+                kind: MemtrackEventKind::Malloc {
+                    size: i,
+                    stack_hash: 0,
+                },
             })
             .collect();
 
@@ -268,7 +336,8 @@ mod tests {
             event.kind,
             MemtrackEventKind::Realloc {
                 old_addr: None,
-                size: 42
+                size: 42,
+                stack_hash: 0,
             }
         ));
 
@@ -291,7 +360,10 @@ mod tests {
                 MemtrackEventKind::Mmap { size: 4096 },
                 MemtrackEventKind::Munmap { size: 4096 },
                 MemtrackEventKind::Brk { size: 8192 },
-                MemtrackEventKind::Malloc { size: 64 },
+                MemtrackEventKind::Malloc {
+                    size: 64,
+                    stack_hash: 0,
+                },
             ]
         );
 
