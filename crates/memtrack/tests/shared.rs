@@ -31,7 +31,7 @@ macro_rules! assert_events_snapshot {
                 matches!(
                     e.kind,
                     MemtrackEventKind::Malloc { .. }
-                        | MemtrackEventKind::Free
+                        | MemtrackEventKind::Free { .. }
                         | MemtrackEventKind::Calloc { .. }
                         | MemtrackEventKind::Realloc { .. }
                         | MemtrackEventKind::AlignedAlloc { .. }
@@ -108,7 +108,7 @@ pub fn between_markers(events: &[Event]) -> Vec<Event> {
 
     const MARKER: u64 = 0xC0D5_9EED;
     let is_marker =
-        |e: &&Event| matches!(e.kind, MemtrackEventKind::Malloc { size } if size == MARKER);
+        |e: &&Event| matches!(e.kind, MemtrackEventKind::Malloc { size, .. } if size == MARKER);
 
     events
         .iter()
@@ -124,6 +124,7 @@ pub fn between_markers(events: &[Event]) -> Vec<Event> {
                     | MemtrackEventKind::Fork { .. }
                     | MemtrackEventKind::Exec
                     | MemtrackEventKind::Exit
+
             )
         })
         .sorted_by_key(|e| e.timestamp)
@@ -281,7 +282,7 @@ fn event_profile(events: &[Event]) -> EventProfile {
         if !matches!(
             event.kind,
             MemtrackEventKind::Malloc { .. }
-                | MemtrackEventKind::Free
+                | MemtrackEventKind::Free { .. }
                 | MemtrackEventKind::Calloc { .. }
                 | MemtrackEventKind::Realloc { .. }
                 | MemtrackEventKind::AlignedAlloc { .. }

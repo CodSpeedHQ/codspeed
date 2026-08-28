@@ -1,4 +1,6 @@
-use runner_shared::artifacts::{MemtrackEvent, MemtrackEventKind};
+use crate::prelude::*;
+use libbpf_rs::MapCore;
+use runner_shared::artifacts::{MemtrackEvent, MemtrackEventKind, StackRecord};
 
 // Include the bindings for event.h
 pub mod bindings {
@@ -34,13 +36,20 @@ pub fn parse_event(data: &[u8]) -> Option<MemtrackEvent> {
                 event.data.alloc.addr,
                 MemtrackEventKind::Malloc {
                     size: event.data.alloc.size,
+                    stack_hash: event.data.alloc.stack_hash,
                 },
             ),
-            EVENT_TYPE_FREE => (event.data.free.addr, MemtrackEventKind::Free),
+            EVENT_TYPE_FREE => (
+                event.data.free.addr,
+                MemtrackEventKind::Free {
+                    stack_hash: event.data.free.stack_hash,
+                },
+            ),
             EVENT_TYPE_CALLOC => (
                 event.data.alloc.addr,
                 MemtrackEventKind::Calloc {
                     size: event.data.alloc.size,
+                    stack_hash: event.data.alloc.stack_hash,
                 },
             ),
             EVENT_TYPE_REALLOC => (
@@ -48,12 +57,14 @@ pub fn parse_event(data: &[u8]) -> Option<MemtrackEvent> {
                 MemtrackEventKind::Realloc {
                     old_addr: Some(event.data.realloc.old_addr),
                     size: event.data.realloc.size,
+                    stack_hash: event.data.realloc.stack_hash,
                 },
             ),
             EVENT_TYPE_ALIGNED_ALLOC => (
                 event.data.alloc.addr,
                 MemtrackEventKind::AlignedAlloc {
                     size: event.data.alloc.size,
+                    stack_hash: event.data.alloc.stack_hash,
                 },
             ),
             EVENT_TYPE_MMAP => (
@@ -111,6 +122,74 @@ pub fn parse_event(data: &[u8]) -> Option<MemtrackEvent> {
     })
 }
 
+/// Decode one stack record from the ring buffer, returning it alongside the
+/// `bpf_get_stackid()` result its frame-pointer chain is stored under.
+pub fn parse_stack(data: &[u8]) -> Option<(MemtrackEvent, i64)> {
+    let header_len = std::mem::size_of::<stack_header>();
+    // SAFETY: the length is checked below, and the layout is the bindgen-generated C ABI struct.
+    let header: stack_header = if data.len() >= header_len {
+        unsafe { std::ptr::read_unaligned(data.as_ptr().cast()) }
+    } else {
+        warn!(
+            "malformed stack record: {} bytes, need at least {header_len}",
+            data.len()
+        );
+        return None;
+    };
+
+    let record_len = header_len + header.copy_len as usize;
+    if data.len() < record_len {
+        warn!(
+            "malformed stack record: {} bytes, need {record_len}",
+            data.len()
+        );
+        return None;
+    }
+
+    let event = MemtrackEvent {
+        pid: header.pid as i32,
+        tid: header.tid as i32,
+        timestamp: header.timestamp,
+        addr: 0,
+        kind: MemtrackEventKind::Stack {
+            record: Box::new(StackRecord {
+                hash: header.hash,
+                sp: header.sp,
+                regs: header.regs.reg.to_vec(),
+                bytes: data[header_len..record_len].to_vec(),
+                fp_chain: Vec::new(),
+                truncated: header.truncated != 0,
+            }),
+        },
+    };
+
+    Some((event, header.stackid))
+}
+
+/// The frame-pointer walk recorded under `stackid`, innermost frame first.
+/// Best effort: a missing chain costs the fallback for one stack, not the run.
+pub fn fp_chain(stack_traces: &impl MapCore, stackid: i64) -> Vec<u64> {
+    let Ok(key) = u32::try_from(stackid) else {
+        return Vec::new();
+    };
+
+    let value = match stack_traces.lookup(&key.to_ne_bytes(), libbpf_rs::MapFlags::ANY) {
+        Ok(Some(value)) => value,
+        Ok(None) => return Vec::new(),
+        Err(error) => {
+            warn!("Failed to read frame-pointer chain for stackid {stackid}: {error}");
+            return Vec::new();
+        }
+    };
+
+    // The map value is a fixed-depth array zero-padded past the last frame.
+    value
+        .chunks_exact(8)
+        .map(|word| u64::from_ne_bytes(word.try_into().expect("chunks_exact yields 8 bytes")))
+        .take_while(|&address| address != 0)
+        .collect()
+}
+
 /// A request from the exec-mapping watcher to attach allocator probes.
 #[derive(Debug, Clone, Copy)]
 pub struct AttachRequest {
@@ -157,6 +236,7 @@ mod tests {
         event.data.realloc.old_addr = 0x1000;
         event.data.realloc.new_addr = 0x2000;
         event.data.realloc.size = 256;
+        event.data.realloc.stack_hash = 0xbeef;
 
         let bytes = event_bytes(&event);
 
@@ -168,9 +248,14 @@ mod tests {
         assert_eq!(parsed.addr, 0x2000);
 
         match parsed.kind {
-            MemtrackEventKind::Realloc { old_addr, size } => {
+            MemtrackEventKind::Realloc {
+                old_addr,
+                size,
+                stack_hash,
+            } => {
                 assert_eq!(old_addr, Some(0x1000));
                 assert_eq!(size, 256);
+                assert_eq!(stack_hash, 0xbeef);
             }
             _ => panic!("Expected Realloc event kind"),
         }
@@ -186,6 +271,7 @@ mod tests {
         event.header.tid = 2000;
         event.data.alloc.addr = 0x1000;
         event.data.alloc.size = 128;
+        event.data.alloc.stack_hash = 0x1234;
 
         let bytes = event_bytes(&event);
 
@@ -197,8 +283,9 @@ mod tests {
         assert_eq!(parsed.addr, 0x1000);
 
         match parsed.kind {
-            MemtrackEventKind::Malloc { size } => {
+            MemtrackEventKind::Malloc { size, stack_hash } => {
                 assert_eq!(size, 128);
+                assert_eq!(stack_hash, 0x1234);
             }
             _ => panic!("Expected Malloc event kind"),
         }
@@ -275,5 +362,76 @@ mod tests {
             }
             _ => panic!("Expected Fork event kind"),
         }
+    }
+}
+
+#[cfg(test)]
+mod stack_tests {
+    use super::*;
+    use crate::ebpf::events::bindings::stack_regs;
+
+    fn encode(header: stack_header, payload: &[u8]) -> Vec<u8> {
+        // SAFETY: The bindgen-generated C ABI struct is copied as bytes for a test fixture.
+        let header_bytes = unsafe {
+            std::slice::from_raw_parts(
+                (&header as *const stack_header).cast::<u8>(),
+                std::mem::size_of::<stack_header>(),
+            )
+        };
+        let mut data = header_bytes.to_vec();
+        data.extend_from_slice(payload);
+        data
+    }
+
+    fn header(copy_len: u32) -> stack_header {
+        stack_header {
+            hash: 0x0123_4567_89ab_cdef,
+            timestamp: 987_654_321,
+            stackid: -17,
+            sp: 0x7fff_1234_5000,
+            pid: 41,
+            tid: 42,
+            copy_len,
+            truncated: 1,
+            _pad: [0; 3],
+            regs: stack_regs {
+                reg: std::array::from_fn(|index| 0x1000 + index as u64),
+            },
+        }
+    }
+
+    #[test]
+    fn well_formed_record_round_trips_every_field() {
+        let header = header(5);
+        let payload = [1, 2, 3, 4, 5];
+
+        let (event, stackid) = parse_stack(&encode(header, &payload)).unwrap();
+        assert_eq!(event.pid, 41);
+        assert_eq!(event.tid, 42);
+        assert_eq!(event.timestamp, 987_654_321);
+        assert_eq!(event.addr, 0);
+        assert_eq!(stackid, -17);
+
+        let MemtrackEventKind::Stack { record } = event.kind else {
+            panic!("expected Stack event");
+        };
+
+        assert_eq!(record.hash, header.hash);
+        assert_eq!(record.sp, header.sp);
+        assert_eq!(record.regs, header.regs.reg.to_vec());
+        assert_eq!(record.bytes, payload);
+        assert!(record.fp_chain.is_empty());
+        assert!(record.truncated);
+    }
+
+    #[test]
+    fn truncated_buffer_returns_none() {
+        let data = vec![0; std::mem::size_of::<stack_header>() - 1];
+        assert!(parse_stack(&data).is_none());
+    }
+
+    #[test]
+    fn missing_payload_returns_none() {
+        assert!(parse_stack(&encode(header(4), &[1, 2, 3])).is_none());
     }
 }

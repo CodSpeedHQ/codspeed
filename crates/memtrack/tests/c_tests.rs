@@ -110,7 +110,7 @@ fn test_track_allocators_disabled_skips_allocations() -> Result<(), Box<dyn std:
             matches!(
                 e.kind,
                 MemtrackEventKind::Malloc { .. }
-                    | MemtrackEventKind::Free
+                    | MemtrackEventKind::Free { .. }
                     | MemtrackEventKind::Calloc { .. }
                     | MemtrackEventKind::Realloc { .. }
                     | MemtrackEventKind::AlignedAlloc { .. }
