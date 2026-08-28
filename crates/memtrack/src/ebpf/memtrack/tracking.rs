@@ -1,4 +1,5 @@
 use super::{MemtrackBpf, RmapSupport};
+use crate::ebpf::mappings::MappingSupport;
 use crate::prelude::*;
 use paste::paste;
 
@@ -61,6 +62,28 @@ impl MemtrackBpf {
     pub fn attach_exec_watcher(&mut self) -> Result<()> {
         let link = with_skel!(mut self, skel => skel.progs.watch_exec_mmap.attach())
             .context("Failed to attach exec-mapping watcher")?;
+        self.probes.push(link);
+        Ok(())
+    }
+
+    /// Attach the mapping recorder: the LSM hook caching resolved paths and the
+    /// `perf_event_mmap` fentry emitting the address records. Only the LSM
+    /// variant the running kernel supports was loaded.
+    pub fn attach_mapping_recorder(&mut self) -> Result<()> {
+        let link = match self.mappings {
+            MappingSupport::Unsupported => return Ok(()),
+            MappingSupport::Legacy => {
+                with_skel!(mut self, skel => skel.progs.cache_mmap_path_legacy.attach())
+            }
+            MappingSupport::Kfunc => {
+                with_skel!(mut self, skel => skel.progs.cache_mmap_path_kfunc.attach())
+            }
+        }
+        .context("Failed to attach the mmap path resolver")?;
+        self.probes.push(link);
+
+        let link = with_skel!(mut self, skel => skel.progs.record_mmap.attach())
+            .context("Failed to attach the mapping recorder")?;
         self.probes.push(link);
         Ok(())
     }

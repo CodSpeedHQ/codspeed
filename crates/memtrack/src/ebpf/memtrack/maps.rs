@@ -2,6 +2,7 @@ use super::MemtrackBpf;
 use crate::ebpf::stacks::StackCaptureStats;
 use crate::prelude::*;
 use libbpf_rs::MapCore;
+use std::collections::HashMap;
 
 impl MemtrackBpf {
     pub fn add_tracked_pid(&mut self, pid: i32) -> Result<()> {
@@ -62,6 +63,39 @@ impl MemtrackBpf {
         )
     }
 
+    /// Number of mapping records dropped because their ring buffer was full.
+    /// A non-zero value means a module may be missing from the trace.
+    pub fn mapping_dropped_count(&self) -> Result<u64> {
+        read_counter(
+            with_skel!(self, skel => &skel.maps.mapping_dropped),
+            "mapping_dropped",
+        )
+    }
+
+    /// The paths the kernel resolved for every mapped file, keyed by
+    /// `(dev, ino)`. Only readable while the BPF object is alive.
+    pub fn mapped_paths(&self) -> Result<HashMap<(u64, u64), String>> {
+        let map = with_skel!(self, skel => &skel.maps.path_by_inode);
+
+        let mut paths = HashMap::new();
+        for key in map.keys() {
+            let Some(value) = map
+                .lookup(&key, libbpf_rs::MapFlags::ANY)
+                .context("Failed to read a resolved mapping path")?
+            else {
+                continue;
+            };
+
+            let Some((dev, ino)) = inode_key(&key) else {
+                continue;
+            };
+            if let Some(path) = inode_path(&value) {
+                paths.insert((dev, ino), path);
+            }
+        }
+        Ok(paths)
+    }
+
     pub fn dropped_events_count(&self) -> Result<u64> {
         read_counter(
             with_skel!(self, skel => &skel.maps.dropped_events),
@@ -116,6 +150,24 @@ fn le(bytes: &[u8]) -> u64 {
         .iter()
         .rev()
         .fold(0, |acc, &b| acc << 8 | u64::from(b))
+}
+
+/// Split a `struct inode_key { __u64 dev; __u64 ino; }` map key.
+fn inode_key(key: &[u8]) -> Option<(u64, u64)> {
+    if key.len() < 16 {
+        return None;
+    }
+    Some((le(&key[..8]), le(&key[8..16])))
+}
+
+/// Read a `struct inode_path { __u32 len; char path[]; }` map value. The kernel
+/// wrote `len` bytes including the NUL terminator.
+fn inode_path(value: &[u8]) -> Option<String> {
+    const PATH_OFFSET: usize = 4;
+
+    let len = u32::from_le_bytes(value.get(..PATH_OFFSET)?.try_into().ok()?) as usize;
+    let path = value.get(PATH_OFFSET..PATH_OFFSET + len.saturating_sub(1))?;
+    Some(String::from_utf8_lossy(path).into_owned())
 }
 
 /// Read slot 0 of a single-entry `__u64` array map.

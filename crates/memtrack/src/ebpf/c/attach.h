@@ -14,11 +14,6 @@
 #define MEMTRACK_PROT_EXEC 0x4
 #define MEMTRACK_SIGSTOP 19
 
-struct inode_key {
-    __u64 dev;
-    __u64 ino;
-};
-
 /* (dev, ino) -> 1; populated by userspace after classify/attach */
 BPF_HASH_MAP(known_inodes, struct inode_key, __u8, 8192);
 /* Requests are 24 B and rare; overflow aborts the run via the counter below */

@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use std::process::Command;
 use tempfile::TempDir;
 
-const COPY_SIZE: u32 = memtrack::DEFAULT_STACK_COPY_SIZE;
+const COPY_SIZE: u32 = 8192;
 
 fn compile_fixture(
     name: &str,
@@ -59,8 +59,7 @@ fn distinct_call_paths_get_distinct_stacks() -> Result<(), Box<dyn std::error::E
     }
     let temp_dir = TempDir::new()?;
     let binary = compile_fixture("stack_paths", &temp_dir)?;
-    let (events, thread_handle) =
-        shared::track_command_with_stacks(Command::new(&binary), COPY_SIZE)?;
+    let (events, thread_handle) = shared::track_command_with_stacks(Command::new(&binary))?;
 
     let records: Vec<_> = events
         .iter()
@@ -133,8 +132,7 @@ fn dedup_collapses_repeated_call_paths() -> Result<(), Box<dyn std::error::Error
     }
     let temp_dir = TempDir::new()?;
     let binary = compile_fixture("stack_paths_dedup", &temp_dir)?;
-    let (events, thread_handle) =
-        shared::track_command_with_stacks(Command::new(&binary), COPY_SIZE)?;
+    let (events, thread_handle) = shared::track_command_with_stacks(Command::new(&binary))?;
 
     let carried = event_hashes(&events);
     let records = record_hashes(&events);
@@ -144,45 +142,6 @@ fn dedup_collapses_repeated_call_paths() -> Result<(), Box<dyn std::error::Error
         carried.len(),
         records.len(),
         events.len()
-    );
-
-    thread_handle
-        .join()
-        .expect("tracker teardown thread panicked");
-    Ok(())
-}
-
-/// The largest budget stresses the verifier hardest: the copy loop and its
-/// unrolled per-chunk hash both scale with the configured size, so a program
-/// that loads at the default can still exceed the instruction limit here.
-/// It is also the only budget at which nothing can be budget-limited, because
-/// the stack mapping always ends first.
-#[test_with::env(GITHUB_ACTIONS)]
-#[test_log::test]
-fn max_copy_budget_loads_and_captures_whole_stacks() -> Result<(), Box<dyn std::error::Error>> {
-    if !require_mapping_support() {
-        return Ok(());
-    }
-    let temp_dir = TempDir::new()?;
-    let binary = compile_fixture("stack_paths_max", &temp_dir)?;
-    let (events, thread_handle) =
-        shared::track_command_with_stacks(Command::new(&binary), u32::MAX)?;
-
-    let truncated: Vec<_> = events
-        .iter()
-        .filter_map(|e| match &e.kind {
-            MemtrackEventKind::Stack { record: r } if r.truncated => Some(r.hash),
-            _ => None,
-        })
-        .collect();
-
-    assert!(
-        !record_hashes(&events).is_empty(),
-        "expected stack records at the maximum copy budget"
-    );
-    assert!(
-        truncated.is_empty(),
-        "no capture can be budget-limited at the maximum budget: {truncated:#x?}"
     );
 
     thread_handle

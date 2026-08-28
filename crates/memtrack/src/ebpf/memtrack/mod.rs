@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::mem::MaybeUninit;
 use std::path::Path;
 
+use crate::ebpf::mappings::MappingSupport;
 use crate::ebpf::poller::RingBufferPoller;
 
 mod token {
@@ -119,28 +120,35 @@ pub struct MemtrackBpf {
     pub(super) skel: Skel,
     pub(super) probes: Vec<Link>,
     rmap: RmapSupport,
+    pub(super) mappings: MappingSupport,
 }
 
 impl MemtrackBpf {
     /// Load the skeleton, picking the variant a BPF token is available for.
-    pub fn new_with_rmap(track_rmap: bool, stack_copy_size: Option<u32>) -> Result<Self> {
+    pub fn new_with_rmap(
+        track_rmap: bool,
+        capture_stacks: bool,
+        mappings: MappingSupport,
+    ) -> Result<Self> {
         let variant = if has_delegated_bpf_token() {
             BpfVariant::Token
         } else {
             BpfVariant::Legacy
         };
-        Self::with_variant(variant, track_rmap, stack_copy_size)
+        Self::with_variant(variant, track_rmap, capture_stacks, mappings)
     }
 
     /// Load a specific variant rather than the one [`Self::new_with_rmap`]
     /// would detect. Either attaches given host privileges; the token only
     /// matters when `bpf()` is called from an unprivileged user namespace.
     ///
-    /// `stack_copy_size` turns on allocation stack capture.
+    /// `capture_stacks` enables allocation stack capture, and `mappings`
+    /// selects the path-resolving LSM program the running kernel supports.
     pub fn with_variant(
         variant: BpfVariant,
         track_rmap: bool,
-        stack_copy_size: Option<u32>,
+        capture_stacks: bool,
+        mappings: MappingSupport,
     ) -> Result<Self> {
         crate::kernel::KernelBtf::ensure_available()?;
 
@@ -172,15 +180,14 @@ impl MemtrackBpf {
                         rodata.target_pidns_dev = dev;
                         rodata.target_pidns_ino = ino;
                     }
-                    if let Some(copy_size) = stack_copy_size {
+                    if capture_stacks {
                         rodata.capture_stacks_enabled = 1;
-                        rodata.stack_copy_size = copy_size;
                     }
                 }
 
                 // Avoid reserving the stack maps when capture is disabled. A
                 // ring buffer's size must stay a power-of-two page count.
-                if stack_copy_size.is_none() {
+                if !capture_stacks {
                     open_skel.maps.stacks.set_max_entries(4096)?;
                     open_skel.maps.stack_traces.set_max_entries(1)?;
                     open_skel.maps.seen_stack_hashes.set_max_entries(1)?;
@@ -209,6 +216,26 @@ impl MemtrackBpf {
                     RmapSupport::CoreAndPud => {}
                 }
 
+                // The kfunc variant fails to load on kernels without
+                // `bpf_path_d_path`, and neither LSM program can attach when the
+                // bpf LSM is inactive; without a path there is nothing to
+                // resolve records against, so the recorder goes too.
+                match mappings {
+                    MappingSupport::Unsupported => {
+                        open_skel.progs.cache_mmap_path_kfunc.set_autoload(false);
+                        open_skel.progs.cache_mmap_path_legacy.set_autoload(false);
+                        open_skel.progs.record_mmap.set_autoload(false);
+                        open_skel.maps.mappings.set_max_entries(4096)?;
+                        open_skel.maps.path_by_inode.set_max_entries(1)?;
+                    }
+                    MappingSupport::Legacy => {
+                        open_skel.progs.cache_mmap_path_kfunc.set_autoload(false);
+                    }
+                    MappingSupport::Kfunc => {
+                        open_skel.progs.cache_mmap_path_legacy.set_autoload(false);
+                    }
+                }
+
                 $skel(Box::new(
                     open_skel
                         .load()
@@ -230,6 +257,7 @@ impl MemtrackBpf {
             skel,
             probes: Vec::new(),
             rmap,
+            mappings,
         })
     }
 
@@ -293,6 +321,27 @@ impl MemtrackBpf {
             tx,
             poll_interval_ms,
         ))
+    }
+
+    /// Poll the mapping-record ring buffer into `tx`. Same contract as
+    /// [`Self::poll_events_with_channel`].
+    pub(crate) fn poll_mappings_with_channel(
+        &self,
+        poll_interval_ms: u64,
+        tx: std::sync::mpsc::Sender<crate::ebpf::mappings::MappingRecord>,
+    ) -> Result<RingBufferPoller> {
+        with_skel!(self, skel => RingBufferPoller::new(
+            &skel.maps.mappings,
+            crate::ebpf::mappings::MappingRecord::parse,
+            tx,
+            poll_interval_ms,
+        ))
+    }
+
+    /// Whether the mapping recorder is loaded, i.e. whether its ring buffer is
+    /// worth polling.
+    pub fn records_mappings(&self) -> bool {
+        self.mappings != MappingSupport::Unsupported
     }
 
     /// Number of currently-attached probes/links.

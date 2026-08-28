@@ -242,12 +242,10 @@ pub fn track_command_with_rmap_maps(
 }
 
 /// Track a command with allocation stack capture enabled, returning its events.
-pub fn track_command_with_stacks(command: Command, copy_size: u32) -> TrackResult {
+pub fn track_command_with_stacks(command: Command) -> TrackResult {
     track_command_with_opts(
         command,
-        TrackerOptions::builder()
-            .stack_copy_size(Some(copy_size))
-            .build(),
+        TrackerOptions::builder().stack_capture(true).build(),
     )
 }
 
