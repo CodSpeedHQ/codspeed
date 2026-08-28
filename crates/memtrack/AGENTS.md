@@ -20,11 +20,20 @@ Control plane: `src/ipc.rs` exposes an out-of-band `ipc-channel` protocol (`Enab
 
 Allocator discovery (`src/allocators/`): `AllocatorLib::find_all()` = dynamic (glob shared libs incl. `/nix/store/*` hints) + static-linked (scan build-dir ELF symbols) + env (`CODSPEED_MEMTRACK_BINARIES`). Each `AllocatorKind` (`Libc`/`LibCpp`/`Jemalloc`/`Mimalloc`/`Tcmalloc`) maps to best-effort attach helpers; only libc must succeed.
 
+Mapping collection (`src/perf_mappings.rs`) uses Linux's native per-CPU perf event stream, not an LSM/BPF availability gate. `PerfMappingPoller` opens a `PERF_TYPE_SOFTWARE` dummy event with `PERF_ATTR_INHERIT` and `PERF_ATTR_MMAP2` on every online CPU for the tracked process, mmaps a perf ring per CPU, and drains those rings on a poll thread. It keeps executable mappings with absolute paths from `PERF_RECORD_MMAP2` and emits the single artifact representation, `MemtrackEventKind::Mapping` inside `MemtrackArtifact.events`, carrying the mapping's pid/tid/timestamp/address/path/device/inode/file offset/length. Opening or enabling any perf event requires the host's perf permissions (for example an allowed `perf_event_paranoid` policy or `CAP_PERFMON`); a permission error is returned from `Tracker::spawn` rather than silently disabling mapping collection. Kernel `PERF_RECORD_LOST` records, ring overruns, and malformed records increment the shared mapping-loss counter. `Tracker::dropped_events_count()` includes that counter with BPF ring-buffer drops, and `codspeed-memtrack track` aborts when the total is non-zero because the artifact is incomplete.`
+
+### Event stream compatibility
+
+Session relies on Rust's declaration-order field drop: _poller, _stack_poller, then _perf_mapping_poller. The BPF event and stack pollers therefore disconnect, fully drain, and join before the perf poller is dropped. PerfMappingPoller buffers mapping records and emits them during shutdown, after ordinary allocation/RSS/stack events have reached encode_events; encode_events preserves input order, so Mapping records are a terminal suffix in the one artifact stream.
+
+This ordering is compatibility-critical. Mapping is a newer event variant; older stream consumers may treat the first unknown Mapping as EOF. Keeping it as the suffix lets those consumers process the complete memory timeline before stopping at that first unknown record. Do not reorder the poller fields or emit mapping records before shutdown.
+
 > Note: the "on-demand attach" design in `.agents/docs/` (AttachWorker, `CODSPEED_MEMTRACK_ONDEMAND`, SIGSTOP/SIGCONT) is a **plan, not yet in source**. Current behavior is upfront attach + `sched_fork` auto-tracking.
 
 ## Key Directories
 
-- `src/ebpf/` — BPF stack (feature-gated `ebpf`): `tracker.rs` (facade), `memtrack/` (libbpf-rs wrapper + generated skeleton, split into `mod.rs`/`macros.rs`/`maps.rs`/`allocator.rs`/`tracking.rs`), `poller.rs`, `events.rs`, `c/main.bpf.c` + `c/event.h` + `c/utils/*.h` + `c/allocator.h`.
+- `src/ebpf/` — BPF stack (feature-gated `ebpf`): `tracker.rs` (facade), `memtrack/` (libbpf-rs wrapper + generated skeleton, split into `mod.rs`/`macros.rs`/`maps.rs`/`allocator.rs`/`tracking.rs`), `stacks/`, `poller.rs`, `events.rs`, `c/main.bpf.c` + `c/event.h` + `c/stack_capture.bpf.h` + `c/utils/*.h` + `c/allocator.h`.
+- `src/perf_mappings.rs` — native per-CPU `PERF_RECORD_MMAP2` collector.
 - `src/allocators/` — allocator classification: `mod.rs`, `dynamic.rs`, `static_linked.rs`.
 - `tests/` — integration tests + `snapshots/` (insta).
 - `testdata/` — allocation fixtures: `*.c` (gcc), `alloc_cpp/` (cmkr/CMake), `alloc_rust/` + `spawn_wrapper/` (standalone Cargo workspaces).
@@ -76,6 +85,31 @@ sudo -E cargo test --test c_tests -- --test-threads 1
 - `vmlinux.h` is pinned to a specific git rev; `libbpf-rs` uses the `vendored` feature (dist links `libbpf-rs/static`).
 
 Env vars actually wired: `CODSPEED_MEMTRACK_BINARIES` (extra static-allocator binaries), `CODSPEED_LOG` (log filter, default `info`), `SUDO_UID`/`SUDO_GID` (privilege drop), `GITHUB_ACTIONS` (build rebuild trigger + test gate).
+
+### Minimum kernel version
+
+The BPF object needs **Linux >= 5.11** with `CONFIG_DEBUG_INFO_BTF` (vmlinux BTF). Nothing below is gated or `set_autoload(false)`-able, so the verifier rejects the whole skeleton on older kernels. Per feature:
+
+| Feature | Used in | Kernel |
+|---|---|---|
+| `BPF_MAP_TYPE_STACK_TRACE`, `bpf_get_stackid` | `c/stack_capture.bpf.h` | 4.6 |
+| `BPF_MAP_TYPE_LRU_HASH` | `c/utils/mm_ownership.h`, `c/rss.bpf.h` | 4.10 |
+| `PERF_RECORD_MMAP2` with `clockid` | `src/perf_mappings.rs` | 4.1 |
+| vmlinux BTF + CO-RE relocations | everything | 5.2 |
+| `bpf_send_signal` | `c/attach.h` | 5.3 |
+| `fentry/*`, `tp_btf/*` programs, `bpf_probe_read_user` | `c/attach.h`, `c/process_tracking.bpf.h`, `c/allocator.h` | 5.5 |
+| `tracepoint/kmem/rss_stat` with `mm_id`/`curr` fields | `c/rss.bpf.h` | 5.5 |
+| `bpf_get_ns_current_pid_tgid` | `c/utils/variant.h` | 5.7 |
+| `BPF_MAP_TYPE_RINGBUF`, `bpf_ringbuf_*` | all event paths | 5.8 |
+| `bpf_get_current_task_btf` (sets the floor) | `c/process_tracking.bpf.h`, `c/rss.bpf.h`, `c/rmap.bpf.h` | 5.11 |
+
+Gated on top of the floor:
+
+- rmap physical tracking (`src/ebpf/memtrack/rmap.rs`, `RmapSupport::for_version`): `Unsupported` < 6.8, PTE/PMD hooks 6.8–6.14, PUD hooks added at 6.15.
+- `Token` variant (`uprobe_multi` links, `c/memtrack_token.bpf.c`): >= 6.6; BPF token delegation itself needs 6.9. The `Legacy` variant (`perf_event_open` uprobes) is the fallback.
+- `folio` layout differences (`flags.f` >= 6.18, `_folio_order` < 6.6) are probed with `bpf_core_field_exists` in `c/utils/folio.h`.
+
+Consequences: cgroup-based BPF memory accounting (5.11) means `bump_memlock_rlimit` failing is always harmless, and userspace syscalls newer than the floor (e.g. `close_range`, 5.9) need no `ENOSYS` fallback.
 
 ## Testing & QA
 
