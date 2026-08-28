@@ -10,6 +10,7 @@ use crate::executor::helpers::env::suppress_go_perf_unwinding_warning;
 use crate::executor::helpers::harvest_perf_maps_for_pids::harvest_perf_maps_for_pids;
 use crate::executor::helpers::run_with_sudo::wrap_with_sudo;
 use crate::executor::shared::fifo::FifoBenchmarkData;
+use crate::executor::shared::module_artifacts::save_artifacts;
 use crate::executor::wall_time::profiler::NO_BENCHMARKS_DETECTED_WARNING;
 use crate::executor::wall_time::profiler::Profiler;
 use crate::executor::wall_time::profiler::SAMPLING_RATE_HZ;
@@ -29,16 +30,9 @@ use runner_shared::metadata::WalltimeMetadata;
 use std::path::Path;
 use std::path::PathBuf;
 
-mod debug_info;
-mod elf_helper;
 mod jit_dump;
-mod loaded_module;
-mod module_symbols;
-mod naming;
 mod parse_perf_file;
-mod save_artifacts;
 pub(crate) mod setup;
-mod unwind_data;
 
 pub mod fifo;
 pub mod perf_executable;
