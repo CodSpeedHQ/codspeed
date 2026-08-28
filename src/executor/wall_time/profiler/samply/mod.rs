@@ -184,11 +184,7 @@ impl Profiler for SamplyProfiler {
 
             // These fields aren't required in samply, since we symbolicate client-side.
             ignored_modules_by_pid: Default::default(),
-            debug_info: Default::default(),
-            mapped_process_debug_info_by_pid: Default::default(),
-            mapped_process_unwind_data_by_pid: Default::default(),
-            mapped_process_module_symbols: Default::default(),
-            path_key_to_path: Default::default(),
+            artifacts: Default::default(),
 
             // Deprecated fields below are no longer used
             debug_info_by_pid: Default::default(),
