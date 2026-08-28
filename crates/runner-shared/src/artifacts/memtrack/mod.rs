@@ -2,9 +2,11 @@ use libc::pid_t;
 use serde::{Deserialize, Serialize};
 use std::io::{BufReader, Read, Write};
 
+mod mappings;
 mod pipeline;
 mod writer;
 
+pub use mappings::*;
 pub use pipeline::*;
 pub use writer::*;
 
