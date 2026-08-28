@@ -94,7 +94,10 @@ mod tests {
                 tid: 1,
                 timestamp: i,
                 addr: i,
-                kind: MemtrackEventKind::Malloc { size: i },
+                kind: MemtrackEventKind::Malloc {
+                    size: i,
+                    stack_hash: 0,
+                },
             })
             .collect()
     }
