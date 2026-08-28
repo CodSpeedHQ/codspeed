@@ -2,6 +2,7 @@
 mod shared;
 
 use itertools::Itertools;
+use memtrack::TrackerOptions;
 use rstest::rstest;
 use runner_shared::artifacts::{MemtrackEvent, MemtrackEventKind};
 use serde::Serialize;
@@ -205,6 +206,13 @@ fn build_fixture(
     Ok((temp_dir, report_path, command))
 }
 
+fn rmap_only_options() -> TrackerOptions {
+    TrackerOptions::builder()
+        .allocators(false)
+        .rmap(true)
+        .build()
+}
+
 /// Run a fixture under `track` and return the raw `/proc` RSS report it wrote to
 /// its argv[1] alongside the collected events.
 ///
@@ -349,7 +357,9 @@ fn test_rss_rmap_tracking(
     #[case] source: &str,
     #[case] name: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let (raw_report, events) = track_fixture(source, name, shared::track_command_with_rmap)?;
+    let (raw_report, events) = track_fixture(source, name, |command| {
+        shared::track_command(command, rmap_only_options())
+    })?;
     let raw_report = raw_report.ok_or("fixture wrote no rss report")?;
     let (rss_stat, rmap) = per_pid_peaks(&events);
     let summary = RssSummary {
@@ -425,14 +435,14 @@ enum Reclaim {
 #[case::rss_stat(Reclaim::RssStat)]
 #[case::rmap(Reclaim::Rmap)]
 fn test_rss_external_reclaim(#[case] mode: Reclaim) -> Result<(), Box<dyn std::error::Error>> {
-    let track: fn(Command) -> shared::TrackResult = match mode {
-        Reclaim::RssStat => shared::track_command,
-        Reclaim::Rmap => shared::track_command_with_rmap,
+    let options = match mode {
+        Reclaim::RssStat => TrackerOptions::default(),
+        Reclaim::Rmap => rmap_only_options(),
     };
     let (_report, events) = track_fixture(
         include_str!("../testdata/rss/madvise_extern.c"),
         "madvise_extern",
-        track,
+        |command| shared::track_command(command, options),
     )?;
 
     // A = owner that faulted the file region; B = external caller, single-threaded
@@ -601,7 +611,7 @@ fn test_rss_rmap_thread_fork_tracks_child() -> Result<(), Box<dyn std::error::Er
     let (_raw_report, events) = track_fixture(
         include_str!("../testdata/rss/rmap_thread_fork.c"),
         "rmap_thread_fork",
-        shared::track_command_with_rmap,
+        |command| shared::track_command(command, rmap_only_options()),
     )?;
 
     // Single fork in the fixture: parent = the fixture process (tgid), child =
@@ -639,7 +649,7 @@ fn test_rmap_matches_rss_stat_across_execs() -> Result<(), Box<dyn std::error::E
         )
         .current_dir(temp_dir.path());
 
-    let (events, thread_handle) = shared::track_command_with_rmap(command)?;
+    let (events, thread_handle) = shared::track_command(command, rmap_only_options())?;
     thread_handle.join().unwrap();
 
     let (_order, rss, rmap) = per_pid_raw(&events);

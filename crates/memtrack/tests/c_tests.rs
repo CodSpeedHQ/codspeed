@@ -89,7 +89,7 @@ fn test_track_allocators_disabled_skips_allocations() -> Result<(), Box<dyn std:
         temp_dir.path(),
     )?;
 
-    let (events, thread_handle) = shared::track_command_with_opts(
+    let (events, thread_handle) = shared::track_command(
         std::process::Command::new(&binary),
         memtrack::TrackerOptions::builder()
             .allocators(false)

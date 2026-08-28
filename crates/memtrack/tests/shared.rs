@@ -90,11 +90,14 @@ macro_rules! assert_events_with_marker_for_each_variant {
     };
 }
 
-/// An event's kind and size, without the addresses that differ between runs of
-/// the same workload. `Realloc` needs spelling out since its `Debug` includes the
-/// old address.
+/// An event's kind and size, without the addresses or stack identities that
+/// differ between runs of the same workload.
 pub fn describe_kind(kind: &MemtrackEventKind) -> String {
     match kind {
+        MemtrackEventKind::Free { .. } => "Free".to_string(),
+        MemtrackEventKind::Malloc { size, .. } => format!("Malloc {{ size: {size} }}"),
+        MemtrackEventKind::Calloc { size, .. } => format!("Calloc {{ size: {size} }}"),
+        MemtrackEventKind::AlignedAlloc { size, .. } => format!("AlignedAlloc {{ size: {size} }}"),
         MemtrackEventKind::Realloc { size, .. } => format!("Realloc {{ size: {size} }}"),
         other => format!("{other:?}"),
     }
@@ -124,7 +127,7 @@ pub fn between_markers(events: &[Event]) -> Vec<Event> {
                     | MemtrackEventKind::Fork { .. }
                     | MemtrackEventKind::Exec
                     | MemtrackEventKind::Exit
-
+                    | MemtrackEventKind::Stack { .. }
             )
         })
         .sorted_by_key(|e| e.timestamp)
@@ -236,6 +239,16 @@ pub fn track_command_with_rmap_maps(
     let (tracker, events, ()) = run_tracked(command, tracker, |_, _| Ok(()))?;
     let maps = tracker.ownership_maps()?;
     Ok((events, maps, std::thread::spawn(move || drop(tracker))))
+}
+
+/// Track a command with allocation stack capture enabled, returning its events.
+pub fn track_command_with_stacks(command: Command, copy_size: u32) -> TrackResult {
+    track_command_with_opts(
+        command,
+        TrackerOptions::builder()
+            .stack_copy_size(Some(copy_size))
+            .build(),
+    )
 }
 
 /// Track a command with rmap hooks and snapshot the ownership maps at a
