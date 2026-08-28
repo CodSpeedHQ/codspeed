@@ -126,6 +126,16 @@ pub struct MemtrackMetadata {
 }
 
 impl MemtrackMetadata {
+    pub const CURRENT_VERSION: u64 = 1;
+
+    pub fn new(integration: (String, String), artifacts: ModuleArtifacts) -> Self {
+        Self {
+            version: Self::CURRENT_VERSION,
+            integration,
+            artifacts,
+        }
+    }
+
     pub fn from_reader<R: std::io::Read>(reader: R) -> anyhow::Result<Self> {
         serde_json::from_reader(reader).context("Could not parse memtrack metadata from JSON")
     }
@@ -233,7 +243,7 @@ mod tests {
     #[test]
     fn memtrack_metadata_round_trips() {
         let metadata = MemtrackMetadata {
-            version: 1,
+            version: MemtrackMetadata::CURRENT_VERSION,
             integration: ("codspeed-rust".to_string(), "4.2.0".to_string()),
             artifacts: populated_artifacts(),
         };
