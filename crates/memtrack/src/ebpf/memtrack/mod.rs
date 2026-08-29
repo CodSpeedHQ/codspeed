@@ -4,7 +4,7 @@ use libbpf_rs::skel::OpenSkel;
 use libbpf_rs::skel::SkelBuilder;
 use std::collections::HashMap;
 use std::mem::MaybeUninit;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::ebpf::poller::RingBufferPoller;
 
@@ -119,6 +119,25 @@ pub struct MemtrackBpf {
     pub(super) skel: Skel,
     pub(super) probes: Vec<Link>,
     rmap: RmapSupport,
+    /// Attach sites already claimed, as (program, library, offset, retprobe).
+    /// Allocator entry points share addresses through aliases (`free`,
+    /// `cfree` and `__libc_free` are one symbol in glibc), and attaching the
+    /// same program twice at one address makes it run twice per call.
+    pub(super) attached_sites: std::collections::HashSet<(&'static str, PathBuf, usize, bool)>,
+}
+
+impl MemtrackBpf {
+    /// Reserve an attach site, returning false if it is already instrumented.
+    pub(super) fn claim_site(
+        &mut self,
+        prog: &'static str,
+        lib_path: &Path,
+        offset: usize,
+        retprobe: bool,
+    ) -> bool {
+        self.attached_sites
+            .insert((prog, lib_path.to_path_buf(), offset, retprobe))
+    }
 }
 
 impl MemtrackBpf {
@@ -209,6 +228,7 @@ impl MemtrackBpf {
             skel,
             probes: Vec::new(),
             rmap,
+            attached_sites: std::collections::HashSet::new(),
         })
     }
 
