@@ -1,6 +1,15 @@
 use crate::prelude::*;
 use std::fmt;
 
+/// The running kernel's full release, e.g. `6.12.8+`.
+fn kernel_release() -> Result<String> {
+    const OSRELEASE_PATH: &str = "/proc/sys/kernel/osrelease";
+
+    std::fs::read_to_string(OSRELEASE_PATH)
+        .map(|release| release.trim().to_owned())
+        .with_context(|| format!("Failed to read {OSRELEASE_PATH}"))
+}
+
 /// A kernel release, ordered by `(major, minor)`. The patch level is ignored:
 /// features are introduced in merge windows, never in a stable point release.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -16,12 +25,8 @@ impl KernelVersion {
 
     /// The running kernel's release.
     pub fn current() -> Result<Self> {
-        const PATH: &str = "/proc/sys/kernel/osrelease";
-
-        let release =
-            std::fs::read_to_string(PATH).with_context(|| format!("Failed to read {PATH}"))?;
-        Self::parse(&release)
-            .with_context(|| format!("Failed to parse kernel release {:?}", release.trim()))
+        let release = kernel_release()?;
+        Self::parse(&release).with_context(|| format!("Failed to parse kernel release {release:?}"))
     }
 
     /// Parse the leading `<major>.<minor>` of a release string, ignoring
