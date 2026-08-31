@@ -136,6 +136,8 @@ impl MemtrackBpf {
     /// would detect. Either attaches given host privileges; the token only
     /// matters when `bpf()` is called from an unprivileged user namespace.
     pub fn with_variant(variant: BpfVariant, track_rmap: bool) -> Result<Self> {
+        crate::kernel::KernelBtf::ensure_available()?;
+
         let page_shift = page_shift()?;
         let rmap = if track_rmap {
             RmapSupport::detect()

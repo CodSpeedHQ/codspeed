@@ -14,7 +14,7 @@ pub use ipc::{
     IpcCommand as MemtrackIpcCommand, IpcMessage as MemtrackIpcMessage,
     IpcResponse as MemtrackIpcResponse, MemtrackIpcClient, MemtrackIpcServer,
 };
-pub use kernel::KernelVersion;
+pub use kernel::{KernelBtf, KernelVersion};
 
 #[cfg(feature = "ebpf")]
 pub use ebpf::*;
