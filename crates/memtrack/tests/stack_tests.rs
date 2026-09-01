@@ -197,3 +197,87 @@ fn explicit_disable_suppresses_stack_capture() -> Result<(), Box<dyn std::error:
         .expect("tracker teardown thread panicked");
     Ok(())
 }
+
+/// The doubling fixtures allocate down a three-level call chain and free in the
+/// reverse order, from three distinct depths (`nested_doubling.c`) or from the
+/// innermost frame (`nested_doubling_shared_free.c`). Both must pair every free
+/// with its allocation in reverse order and give each allocation depth its own
+/// stack identity.
+#[test_with::env(GITHUB_ACTIONS)]
+#[test_log::test]
+fn nested_doubling_frees_in_reverse_order() -> Result<(), Box<dyn std::error::Error>> {
+    if !require_mapping_support() {
+        return Ok(());
+    }
+    for (name, source) in [
+        (
+            "nested_doubling",
+            include_str!("../testdata/nested_doubling.c"),
+        ),
+        (
+            "nested_doubling_shared_free",
+            include_str!("../testdata/nested_doubling_shared_free.c"),
+        ),
+    ] {
+        let temp_dir = TempDir::new()?;
+        let binary = shared::compile_c_source(source, name, temp_dir.path())?;
+        let (events, thread_handle) = shared::track_command_with_stacks(Command::new(&binary))?;
+
+        let allocations: Vec<(u64, u64, u64)> = events
+            .iter()
+            .filter_map(|e| match e.kind {
+                MemtrackEventKind::Malloc { size, stack_hash } if (1024..=4096).contains(&size) => {
+                    Some((size, e.addr, stack_hash))
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(
+            allocations
+                .iter()
+                .map(|(size, ..)| *size)
+                .collect::<Vec<_>>(),
+            vec![1024, 2048, 4096],
+            "[{name}] each level must allocate twice its caller, outermost first"
+        );
+
+        // Both probes of one free report the same address, so dedup by address
+        // to recover the order the fixture released its buffers in.
+        let mut released: Vec<u64> = Vec::new();
+        let mut free_hashes: Vec<u64> = Vec::new();
+        for event in &events {
+            let MemtrackEventKind::Free { stack_hash } = event.kind else {
+                continue;
+            };
+            if released.last() == Some(&event.addr) {
+                continue;
+            }
+            released.push(event.addr);
+            free_hashes.push(stack_hash);
+        }
+
+        let allocated: Vec<u64> = allocations.iter().map(|(_, addr, _)| *addr).collect();
+        let expected: Vec<u64> = allocated.iter().rev().copied().collect();
+        assert_eq!(
+            released, expected,
+            "[{name}] buffers must be freed in the reverse of their allocation order"
+        );
+
+        let alloc_hashes: HashSet<u64> = allocations.iter().map(|(.., hash)| *hash).collect();
+        assert_eq!(
+            alloc_hashes.len(),
+            allocations.len(),
+            "[{name}] each allocation depth must carry its own stack identity"
+        );
+        assert!(
+            !alloc_hashes.contains(&0) && !free_hashes.contains(&0),
+            "[{name}] every allocation and free must carry a captured stack"
+        );
+
+        thread_handle
+            .join()
+            .expect("tracker teardown thread panicked");
+    }
+    Ok(())
+}
