@@ -1,22 +1,23 @@
 use crate::ebpf::attach_worker::AttachWorker;
-use crate::ebpf::mappings::{MappingRecord, MappingSupport, resolve_mappings};
 use crate::ebpf::spawn::{resume, spawn_stopped, wrap_stopped};
-use crate::ebpf::stacks::config::stack_capture_from_env;
-use crate::ebpf::stacks::counters::StackCaptureStats;
+use crate::ebpf::stacks::StackCaptureStats;
 use crate::ebpf::{BpfVariant, MemtrackBpf, OwnershipMaps};
+use crate::perf_mappings::PerfMappingPoller;
 use crate::prelude::*;
 use crate::session::Session;
 use parking_lot::Mutex;
-use runner_shared::artifacts::MemtrackMappings;
 use std::os::unix::process::CommandExt;
 use std::process::Command;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use typed_builder::TypedBuilder;
 
 #[derive(Debug, Clone, Copy, TypedBuilder)]
 pub struct TrackerOptions {
+    /// BPF attach mechanism, or automatic detection when unset.
+    #[builder(default)]
+    pub variant: Option<BpfVariant>,
     /// Attach allocator uprobes (malloc/free/calloc/...) through the
     /// exec-mapping watcher.
     #[builder(default = true)]
@@ -27,6 +28,9 @@ pub struct TrackerOptions {
     /// Capture allocation call stacks.
     #[builder(default = true)]
     pub stack_capture: bool,
+    /// Maximum bytes of user stack to copy per captured call stack.
+    #[builder(default = 8192)]
+    pub stack_budget: u32,
 }
 
 impl TrackerOptions {
@@ -37,21 +41,38 @@ impl TrackerOptions {
                 Ok("0") | Ok("false")
             ))
             .rmap(std::env::var("CODSPEED_MEMTRACK_TRACK_RMAP").is_ok_and(|v| v == "1"))
-            .stack_capture(stack_capture_from_env())
+            .stack_capture(!matches!(
+                std::env::var("CODSPEED_MEMTRACK_CAPTURE_STACKS").as_deref(),
+                Ok("0") | Ok("false")
+            ))
+            .stack_budget(
+                std::env::var("CODSPEED_MEMTRACK_STACK_BUDGET")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(8192),
+            )
             .build()
+    }
+}
+
+impl Default for TrackerOptions {
+    fn default() -> Self {
+        Self::builder().build()
     }
 }
 
 pub struct Tracker {
     bpf: Arc<Mutex<MemtrackBpf>>,
     worker: Mutex<Option<AttachWorker>>,
-    allocators: bool,
-    /// The dedup gate spans the whole BPF object, so a second session would
-    /// reference stack records the first one already consumed.
-    stacks_polled: Option<AtomicBool>,
-    /// Filled by the mapping poller; drained by [`Tracker::mappings`] after the
-    /// session is dropped, so the poller's final drain is included.
-    mapping_rx: Mutex<Option<mpsc::Receiver<MappingRecord>>>,
+    options: TrackerOptions,
+    /// Number of native perf mapping records lost due to ring-buffer overflow.
+    mapping_lost: Arc<AtomicU64>,
+}
+
+fn kill_and_wait(child: &mut std::process::Child) {
+    // Cleanup is best effort so the setup error remains the returned error.
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 impl Tracker {
@@ -63,48 +84,23 @@ impl Tracker {
 
     /// Create a tracker from an explicit probe selection rather than the environment.
     pub fn with_options(options: TrackerOptions) -> Result<Self> {
-        let mappings = MappingSupport::detect();
-
-        // Stacks are raw addresses: without mapped module paths nothing can
-        // attribute them, so capturing them would only inflate the artifact.
-        let capture_stacks = match (options.stack_capture, mappings) {
-            (true, MappingSupport::Unsupported) => {
-                warn!("Allocation stack capture needs in-kernel path resolution; disabling it");
-                false
-            }
-            (capture_stacks, _) => capture_stacks,
-        };
-        Self::build(
-            MemtrackBpf::new_with_rmap(options.rmap, capture_stacks, mappings)?,
-            options.allocators,
-            capture_stacks,
-        )
-    }
-    /// Like [`Tracker::new`], but pinned to a specific BPF variant instead of
-    /// the detected one.
-    pub fn with_variant(variant: BpfVariant) -> Result<Self> {
-        let track_rmap = TrackerOptions::from_env().rmap;
-        Self::build(
-            MemtrackBpf::with_variant(variant, track_rmap, false, MappingSupport::detect())?,
-            true,
-            false,
-        )
+        let bpf = MemtrackBpf::new(&options)?;
+        Self::build(bpf, options)
     }
 
     /// Build a tracker: attach lifetime tracepoints (and rmap fentries when the
     /// skeleton was opened for them), plus, when `allocators` is set, the
     /// exec-mapping watcher and the on-demand allocator-attach worker.
-    fn build(mut bpf: MemtrackBpf, allocators: bool, capture_stacks: bool) -> Result<Self> {
+    fn build(mut bpf: MemtrackBpf, options: TrackerOptions) -> Result<Self> {
         Self::bump_memlock_rlimit()?;
 
         bpf.attach_tracepoints()?;
-        if allocators {
+        if options.allocators {
             bpf.attach_exec_watcher()?;
-            bpf.attach_mapping_recorder()?;
         }
 
         let bpf = Arc::new(Mutex::new(bpf));
-        let worker = if allocators {
+        let worker = if options.allocators {
             Some(AttachWorker::start(bpf.clone())?)
         } else {
             None
@@ -113,9 +109,8 @@ impl Tracker {
         Ok(Self {
             bpf,
             worker: Mutex::new(worker),
-            allocators,
-            stacks_polled: capture_stacks.then(|| AtomicBool::new(false)),
-            mapping_rx: Mutex::new(None),
+            options,
+            mapping_lost: Arc::new(AtomicU64::new(0)),
         })
     }
 
@@ -128,80 +123,60 @@ impl Tracker {
     /// `uid_gid` drops the child's privileges (a `Command`'s uid/gid cannot be
     /// read back, so it cannot be preserved through the wrap).
     pub fn spawn(&self, cmd: &Command, uid_gid: Option<(u32, u32)>) -> Result<Session> {
-        let capture_stacks = match &self.stacks_polled {
-            Some(polled) if polled.swap(true, Ordering::Relaxed) => {
-                bail!("stack capture supports a single spawned command per tracker")
-            }
-            Some(_) => true,
-            None => false,
-        };
+        let capture_stacks = self.options.stack_capture;
 
         let mut wrapped = wrap_stopped(cmd);
         if let Some((uid, gid)) = uid_gid {
             wrapped.uid(uid).gid(gid);
         }
 
-        let child = spawn_stopped(&mut wrapped)?;
+        let mut child = spawn_stopped(&mut wrapped)?;
         let pid = child.id() as i32;
 
-        match self.worker.lock().as_ref() {
-            Some(worker) => worker.set_root_pid(pid),
-            // No watcher to arm means exec mappings would be missed.
-            None if self.allocators => bail!("tracker already finished"),
-            None => {}
-        }
+        let setup = (|| -> Result<_> {
+            match self.worker.lock().as_ref() {
+                Some(worker) => worker.set_root_pid(pid),
+                // No watcher to arm means exec mappings would be missed.
+                None if self.options.allocators => bail!("tracker already finished"),
+                None => {}
+            }
 
-        let (tx, rx) = mpsc::channel();
-        let (mapping_tx, mapping_rx) = mpsc::channel();
-        let (poller, stack_poller, mapping_poller) = {
-            let mut bpf = self.bpf.lock();
-            bpf.add_tracked_pid(pid)?;
-            let stack_poller = capture_stacks
-                .then(|| bpf.poll_stacks(10, tx.clone()))
+            let (tx, rx) = mpsc::channel();
+            let (poller, stack_poller) = {
+                let mut bpf = self.bpf.lock();
+                bpf.add_tracked_pid(pid)?;
+                let stack_poller = capture_stacks
+                    .then(|| bpf.poll_stacks(10, tx.clone()))
+                    .transpose()?;
+                (bpf.poll_events_with_channel(10, tx.clone())?, stack_poller)
+            };
+            let perf_mapping_poller = capture_stacks
+                .then(|| PerfMappingPoller::start(pid, tx, self.mapping_lost.clone()))
                 .transpose()?;
-            let mapping_poller = bpf
-                .records_mappings()
-                .then(|| bpf.poll_mappings_with_channel(10, mapping_tx))
-                .transpose()?;
-            (
-                bpf.poll_events_with_channel(10, tx)?,
-                stack_poller,
-                mapping_poller,
-            )
+
+            Ok((rx, poller, stack_poller, perf_mapping_poller))
+        })();
+        let (rx, poller, stack_poller, perf_mapping_poller) = match setup {
+            Ok(pollers) => pollers,
+            Err(error) => {
+                kill_and_wait(&mut child);
+                return Err(error);
+            }
         };
-        *self.mapping_rx.lock() = Some(mapping_rx);
-        resume(pid)?;
+
+        if let Err(error) = resume(pid) {
+            kill_and_wait(&mut child);
+            return Err(error);
+        }
 
         Ok(Session::new(
             child,
             rx,
             poller,
             stack_poller,
-            mapping_poller,
+            perf_mapping_poller,
         ))
     }
-
-    /// The module mappings recorded during the run, joined with the paths the
-    /// kernel resolved for them. Call after dropping the session so the poller's
-    /// final drain is included, and before the BPF object is torn down.
-    pub fn mappings(&self) -> Result<MemtrackMappings> {
-        let Some(rx) = self.mapping_rx.lock().take() else {
-            return Ok(MemtrackMappings::default());
-        };
-
-        let records: Vec<_> = rx.try_iter().collect();
-        let paths = self.bpf.lock().mapped_paths()?;
-
-        let dropped = self.bpf.lock().mapping_dropped_count()?;
-        if dropped > 0 {
-            warn!("{dropped} mapping records were dropped; some modules may be unresolved");
-        }
-
-        Ok(MemtrackMappings {
-            mappings: resolve_mappings(records, &paths),
-        })
-    }
-
     /// Enable allocator-event tracking in the BPF program. Lifetime events
     /// (rss_stat, rmap, fork/exec/exit) are emitted for tracked pids
     /// regardless of this toggle.
@@ -217,12 +192,16 @@ impl Tracker {
     /// Number of events the kernel dropped because the ring buffer was full.
     /// A non-zero value means the resulting trace is incomplete.
     pub fn dropped_events_count(&self) -> Result<u64> {
-        self.bpf.lock().dropped_events_count()
+        Ok(self.bpf.lock().dropped_events_count()? + self.mapping_lost.load(Ordering::Relaxed))
     }
 
     /// Per-cause counts of stack captures that were skipped or truncated.
     pub fn stack_capture_stats(&self) -> Result<StackCaptureStats> {
         self.bpf.lock().stack_capture_stats()
+    }
+
+    pub fn stack_capture_enabled(&self) -> bool {
+        self.options.stack_capture
     }
 
     /// Only meaningful while the BPF object is alive; teardown frees the maps.

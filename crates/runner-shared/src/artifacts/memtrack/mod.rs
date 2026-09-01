@@ -2,11 +2,9 @@ use libc::pid_t;
 use serde::{Deserialize, Serialize};
 use std::io::{BufReader, Read, Write};
 
-mod mappings;
 mod pipeline;
 mod writer;
 
-pub use mappings::*;
 pub use pipeline::*;
 pub use writer::*;
 
@@ -104,8 +102,18 @@ pub enum MemtrackEventKind {
         member: i32,
         delta: i64,
     },
+    /// One executable file mapping from a native PERF_RECORD_MMAP2 record.
+    /// The common event header carries its address, process, and timestamp.
+    Mapping {
+        path: String,
+        dev: u64,
+        ino: u64,
+        file_offset: u64,
+        len: u64,
+    },
 
     Stack {
+        // Box keeps the MemtrackEventKind enum small across millions of events.
         #[serde(flatten)]
         record: Box<StackRecord>,
     },
@@ -180,6 +188,19 @@ mod tests {
                     size: 40960,
                 },
             },
+            MemtrackEvent {
+                pid: 1,
+                tid: 11,
+                timestamp: 400,
+                addr: 0x400000,
+                kind: MemtrackEventKind::Mapping {
+                    path: "/usr/lib/libexample.so".into(),
+                    dev: 0x0801,
+                    ino: 0x1234,
+                    file_offset: 0x1000,
+                    len: 0x2000,
+                },
+            },
         ];
 
         let artifact = MemtrackArtifact {
@@ -239,6 +260,13 @@ mod tests {
             MemtrackEventKind::Mmap { size: 9 },
             MemtrackEventKind::Munmap { size: 9 },
             MemtrackEventKind::Brk { size: 9 },
+            MemtrackEventKind::Mapping {
+                path: "/usr/lib/libexample.so".into(),
+                dev: 0x0801,
+                ino: 0x1234,
+                file_offset: 0x1000,
+                len: 0x2000,
+            },
             MemtrackEventKind::Stack {
                 record: Box::new(StackRecord {
                     hash: 0xDEAD_BEEF,

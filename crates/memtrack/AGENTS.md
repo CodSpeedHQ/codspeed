@@ -84,7 +84,7 @@ sudo -E cargo test --test c_tests -- --test-threads 1
 - **Build toolchain:** `clang` + BTF/vmlinux headers, `libbpf-dev`, `zlib1g-dev`, `pkgconf`, `build-essential`; vendored libbpf also needs `autopoint`/`bison`/`flex`.
 - `vmlinux.h` is pinned to a specific git rev; `libbpf-rs` uses the `vendored` feature (dist links `libbpf-rs/static`).
 
-Env vars actually wired: `CODSPEED_MEMTRACK_BINARIES` (extra static-allocator binaries), `CODSPEED_LOG` (log filter, default `info`), `SUDO_UID`/`SUDO_GID` (privilege drop), `GITHUB_ACTIONS` (build rebuild trigger + test gate).
+Env vars actually wired: `CODSPEED_MEMTRACK_BINARIES` (extra static-allocator binaries), `CODSPEED_MEMTRACK_TRACK_ALLOCATORS` (0/false disables), `CODSPEED_MEMTRACK_TRACK_RMAP` (1 enables), `CODSPEED_MEMTRACK_CAPTURE_STACKS` (0/false disables), `CODSPEED_MEMTRACK_STACK_BUDGET` (stack copy size in bytes, default 8192), `CODSPEED_LOG` (log filter, default `info`), `SUDO_UID`/`SUDO_GID` (privilege drop), `GITHUB_ACTIONS` (build rebuild trigger + test gate).
 
 ## Testing & QA
 

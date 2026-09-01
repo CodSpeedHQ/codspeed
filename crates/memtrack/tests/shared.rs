@@ -9,6 +9,11 @@ use std::process::Command;
 
 pub type TrackResult = anyhow::Result<(Vec<Event>, std::thread::JoinHandle<()>)>;
 
+pub struct AllocationTestCase {
+    pub name: &'static str,
+    pub source: &'static str,
+}
+
 /// Snapshot every tracked event, ordered by timestamp and deduplicated by
 /// `(addr, kind)` so repeated tracking of one allocation counts once.
 ///
@@ -177,7 +182,11 @@ pub fn compile_rust_binary(
 
 /// Track a binary, collecting all memory events.
 pub fn track_binary(binary: &Path) -> TrackResult {
-    track_command(Command::new(binary))
+    track_command(Command::new(binary), None)
+}
+
+pub fn track_binary_with_env(binary: &Path) -> TrackResult {
+    track_command_with_tracker(Command::new(binary), Tracker::new()?)
 }
 
 pub fn compile_c_source(
@@ -201,15 +210,10 @@ pub fn compile_c_source(
     Ok(binary_path)
 }
 
-/// Track a command with the default probes: no rmap, and allocators discovered
-/// by the exec-mapping watcher as the tracked tree maps executables.
-pub fn track_command(command: Command) -> TrackResult {
-    track_command_with_opts(command, TrackerOptions::builder().build())
-}
-
-/// Track a command under a specific BPF variant rather than the detected one.
-pub fn track_command_with_variant(command: Command, variant: BpfVariant) -> TrackResult {
-    track_command_with_tracker(command, Tracker::with_variant(variant)?)
+/// Track a command with explicit options, using builder defaults when absent.
+pub fn track_command(command: Command, options: impl Into<Option<TrackerOptions>>) -> TrackResult {
+    let tracker = Tracker::with_options(options.into().unwrap_or_default())?;
+    track_command_with_tracker(command, tracker)
 }
 
 /// RSS reconstruction from the folio rmap hooks, without allocator probes.
@@ -218,16 +222,6 @@ fn rmap_only_options() -> TrackerOptions {
         .allocators(false)
         .rmap(true)
         .build()
-}
-
-/// Track a command with folio rmap hooks enabled, reconstructing per-process RSS.
-pub fn track_command_with_rmap(command: Command) -> TrackResult {
-    track_command_with_opts(command, rmap_only_options())
-}
-
-/// Track a command with an explicit probe selection rather than the environment's.
-pub fn track_command_with_opts(command: Command, options: TrackerOptions) -> TrackResult {
-    track_command_with_tracker(command, Tracker::with_options(options)?)
 }
 
 /// Track a command with rmap hooks and snapshot its ownership maps after the
@@ -239,14 +233,6 @@ pub fn track_command_with_rmap_maps(
     let (tracker, events, ()) = run_tracked(command, tracker, |_, _| Ok(()))?;
     let maps = tracker.ownership_maps()?;
     Ok((events, maps, std::thread::spawn(move || drop(tracker))))
-}
-
-/// Track a command with allocation stack capture enabled, returning its events.
-pub fn track_command_with_stacks(command: Command) -> TrackResult {
-    track_command_with_opts(
-        command,
-        TrackerOptions::builder().stack_capture(true).build(),
-    )
 }
 
 /// Track a command with rmap hooks and snapshot the ownership maps at a
@@ -319,7 +305,8 @@ pub fn for_each_variant(
     let mut profiles: Vec<(BpfVariant, EventProfile)> = Vec::new();
 
     for variant in [BpfVariant::Legacy, BpfVariant::Token] {
-        let tracker = match Tracker::with_variant(variant) {
+        let options = TrackerOptions::builder().variant(Some(variant)).build();
+        let tracker = match Tracker::with_options(options) {
             Ok(tracker) => tracker,
             Err(err) => {
                 eprintln!("skipping {variant:?} variant, cannot attach here: {err:#}");

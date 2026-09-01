@@ -115,32 +115,11 @@ struct event {
     } data;
 };
 
-/* Identifies a mapped file across both the attach watcher and the mapping
- * recorder. `dev` uses the kernel's s_dev encoding: (major << 20) | minor. */
-struct inode_key {
-    uint64_t dev;
-    uint64_t ino;
-};
-
 /* Request from the exec-mapping watcher to the userspace attach worker */
 struct attach_request {
     uint32_t pid;
     uint64_t dev; /* kernel s_dev encoding: (major << 20) | minor */
     uint64_t ino;
-};
-
-/* One executable file mapping, mirroring PERF_RECORD_MMAP2. The path is not
- * here: it is resolved once per inode into a BPF map that userspace joins
- * against, since every mapping of the same file shares it. */
-struct mapping_record {
-    uint64_t dev;
-    uint64_t ino;
-    uint64_t file_offset; /* offset of the mapping's first byte in the file */
-    uint64_t start;
-    uint64_t end;
-    uint64_t timestamp; /* monotonic time in nanoseconds (CLOCK_MONOTONIC) */
-    uint32_t pid;
-    uint32_t _pad;
 };
 
 #endif /* __EVENT_H__ */
