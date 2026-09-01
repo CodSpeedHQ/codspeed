@@ -355,7 +355,7 @@ fn test_rss_rmap_tracking(
         .physical(true)
         .build();
     let (raw_report, events) = track_fixture(source, name, |command| {
-        shared::track_command_with_opts(command, options)
+        shared::track_command(command, options)
     })?;
     let raw_report = raw_report.ok_or("fixture wrote no rss report")?;
     let (rss_stat, rmap) = per_pid_peaks(&events);
@@ -439,7 +439,7 @@ fn test_rss_external_reclaim(#[case] mode: Reclaim) -> Result<(), Box<dyn std::e
     let (_report, events) = track_fixture(
         include_str!("../testdata/rss/madvise_extern.c"),
         "madvise_extern",
-        |command| shared::track_command_with_opts(command, options),
+        |command| shared::track_command(command, options),
     )?;
 
     // A = owner that faulted the file region; B = external caller, single-threaded
@@ -612,7 +612,7 @@ fn test_rss_rmap_thread_fork_tracks_child() -> Result<(), Box<dyn std::error::Er
     let (_raw_report, events) = track_fixture(
         include_str!("../testdata/rss/rmap_thread_fork.c"),
         "rmap_thread_fork",
-        |command| shared::track_command_with_opts(command, options),
+        |command| shared::track_command(command, options),
     )?;
 
     // Single fork in the fixture: parent = the fixture process (tgid), child =
@@ -654,7 +654,7 @@ fn test_rmap_matches_rss_stat_across_execs() -> Result<(), Box<dyn std::error::E
         .allocators(false)
         .physical(true)
         .build();
-    let (events, thread_handle) = shared::track_command_with_opts(command, options)?;
+    let (events, thread_handle) = shared::track_command(command, options)?;
     thread_handle.join().unwrap();
 
     let (_order, rss, rmap) = per_pid_raw(&events);
