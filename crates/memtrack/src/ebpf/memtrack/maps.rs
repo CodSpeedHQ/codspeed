@@ -1,4 +1,5 @@
 use super::MemtrackBpf;
+use crate::ebpf::stacks::StackCaptureStats;
 use crate::prelude::*;
 use libbpf_rs::MapCore;
 
@@ -66,6 +67,10 @@ impl MemtrackBpf {
             with_skel!(self, skel => &skel.maps.dropped_events),
             "dropped_events",
         )
+    }
+
+    pub fn stack_capture_stats(&self) -> Result<StackCaptureStats> {
+        StackCaptureStats::read(with_skel!(self, skel => &skel.maps.stack_counters))
     }
 
     pub fn ownership_maps(&self) -> Result<OwnershipMaps> {
