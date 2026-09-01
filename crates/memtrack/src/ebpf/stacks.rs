@@ -2,7 +2,7 @@ use crate::ebpf::events::bindings::*;
 use crate::prelude::*;
 
 #[derive(Debug, Clone, Copy, Default, serde::Serialize)]
-pub struct StackCaptureStats {
+pub struct StackCaptureFailureStats {
     pub copy_failed: u64,
     pub hash_map_full: u64,
     pub stackid_failed: u64,
@@ -10,7 +10,7 @@ pub struct StackCaptureStats {
     pub ring_full: u64,
 }
 
-impl StackCaptureStats {
+impl StackCaptureFailureStats {
     pub fn read(map: &impl libbpf_rs::MapCore) -> Result<Self> {
         Ok(Self {
             copy_failed: slot(map, MEMTRACK_STACK_COUNTER_COPY_FAILED)?,
