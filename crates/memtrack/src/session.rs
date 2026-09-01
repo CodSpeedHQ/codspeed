@@ -10,6 +10,7 @@ pub struct Session {
     child: Child,
     events: Option<Receiver<MemtrackEvent>>,
     _poller: RingBufferPoller,
+    _stack_poller: Option<RingBufferPoller>,
 }
 
 impl Session {
@@ -17,11 +18,13 @@ impl Session {
         child: Child,
         events: Receiver<MemtrackEvent>,
         poller: RingBufferPoller,
+        stack_poller: Option<RingBufferPoller>,
     ) -> Self {
         Self {
             child,
             events: Some(events),
             _poller: poller,
+            _stack_poller: stack_poller,
         }
     }
 

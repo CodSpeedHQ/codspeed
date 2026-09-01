@@ -159,6 +159,13 @@ fn track_command(
     // exec mappings mean incomplete allocator coverage).
     tracker.finish()?;
 
+    if tracker.stack_capture_enabled() {
+        let stats = tracker
+            .stack_capture_stats()
+            .context("Failed to read stack capture stats")?;
+        debug!("stack capture stats: {stats:?}");
+    }
+
     // Detach probes explicitly: the IPC thread still holds an Arc clone, so the
     // tracker would otherwise never be dropped before process::exit and the
     // kernel would close every link fd serially during exit.

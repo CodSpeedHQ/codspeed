@@ -123,19 +123,25 @@ pub struct MemtrackBpf {
 
 impl MemtrackBpf {
     /// Load the skeleton, picking the variant a BPF token is available for.
-    pub fn new_with_rmap(track_rmap: bool) -> Result<Self> {
+    pub fn new_with_rmap(track_rmap: bool, stack_copy_size: Option<u32>) -> Result<Self> {
         let variant = if has_delegated_bpf_token() {
             BpfVariant::Token
         } else {
             BpfVariant::Legacy
         };
-        Self::with_variant(variant, track_rmap)
+        Self::with_variant(variant, track_rmap, stack_copy_size)
     }
 
     /// Load a specific variant rather than the one [`Self::new_with_rmap`]
     /// would detect. Either attaches given host privileges; the token only
     /// matters when `bpf()` is called from an unprivileged user namespace.
-    pub fn with_variant(variant: BpfVariant, track_rmap: bool) -> Result<Self> {
+    ///
+    /// `stack_copy_size` turns on allocation stack capture.
+    pub fn with_variant(
+        variant: BpfVariant,
+        track_rmap: bool,
+        stack_copy_size: Option<u32>,
+    ) -> Result<Self> {
         crate::kernel::KernelBtf::ensure_available()?;
 
         let page_shift = page_shift()?;
@@ -166,6 +172,19 @@ impl MemtrackBpf {
                         rodata.target_pidns_dev = dev;
                         rodata.target_pidns_ino = ino;
                     }
+                    if let Some(copy_size) = stack_copy_size {
+                        rodata.capture_stacks_enabled = 1;
+                        rodata.stack_copy_size = copy_size;
+                    }
+                }
+
+                // Avoid reserving the stack maps when capture is disabled. A
+                // ring buffer's size must stay a power-of-two page count.
+                if stack_copy_size.is_none() {
+                    open_skel.maps.stacks.set_max_entries(4096)?;
+                    open_skel.maps.stack_traces.set_max_entries(1)?;
+                    open_skel.maps.seen_stack_hashes.set_max_entries(1)?;
+                    open_skel.maps.pending_stack_hash.set_max_entries(1)?;
                 }
 
                 // Autoload is decided before load(), so fentries whose targets
@@ -224,6 +243,38 @@ impl MemtrackBpf {
         with_skel!(self, skel => RingBufferPoller::new(
             &skel.maps.events,
             crate::ebpf::events::parse_event,
+            tx,
+            poll_interval_ms,
+        ))
+    }
+
+    /// Poll the stack-record ring buffer into `tx`.
+    pub(crate) fn poll_stacks(
+        &self,
+        poll_interval_ms: u64,
+        tx: std::sync::mpsc::Sender<runner_shared::artifacts::MemtrackEvent>,
+    ) -> Result<RingBufferPoller> {
+        use crate::ebpf::stacks::events;
+        use runner_shared::artifacts::MemtrackEventKind;
+
+        // The poller outlives this borrow of the skeleton, so the chain lookup
+        // needs an owned handle rather than a reference to the skeleton map.
+        let stack_traces = with_skel!(self, skel => {
+            libbpf_rs::MapHandle::try_from(&skel.maps.stack_traces)
+                .context("Failed to create handle for stack_traces map")?
+        });
+
+        let parse = move |data: &[u8]| {
+            let (mut event, stackid) = events::parse_stack(data)?;
+            if let MemtrackEventKind::Stack { record } = &mut event.kind {
+                record.fp_chain = events::fp_chain(&stack_traces, stackid);
+            }
+            Some(event)
+        };
+
+        with_skel!(self, skel => RingBufferPoller::new(
+            &skel.maps.stacks,
+            parse,
             tx,
             poll_interval_ms,
         ))

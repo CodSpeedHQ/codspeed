@@ -1,5 +1,7 @@
 use crate::ebpf::attach_worker::AttachWorker;
 use crate::ebpf::spawn::{resume, spawn_stopped, wrap_stopped};
+use crate::ebpf::stacks::config::{clamp_copy_size, stack_copy_size_from_env};
+use crate::ebpf::stacks::counters::StackCaptureStats;
 use crate::ebpf::{BpfVariant, MemtrackBpf, OwnershipMaps};
 use crate::prelude::*;
 use crate::session::Session;
@@ -7,6 +9,7 @@ use parking_lot::Mutex;
 use std::os::unix::process::CommandExt;
 use std::process::Command;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use typed_builder::TypedBuilder;
 
@@ -19,6 +22,10 @@ pub struct TrackerOptions {
     /// Reconstruct per-process RSS from the folio rmap fentry hooks.
     #[builder(default = false)]
     pub rmap: bool,
+    /// Bytes of user stack to copy for each allocation event. `None` leaves
+    /// stack capture off; values are clamped to the supported range.
+    #[builder(default = None)]
+    pub stack_copy_size: Option<u32>,
 }
 
 impl TrackerOptions {
@@ -29,6 +36,7 @@ impl TrackerOptions {
                 Ok("0") | Ok("false")
             ))
             .rmap(std::env::var("CODSPEED_MEMTRACK_TRACK_RMAP").is_ok_and(|v| v == "1"))
+            .stack_copy_size(stack_copy_size_from_env())
             .build()
     }
 }
@@ -37,6 +45,9 @@ pub struct Tracker {
     bpf: Arc<Mutex<MemtrackBpf>>,
     worker: Mutex<Option<AttachWorker>>,
     allocators: bool,
+    /// The dedup gate spans the whole BPF object, so a second session would
+    /// reference stack records the first one already consumed.
+    stacks_polled: Option<AtomicBool>,
 }
 
 impl Tracker {
@@ -48,9 +59,11 @@ impl Tracker {
 
     /// Create a tracker from an explicit probe selection rather than the environment.
     pub fn with_options(options: TrackerOptions) -> Result<Self> {
+        let copy_size = options.stack_copy_size.map(clamp_copy_size);
         Self::build(
-            MemtrackBpf::new_with_rmap(options.rmap)?,
+            MemtrackBpf::new_with_rmap(options.rmap, copy_size)?,
             options.allocators,
+            copy_size.is_some(),
         )
     }
 
@@ -58,13 +71,17 @@ impl Tracker {
     /// the detected one.
     pub fn with_variant(variant: BpfVariant) -> Result<Self> {
         let track_rmap = TrackerOptions::from_env().rmap;
-        Self::build(MemtrackBpf::with_variant(variant, track_rmap)?, true)
+        Self::build(
+            MemtrackBpf::with_variant(variant, track_rmap, None)?,
+            true,
+            false,
+        )
     }
 
     /// Build a tracker: attach lifetime tracepoints (and rmap fentries when the
     /// skeleton was opened for them), plus, when `allocators` is set, the
     /// exec-mapping watcher and the on-demand allocator-attach worker.
-    fn build(mut bpf: MemtrackBpf, allocators: bool) -> Result<Self> {
+    fn build(mut bpf: MemtrackBpf, allocators: bool, capture_stacks: bool) -> Result<Self> {
         Self::bump_memlock_rlimit()?;
 
         bpf.attach_tracepoints()?;
@@ -83,6 +100,7 @@ impl Tracker {
             bpf,
             worker: Mutex::new(worker),
             allocators,
+            stacks_polled: capture_stacks.then(|| AtomicBool::new(false)),
         })
     }
 
@@ -95,6 +113,14 @@ impl Tracker {
     /// `uid_gid` drops the child's privileges (a `Command`'s uid/gid cannot be
     /// read back, so it cannot be preserved through the wrap).
     pub fn spawn(&self, cmd: &Command, uid_gid: Option<(u32, u32)>) -> Result<Session> {
+        let capture_stacks = match &self.stacks_polled {
+            Some(polled) if polled.swap(true, Ordering::Relaxed) => {
+                bail!("stack capture supports a single spawned command per tracker")
+            }
+            Some(_) => true,
+            None => false,
+        };
+
         let mut wrapped = wrap_stopped(cmd);
         if let Some((uid, gid)) = uid_gid {
             wrapped.uid(uid).gid(gid);
@@ -102,6 +128,7 @@ impl Tracker {
 
         let child = spawn_stopped(&mut wrapped)?;
         let pid = child.id() as i32;
+
         match self.worker.lock().as_ref() {
             Some(worker) => worker.set_root_pid(pid),
             // No watcher to arm means exec mappings would be missed.
@@ -110,14 +137,17 @@ impl Tracker {
         }
 
         let (tx, rx) = mpsc::channel();
-        let poller = {
+        let (poller, stack_poller) = {
             let mut bpf = self.bpf.lock();
             bpf.add_tracked_pid(pid)?;
-            bpf.poll_events_with_channel(10, tx)?
+            let stack_poller = capture_stacks
+                .then(|| bpf.poll_stacks(10, tx.clone()))
+                .transpose()?;
+            (bpf.poll_events_with_channel(10, tx)?, stack_poller)
         };
         resume(pid)?;
 
-        Ok(Session::new(child, rx, poller))
+        Ok(Session::new(child, rx, poller, stack_poller))
     }
 
     /// Enable allocator-event tracking in the BPF program. Lifetime events
@@ -136,6 +166,11 @@ impl Tracker {
     /// A non-zero value means the resulting trace is incomplete.
     pub fn dropped_events_count(&self) -> Result<u64> {
         self.bpf.lock().dropped_events_count()
+    }
+
+    /// Per-cause counts of stack captures that were skipped or truncated.
+    pub fn stack_capture_stats(&self) -> Result<StackCaptureStats> {
+        self.bpf.lock().stack_capture_stats()
     }
 
     /// Only meaningful while the BPF object is alive; teardown frees the maps.
