@@ -2,13 +2,9 @@
 mod shared;
 
 use rstest::rstest;
+use shared::AllocationTestCase;
 use std::process::Command;
 use tempfile::TempDir;
-
-struct AllocationTestCase {
-    name: &'static str,
-    source: &'static str,
-}
 
 const ALLOCATION_TEST_CASES: &[AllocationTestCase] = &[
     AllocationTestCase {

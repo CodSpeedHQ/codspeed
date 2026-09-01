@@ -34,6 +34,9 @@ itertools = { workspace = true }
 paste = "1.0.15"
 libbpf-rs = { version = "0.26", features = ["vendored"], optional = true }
 object = { workspace = true }
+perf-event2 = "0.7.4"
+linux-perf-event-reader = { workspace = true }
+byteorder = "1.5"
 rayon = "1.12"
 parking_lot = "0.12"
 typed-builder = "0.23.2"
