@@ -121,6 +121,11 @@ pub struct MemtrackBpf {
     pub(super) probes: Vec<Link>,
     rmap: RmapSupport,
     physical: bool,
+    /// `(lib_path, offset)` pairs already instrumented. glibc exports
+    /// symbols like `cfree` (and `free_sized`/`__libc_free` elsewhere) at
+    /// the same file offset as their canonical function; attaching each
+    /// alias would double-instrument the one underlying function.
+    attached_offsets: std::collections::HashSet<(std::path::PathBuf, usize)>,
 }
 
 impl MemtrackBpf {
@@ -224,6 +229,7 @@ impl MemtrackBpf {
             probes: Vec::new(),
             rmap,
             physical,
+            attached_offsets: std::collections::HashSet::new(),
         })
     }
 
