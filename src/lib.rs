@@ -6,6 +6,7 @@ mod binary_pins;
 pub mod cli;
 mod config;
 mod executor;
+pub mod exit_code;
 mod instruments;
 mod local_logger;
 pub mod logger;
