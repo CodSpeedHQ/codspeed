@@ -1,3 +1,4 @@
+use super::build_from_source;
 use crate::binary_pins::{
     Arch, DistroVersion, PinnedBinary, VALGRIND_CODSPEED_ITERATION, VALGRIND_CODSPEED_VERSION,
     VALGRIND_CODSPEED_VERSION_STRING, ValgrindTarget,
@@ -257,8 +258,26 @@ pub async fn install_valgrind(
             return Ok(());
         }
 
+        // No package to publish means nothing to install automatically: try to build
+        // valgrind-codspeed from source instead. This is a best effort, the build toolchain may be
+        // missing or the build may fail, in which case the user is pointed to a manual installation.
+        warn!(
+            "CodSpeed does not publish a valgrind package for {}, falling back to building it from source",
+            system_info.os
+        );
+        let build_error = match build_from_source::build_and_install(system_info).await {
+            Ok(()) => {
+                if is_valgrind_installed(system_info) {
+                    info!("valgrind-codspeed has been built and installed from source");
+                    return Ok(());
+                }
+                anyhow!("the freshly built valgrind is not usable, see the logs above")
+            }
+            Err(error) => error,
+        };
+
         bail!(
-            "CodSpeed does not publish a valgrind package for {}, so it cannot be installed automatically. \
+            "CodSpeed does not publish a valgrind package for {}, and building it from source failed: {build_error}. \
             Install valgrind-codspeed {} or higher manually, see https://github.com/CodSpeedHQ/valgrind-codspeed",
             system_info.os,
             VALGRIND_CODSPEED_VERSION_STRING.as_str()
