@@ -8,7 +8,10 @@ pub const FAILURE: i32 = 1;
 /// Invalid command-line usage (from Clap).
 pub const USAGE: i32 = 2;
 
-/// Benchmark command exited with a non-zero status.
+/// The benchmark process (the workload+tool) exited with a non-zero status.
+/// Only simulation mode separates the workload from the tool,
+/// because the wrapper script records the program's own status;
+/// elsewhere the tool's status is the only one known.
 pub const BENCHMARK_FAILED: i32 = 3;
 
 /// Could not authenticate against CodSpeed.
@@ -63,7 +66,7 @@ pub fn help_text() -> String {
          0  Success\n  \
          {FAILURE}  Failure\n  \
          {USAGE}  Invalid command-line usage\n  \
-         {BENCHMARK_FAILED}  The benchmark command itself failed\n  \
+         {BENCHMARK_FAILED}  The benchmark process failed\n  \
          {AUTH_FAILED}  Authentication or authorization failed\n  \
          {UPLOAD_FAILED}  The benchmarks ran, but their results could not be uploaded"
     )
