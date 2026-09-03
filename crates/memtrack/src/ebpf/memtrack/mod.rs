@@ -119,27 +119,28 @@ pub struct MemtrackBpf {
     pub(super) skel: Skel,
     pub(super) probes: Vec<Link>,
     rmap: RmapSupport,
+    physical: bool,
 }
 
 impl MemtrackBpf {
     /// Load the skeleton, picking the variant a BPF token is available for.
-    pub fn new_with_rmap(track_rmap: bool) -> Result<Self> {
+    pub fn new_with_physical(physical: bool) -> Result<Self> {
         let variant = if has_delegated_bpf_token() {
             BpfVariant::Token
         } else {
             BpfVariant::Legacy
         };
-        Self::with_variant(variant, track_rmap)
+        Self::with_variant(variant, physical)
     }
 
-    /// Load a specific variant rather than the one [`Self::new_with_rmap`]
+    /// Load a specific variant rather than the one [`Self::new_with_physical`]
     /// would detect. Either attaches given host privileges; the token only
     /// matters when `bpf()` is called from an unprivileged user namespace.
-    pub fn with_variant(variant: BpfVariant, track_rmap: bool) -> Result<Self> {
+    pub fn with_variant(variant: BpfVariant, physical: bool) -> Result<Self> {
         crate::kernel::KernelBtf::ensure_available()?;
 
         let page_shift = page_shift()?;
-        let rmap = if track_rmap {
+        let rmap = if physical {
             RmapSupport::detect()
         } else {
             RmapSupport::Unsupported
@@ -190,6 +191,10 @@ impl MemtrackBpf {
                     RmapSupport::CoreAndPud => {}
                 }
 
+                if !physical {
+                    open_skel.progs.tracepoint_rss_stat.set_autoload(false);
+                }
+
                 $skel(Box::new(
                     open_skel
                         .load()
@@ -211,6 +216,7 @@ impl MemtrackBpf {
             skel,
             probes: Vec::new(),
             rmap,
+            physical,
         })
     }
 

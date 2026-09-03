@@ -425,14 +425,10 @@ enum Reclaim {
 #[case::rss_stat(Reclaim::RssStat)]
 #[case::rmap(Reclaim::Rmap)]
 fn test_rss_external_reclaim(#[case] mode: Reclaim) -> Result<(), Box<dyn std::error::Error>> {
-    let track: fn(Command) -> shared::TrackResult = match mode {
-        Reclaim::RssStat => shared::track_command,
-        Reclaim::Rmap => shared::track_command_with_rmap,
-    };
     let (_report, events) = track_fixture(
         include_str!("../testdata/rss/madvise_extern.c"),
         "madvise_extern",
-        track,
+        shared::track_command_with_rmap,
     )?;
 
     // A = owner that faulted the file region; B = external caller, single-threaded

@@ -197,8 +197,8 @@ pub fn compile_c_source(
     Ok(binary_path)
 }
 
-/// Track a command with the default probes: no rmap, and allocators discovered
-/// by the exec-mapping watcher as the tracked tree maps executables.
+/// Track a command with the default probes: allocators only, discovered by the
+/// exec-mapping watcher as the tracked tree maps executables.
 pub fn track_command(command: Command) -> TrackResult {
     track_command_with_opts(command, TrackerOptions::builder().build())
 }
@@ -208,15 +208,15 @@ pub fn track_command_with_variant(command: Command, variant: BpfVariant) -> Trac
     track_command_with_tracker(command, Tracker::with_variant(variant)?)
 }
 
-/// RSS reconstruction from the folio rmap hooks, without allocator probes.
+/// Physical-memory tracking without allocator probes.
 fn rmap_only_options() -> TrackerOptions {
     TrackerOptions::builder()
         .allocators(false)
-        .rmap(true)
+        .physical(true)
         .build()
 }
 
-/// Track a command with folio rmap hooks enabled, reconstructing per-process RSS.
+/// Track a command with physical-memory tracking enabled.
 pub fn track_command_with_rmap(command: Command) -> TrackResult {
     track_command_with_opts(command, rmap_only_options())
 }

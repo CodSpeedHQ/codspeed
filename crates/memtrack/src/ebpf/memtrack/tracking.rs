@@ -22,8 +22,10 @@ impl MemtrackBpf {
         self.attach_sys_enter_munmap()?;
         self.attach_sys_enter_brk()?;
         self.attach_sys_exit_brk()?;
-        if let Err(e) = self.attach_rss_stat() {
-            warn!("Failed to attach rss_stat tracepoint, RSS collection disabled: {e:#}");
+        if self.physical {
+            if let Err(e) = self.attach_rss_stat() {
+                warn!("Failed to attach rss_stat tracepoint, RSS collection disabled: {e:#}");
+            }
         }
 
         // Defined here rather than as a method per group because the per-program
