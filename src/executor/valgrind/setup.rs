@@ -245,6 +245,26 @@ pub async fn install_valgrind(
     system_info: &SystemInfo,
     setup_cache_dir: Option<&Path>,
 ) -> Result<()> {
+    // On distributions we do not publish a valgrind-codspeed package for (rolling releases,
+    // non-apt systems, ...), there is nothing to install automatically: the user brings their own
+    // build. Accept that installation instead of failing on the package we cannot provide.
+    if !is_codspeed_valgrind_installation_supported(system_info) {
+        if is_valgrind_installed(system_info) {
+            debug!(
+                "Using the valgrind installation already present on {}",
+                system_info.os
+            );
+            return Ok(());
+        }
+
+        bail!(
+            "CodSpeed does not publish a valgrind package for {}, so it cannot be installed automatically. \
+            Install valgrind-codspeed {} or higher manually, see https://github.com/CodSpeedHQ/valgrind-codspeed",
+            system_info.os,
+            VALGRIND_CODSPEED_VERSION_STRING.as_str()
+        );
+    }
+
     apt::install_cached(
         system_info,
         setup_cache_dir,
