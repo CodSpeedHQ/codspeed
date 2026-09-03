@@ -4,6 +4,10 @@ use serde::{Deserialize, Serialize};
 use sysinfo::System;
 
 use crate::prelude::*;
+
+/// Placeholder version for distributions that do not report one (rolling releases).
+const UNKNOWN_OS_VERSION: &str = "unknown";
+
 /// Typed representation of the host operating system.
 ///
 /// Only operating systems that CodSpeed can run on are represented here.
@@ -22,14 +26,21 @@ impl SupportedOs {
     /// For Linux, the distribution is identified via `sysinfo::System::distribution_id()`.
     /// The OS version is read from `sysinfo::System::os_version()`.
     pub fn from_os(os: &str) -> Result<Self> {
-        let os_version = System::os_version().ok_or(anyhow!("Failed to get OS version"))?;
         match os {
             "linux" => {
                 let os_id = System::distribution_id();
+                // Rolling release distributions (Arch, Gentoo, ...) do not expose a `VERSION_ID`
+                // in `/etc/os-release`, so `sysinfo` reports no version for them. This is not
+                // fatal: the version only matters for the distributions we ship packages for,
+                // which all expose one.
+                let os_version = System::os_version().unwrap_or_else(|| {
+                    debug!("No OS version reported for distribution {os_id}");
+                    UNKNOWN_OS_VERSION.to_string()
+                });
                 Ok(Self::Linux(LinuxDistribution::from_id(&os_id, &os_version)))
             }
             "macos" => Ok(Self::Macos {
-                version: os_version,
+                version: System::os_version().ok_or(anyhow!("Failed to get OS version"))?,
             }),
             unsupported => bail!("Unsupported operating system: {unsupported}"),
         }
@@ -136,5 +147,14 @@ mod tests {
     fn from_os_bails_on_unsupported() {
         let err = SupportedOs::from_os("windows").unwrap_err();
         assert_eq!(err.to_string(), "Unsupported operating system: windows");
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn from_os_succeeds_on_linux_without_version_id() {
+        // Rolling releases report no version: we must still build a `SupportedOs`.
+        let os = SupportedOs::from_os("linux").unwrap();
+        assert!(matches!(os, SupportedOs::Linux(_)));
+        assert!(!os.version().is_empty());
     }
 }
