@@ -2,7 +2,7 @@
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-use codspeed_runner::{clean_logger, cli};
+use codspeed_runner::{clean_logger, cli, exit_code};
 use console::style;
 use log::log_enabled;
 
@@ -10,6 +10,7 @@ use log::log_enabled;
 async fn main() {
     let res = cli::run().await;
     if let Err(err) = res {
+        let code = exit_code::exit_code_for(&err);
         // Show the primary error
         let mut chain = err.chain();
         if let Some(primary) = chain.next() {
@@ -26,6 +27,6 @@ async fn main() {
             }
         }
         clean_logger();
-        std::process::exit(1);
+        std::process::exit(code);
     }
 }

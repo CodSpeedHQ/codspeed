@@ -16,6 +16,7 @@ pub mod helpers;
 pub mod logger;
 
 #[derive(Args, Debug)]
+#[command(after_long_help = crate::exit_code::help_text())]
 pub struct RunArgs {
     #[command(flatten)]
     pub shared: ExecAndRunSharedArgs,
