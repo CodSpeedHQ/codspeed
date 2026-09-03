@@ -1,5 +1,6 @@
 use anyhow::Context;
 use libc::pid_t;
+use serde::de::{Deserializer, Error};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::BufWriter;
@@ -10,6 +11,31 @@ use crate::debug_info::{MappedProcessDebugInfo, ModuleDebugInfo};
 use crate::fifo::MarkerType;
 use crate::module_symbols::MappedProcessModuleSymbols;
 use crate::unwind_data::MappedProcessUnwindData;
+
+/// Reads a pid-keyed map whose keys arrive as strings.
+///
+/// JSON object keys are always strings. serde_json's direct deserializer
+/// special-cases that and parses integer map keys, but a `#[serde(flatten)]`
+/// field is buffered into serde's internal `Content` first, and that path has
+/// no such special case — a `pid_t` key then fails with `invalid type: string`.
+/// See <https://github.com/serde-rs/serde/issues/1183>.
+///
+/// Only the read side needs this: serializing writes the same bytes either way.
+fn pid_keys_from_strings<'de, V, D>(deserializer: D) -> Result<HashMap<pid_t, V>, D::Error>
+where
+    V: Deserialize<'de>,
+    D: Deserializer<'de>,
+{
+    HashMap::<String, V>::deserialize(deserializer)?
+        .into_iter()
+        .map(|(key, value)| {
+            let pid = key
+                .parse::<pid_t>()
+                .map_err(|_| D::Error::custom(format!("invalid pid key: {key}")))?;
+            Ok((pid, value))
+        })
+        .collect()
+}
 
 /// The per-profile module artifacts: the deduplicated debug info, unwind data
 /// and symbol tables extracted from the ELF modules the profiled processes
@@ -28,7 +54,7 @@ pub struct ModuleArtifacts {
     #[serde(
         default,
         skip_serializing_if = "HashMap::is_empty",
-        with = "crate::serde_pid_map"
+        deserialize_with = "pid_keys_from_strings"
     )]
     pub mapped_process_debug_info_by_pid: HashMap<pid_t, Vec<MappedProcessDebugInfo>>,
 
@@ -37,7 +63,7 @@ pub struct ModuleArtifacts {
     #[serde(
         default,
         skip_serializing_if = "HashMap::is_empty",
-        with = "crate::serde_pid_map"
+        deserialize_with = "pid_keys_from_strings"
     )]
     pub mapped_process_unwind_data_by_pid: HashMap<pid_t, Vec<MappedProcessUnwindData>>,
 
@@ -46,7 +72,7 @@ pub struct ModuleArtifacts {
     #[serde(
         default,
         skip_serializing_if = "HashMap::is_empty",
-        with = "crate::serde_pid_map"
+        deserialize_with = "pid_keys_from_strings"
     )]
     pub mapped_process_module_symbols: HashMap<pid_t, Vec<MappedProcessModuleSymbols>>,
 
