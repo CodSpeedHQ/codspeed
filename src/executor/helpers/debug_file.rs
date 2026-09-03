@@ -12,11 +12,17 @@ use std::path::{Path, PathBuf};
 ///
 /// [Separate Debug Files]: https://sourceware.org/gdb/current/onlinedocs/gdb.html/Separate-Debug-Files.html
 pub fn find_debug_file(object: &object::File, binary_path: &Path) -> Option<PathBuf> {
-    ["/usr/lib/debug", "/run/current-system/sw/lib/debug"]
+    let via_known_roots = ["/usr/lib/debug", "/run/current-system/sw/lib/debug"]
         .iter()
         .map(Path::new)
         .filter(|dir| dir.exists())
-        .find_map(|dir| find_debug_file_in(object, binary_path, dir))
+        .find_map(|dir| find_debug_file_in(object, binary_path, dir));
+
+    // `.gnu_debuglink` beside the binary (and its `.debug` subdirectory) is part of
+    // GDB's search order regardless of whether a global debug-directory root exists
+    // (see module docs), so it must not be skipped on systems without one, e.g. most
+    // CI runners.
+    via_known_roots.or_else(|| find_debug_file_by_debuglink(object, binary_path, None))
 }
 
 fn find_debug_file_in(
@@ -27,7 +33,7 @@ fn find_debug_file_in(
     if let Some(path) = find_debug_file_by_build_id(object, debug_dir) {
         return Some(path);
     }
-    find_debug_file_by_debuglink(object, binary_path, debug_dir)
+    find_debug_file_by_debuglink(object, binary_path, Some(debug_dir))
 }
 
 /// Build-id `a05cfb6313fe06a13c9b4b5cb86c2069faa3951f` resolves to
@@ -58,19 +64,20 @@ fn find_debug_file_by_build_id(object: &object::File, debug_dir: &Path) -> Optio
 fn find_debug_file_by_debuglink(
     object: &object::File,
     binary_path: &Path,
-    debug_dir: &Path,
+    debug_dir: Option<&Path>,
 ) -> Option<PathBuf> {
     let (debuglink, expected_crc) = object.gnu_debuglink().ok()??;
     let debuglink = std::str::from_utf8(debuglink).ok()?;
     let dir = binary_path.parent()?;
 
-    let candidates = [
-        dir.join(debuglink),
-        dir.join(".debug").join(debuglink),
-        debug_dir
-            .join(dir.strip_prefix("/").unwrap_or(dir))
-            .join(debuglink),
-    ];
+    let mut candidates = vec![dir.join(debuglink), dir.join(".debug").join(debuglink)];
+    if let Some(debug_dir) = debug_dir {
+        candidates.push(
+            debug_dir
+                .join(dir.strip_prefix("/").unwrap_or(dir))
+                .join(debuglink),
+        );
+    }
 
     candidates.into_iter().find(|p| {
         let Ok(content) = std::fs::read(p) else {
