@@ -205,11 +205,11 @@ pub fn track_command(command: Command) -> TrackResult {
 
 /// Track a command under a specific BPF variant rather than the detected one.
 pub fn track_command_with_variant(command: Command, variant: BpfVariant) -> TrackResult {
-    track_command_with_tracker(command, Tracker::with_variant(variant)?)
+    track_command_with_opts(command, TrackerOptions::builder().variant(variant).build())
 }
 
 /// Physical-memory tracking without allocator probes.
-fn rmap_only_options() -> TrackerOptions {
+fn physical_only_options() -> TrackerOptions {
     TrackerOptions::builder()
         .allocators(false)
         .physical(true)
@@ -218,7 +218,7 @@ fn rmap_only_options() -> TrackerOptions {
 
 /// Track a command with physical-memory tracking enabled.
 pub fn track_command_with_rmap(command: Command) -> TrackResult {
-    track_command_with_opts(command, rmap_only_options())
+    track_command_with_opts(command, physical_only_options())
 }
 
 /// Track a command with an explicit probe selection rather than the environment's.
@@ -231,7 +231,7 @@ pub fn track_command_with_opts(command: Command, options: TrackerOptions) -> Tra
 pub fn track_command_with_rmap_maps(
     command: Command,
 ) -> anyhow::Result<(Vec<Event>, OwnershipMaps, std::thread::JoinHandle<()>)> {
-    let tracker = Tracker::with_options(rmap_only_options())?;
+    let tracker = Tracker::with_options(physical_only_options())?;
     let (tracker, events, ()) = run_tracked(command, tracker, |_, _| Ok(()))?;
     let maps = tracker.ownership_maps()?;
     Ok((events, maps, std::thread::spawn(move || drop(tracker))))
@@ -247,7 +247,7 @@ pub fn track_command_with_rmap_checkpoint(
     ready: &Path,
     release: &Path,
 ) -> anyhow::Result<(Vec<Event>, OwnershipMaps, i32, std::thread::JoinHandle<()>)> {
-    let tracker = Tracker::with_options(rmap_only_options())?;
+    let tracker = Tracker::with_options(physical_only_options())?;
     let (tracker, events, (maps, root_pid)) = run_tracked(command, tracker, |tracker, pid| {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
         while !ready.exists() && std::time::Instant::now() < deadline {
@@ -307,13 +307,14 @@ pub fn for_each_variant(
     let mut profiles: Vec<(BpfVariant, EventProfile)> = Vec::new();
 
     for variant in [BpfVariant::Legacy, BpfVariant::Token] {
-        let tracker = match Tracker::with_variant(variant) {
-            Ok(tracker) => tracker,
-            Err(err) => {
-                eprintln!("skipping {variant:?} variant, cannot attach here: {err:#}");
-                continue;
-            }
-        };
+        let tracker =
+            match Tracker::with_options(TrackerOptions::builder().variant(variant).build()) {
+                Ok(tracker) => tracker,
+                Err(err) => {
+                    eprintln!("skipping {variant:?} variant, cannot attach here: {err:#}");
+                    continue;
+                }
+            };
 
         let (events, thread_handle) = track_command_with_tracker(workload(), tracker)?;
         assert_events(&events);

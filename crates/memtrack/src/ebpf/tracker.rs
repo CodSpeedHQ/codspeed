@@ -20,6 +20,9 @@ pub struct TrackerOptions {
     /// folio rmap hooks, which only attach on kernels that expose them.
     #[builder(default = false)]
     pub physical: bool,
+    /// Uprobe attach mechanism. `None` detects it from BPF token availability.
+    #[builder(default, setter(strip_option))]
+    pub variant: Option<BpfVariant>,
 }
 
 impl TrackerOptions {
@@ -41,40 +44,23 @@ pub struct Tracker {
 }
 
 impl Tracker {
-    /// Create a new tracker. The exec-mapping watcher discovers and attaches
-    /// allocator probes as the tracked process tree maps executable files.
+    /// Create a tracker configured from the environment.
     pub fn new() -> Result<Self> {
         Self::with_options(TrackerOptions::from_env())
     }
 
     /// Create a tracker from an explicit probe selection rather than the environment.
     pub fn with_options(options: TrackerOptions) -> Result<Self> {
-        Self::build(
-            MemtrackBpf::new_with_physical(options.physical)?,
-            options.allocators,
-        )
-    }
-
-    /// Like [`Tracker::new`], but pinned to a specific BPF variant instead of
-    /// the detected one.
-    pub fn with_variant(variant: BpfVariant) -> Result<Self> {
-        let physical = TrackerOptions::from_env().physical;
-        Self::build(MemtrackBpf::with_variant(variant, physical)?, true)
-    }
-
-    /// Build a tracker: attach lifetime tracepoints (and rmap fentries when the
-    /// skeleton was opened for them), plus, when `allocators` is set, the
-    /// exec-mapping watcher and the on-demand allocator-attach worker.
-    fn build(mut bpf: MemtrackBpf, allocators: bool) -> Result<Self> {
         Self::bump_memlock_rlimit()?;
 
+        let mut bpf = MemtrackBpf::load(options)?;
         bpf.attach_tracepoints()?;
-        if allocators {
+        if options.allocators {
             bpf.attach_exec_watcher()?;
         }
 
         let bpf = Arc::new(Mutex::new(bpf));
-        let worker = if allocators {
+        let worker = if options.allocators {
             Some(AttachWorker::start(bpf.clone())?)
         } else {
             None
@@ -83,7 +69,7 @@ impl Tracker {
         Ok(Self {
             bpf,
             worker: Mutex::new(worker),
-            allocators,
+            allocators: options.allocators,
         })
     }
 

@@ -26,6 +26,7 @@ pub use maps::OwnershipMaps;
 pub use rmap::RmapSupport;
 
 use crate::bpf_token::has_delegated_bpf_token;
+use crate::ebpf::TrackerOptions;
 
 /// Which attach mechanism a loaded skeleton uses for its uprobes. See
 /// `src/ebpf/c/utils/variant.h` for why only one of them is delegatable.
@@ -123,20 +124,16 @@ pub struct MemtrackBpf {
 }
 
 impl MemtrackBpf {
-    /// Load the skeleton, picking the variant a BPF token is available for.
-    pub fn new_with_physical(physical: bool) -> Result<Self> {
-        let variant = if has_delegated_bpf_token() {
-            BpfVariant::Token
-        } else {
-            BpfVariant::Legacy
-        };
-        Self::with_variant(variant, physical)
-    }
-
-    /// Load a specific variant rather than the one [`Self::new_with_physical`]
-    /// would detect. Either attaches given host privileges; the token only
-    /// matters when `bpf()` is called from an unprivileged user namespace.
-    pub fn with_variant(variant: BpfVariant, physical: bool) -> Result<Self> {
+    /// Load the skeleton, defaulting to the variant a BPF token is available for.
+    pub fn load(options: TrackerOptions) -> Result<Self> {
+        let variant = options.variant.unwrap_or_else(|| {
+            if has_delegated_bpf_token() {
+                BpfVariant::Token
+            } else {
+                BpfVariant::Legacy
+            }
+        });
+        let physical = options.physical;
         crate::kernel::KernelBtf::ensure_available()?;
 
         let page_shift = page_shift()?;
@@ -146,9 +143,7 @@ impl MemtrackBpf {
             RmapSupport::Unsupported
         };
 
-        // Both variants expose `rodata_data` and `progs` under the same field
-        // names, but as distinct generated types, so this can't be a function
-        // over the two.
+        // Both variants expose the same fields as distinct types, so this can't be a function.
         macro_rules! open_and_load {
             ($builder:expr, $skel:path) => {{
                 let open_object = Box::leak(Box::new(MaybeUninit::uninit()));
@@ -169,9 +164,7 @@ impl MemtrackBpf {
                     }
                 }
 
-                // Autoload is decided before load(), so fentries whose targets
-                // the kernel lacks have to be turned off here or the whole
-                // skeleton fails to load.
+                // Autoload is decided before load(), so missing fentry targets must be off here.
                 macro_rules! disable_rmap_prog {
                     ($name:ident) => {
                         paste::paste! {
