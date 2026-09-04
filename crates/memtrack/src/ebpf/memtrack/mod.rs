@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::mem::MaybeUninit;
 use std::path::Path;
 
-use crate::ebpf::poller::RingBufferPoller;
+use crate::ebpf::poller::{RingBufferPoller, ThreadedRingBufferPoller};
 use crate::ebpf::tracker::TrackerOptions;
 
 mod token {
@@ -248,33 +248,37 @@ impl MemtrackBpf {
         ))
     }
 
-    /// Poll the stack-record ring buffer into `tx`.
+    /// Poll the stack-record ring buffer into `tx`. The map lookup for each
+    /// stack's frame-pointer chain is a syscall, so it runs on a resolver
+    /// thread rather than the ring poll thread: see [`ThreadedRingBufferPoller`].
     pub(crate) fn poll_stacks(
         &self,
         poll_interval_ms: u64,
         tx: std::sync::mpsc::Sender<runner_shared::artifacts::MemtrackEvent>,
-    ) -> Result<RingBufferPoller> {
+    ) -> Result<ThreadedRingBufferPoller> {
         use crate::ebpf::events;
         use runner_shared::artifacts::MemtrackEventKind;
 
-        // The poller outlives this borrow of the skeleton, so the chain lookup
-        // needs an owned handle rather than a reference to the skeleton map.
+        // The resolver thread outlives this borrow of the skeleton, so the
+        // chain lookup needs an owned handle rather than a reference to the
+        // skeleton map.
         let stack_traces = with_skel!(self, skel => {
             libbpf_rs::MapHandle::try_from(&skel.maps.stack_traces)
                 .context("Failed to create handle for stack_traces map")?
         });
 
-        let parse = move |data: &[u8]| {
-            let (mut event, stackid) = events::parse_stack(data)?;
-            if let MemtrackEventKind::Stack { record } = &mut event.kind {
-                record.fp_chain = events::fp_chain(&stack_traces, stackid);
-            }
-            Some(event)
-        };
+        let resolve =
+            move |(mut event, stackid): (runner_shared::artifacts::MemtrackEvent, i64)| {
+                if let MemtrackEventKind::Stack { record } = &mut event.kind {
+                    record.fp_chain = events::fp_chain(&stack_traces, stackid);
+                }
+                event
+            };
 
-        with_skel!(self, skel => RingBufferPoller::new(
+        with_skel!(self, skel => ThreadedRingBufferPoller::new(
             &skel.maps.stacks,
-            parse,
+            events::parse_stack,
+            resolve,
             tx,
             poll_interval_ms,
         ))

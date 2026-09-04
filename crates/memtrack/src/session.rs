@@ -1,4 +1,4 @@
-use crate::ebpf::poller::RingBufferPoller;
+use crate::ebpf::poller::{RingBufferPoller, ThreadedRingBufferPoller};
 use crate::perf_mappings::PerfMappingPoller;
 use crate::prelude::*;
 use runner_shared::artifacts::MemtrackEvent;
@@ -17,7 +17,7 @@ pub struct Session {
     // join their poll threads before PerfMappingPoller drops and emits its
     // buffered Mapping records as the terminal stream suffix.
     _poller: RingBufferPoller,
-    _stack_poller: Option<RingBufferPoller>,
+    _stack_poller: Option<ThreadedRingBufferPoller>,
     _perf_mapping_poller: Option<PerfMappingPoller>,
 }
 
@@ -26,7 +26,7 @@ impl Session {
         child: Child,
         events: Receiver<MemtrackEvent>,
         poller: RingBufferPoller,
-        stack_poller: Option<RingBufferPoller>,
+        stack_poller: Option<ThreadedRingBufferPoller>,
         perf_mapping_poller: Option<PerfMappingPoller>,
     ) -> Self {
         Self {
