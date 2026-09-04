@@ -153,6 +153,39 @@ jobs:
           mode: ${{ matrix.mode }}
           run: cargo codspeed run -p runner-shared
 
+  memtrack-benchmarks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: true
+
+      - uses: ./.github/actions/install-rust
+      - uses: ./.github/actions/install-bpf-deps
+
+      - name: Install memtrack
+        run: |
+          cargo install --path crates/memtrack --locked
+
+      - name: Grant memtrack file capabilities
+        run: cargo r -- setup --mode memory
+
+      - name: Build the codspeed CLI
+        run: cargo build --release
+
+      - name: Prepare memtrack output directory
+        run: mkdir -p /tmp/codspeed-memtrack-bench
+
+      # The write benchmarks overwrite these archives every round; creating
+      # them inside a measured round would time one-off disk allocation.
+      - name: Pre-create benchmark archives
+        run: |
+          tar -cf /tmp/memtrack-bench.tar /usr/lib/x86_64-linux-gnu
+          dd if=/dev/zero of=/tmp/memtrack-bench-dd.bin bs=1M count=64 2> /dev/null
+
+      - name: Run memtrack walltime benchmarks
+        run: ./target/release/codspeed --config crates/memtrack/codspeed.yml run -m walltime
+
   check:
     runs-on: ubuntu-latest
     if: always()
@@ -164,6 +197,7 @@ jobs:
       - macos-basic-run-test
       - bpf-tests
       - benchmarks
+      - memtrack-benchmarks
     steps:
       - uses: re-actors/alls-green@release/v1
         with:
