@@ -44,7 +44,7 @@ fn get_user_uid_gid() -> Option<(u32, u32)> {
 fn main() -> Result<()> {
     env_logger::builder()
         .parse_env(env_logger::Env::new().filter_or("CODSPEED_LOG", "info"))
-        .format_timestamp(None)
+        .format_timestamp(Some(env_logger::fmt::TimestampPrecision::Millis))
         .init();
 
     let cli = Cli::parse();

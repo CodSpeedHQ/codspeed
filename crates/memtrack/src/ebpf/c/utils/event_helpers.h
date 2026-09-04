@@ -8,36 +8,118 @@
 BPF_RINGBUF(events, 256 * 1024 * 1024);
 BPF_ARRAY_MAP(dropped_events, __u64, 1);
 
-/* Wake the consumer only once this much unconsumed data has accumulated.
- * Per-event wakeups dominate submission cost at high event rates; batching
- * them behind a data watermark amortizes the wakeup to ~1 per thousand
- * events. The userspace poller's poll timeout flushes the tail that never
- * reaches the watermark. */
+/* Wake the consumer once this much data has been submitted. Per-event wakeups
+ * dominate submission cost at high event rates; batching them behind a data
+ * watermark amortizes the wakeup to ~1 per thousand events. The userspace
+ * poller's poll timeout flushes a tail that never reaches the watermark. */
 #define WAKEUP_DATA_SIZE (64 * 1024)
 
-static __always_inline long wake_flags(void) {
-    long avail = bpf_ringbuf_query(&events, BPF_RB_AVAIL_DATA);
-    return avail >= WAKEUP_DATA_SIZE ? BPF_RB_FORCE_WAKEUP : BPF_RB_NO_WAKEUP;
+/* Bytes submitted per CPU since the last forced wakeup.
+ *
+ * Counting what this CPU produced, rather than asking the ring buffer how much
+ * is unconsumed, keeps the decision on the producer side: bpf_ringbuf_query()
+ * reads the consumer position, a cache line the polling thread on another CPU
+ * writes continuously, so querying it per event costs a cross-CPU miss on every
+ * event. */
+BPF_PERCPU_ARRAY_MAP(submitted_bytes, __u64, 1);
+
+static __always_inline long wake_flags(__u64 event_size) {
+    __u32 zero = 0;
+    __u64* pending = bpf_map_lookup_elem(&submitted_bytes, &zero);
+    if (!pending) {
+        /* Can't track the watermark, so don't risk a stalled consumer. */
+        return BPF_RB_FORCE_WAKEUP;
+    }
+
+    *pending += event_size;
+    if (*pending < WAKEUP_DATA_SIZE) {
+        return BPF_RB_NO_WAKEUP;
+    }
+
+    *pending = 0;
+    return BPF_RB_FORCE_WAKEUP;
 }
 
-static __always_inline int store_param(void* map, __u64 value) {
-    /* Key by the tid: unique per thread, so it survives the entry/exit pair even
-     * when several threads are inside the same allocator call. */
-    struct task_ids ids = current_task_ids();
-    __u64 tid = ids.tid;
-    if (is_tracked(ids.tgid)) {
-        bpf_map_update_elem(map, &tid, &value, BPF_ANY);
+/* Per-thread scratch for the allocator entry/exit hand-off.
+ *
+ * One slot per instrumented entry point rather than a single shared slot: an
+ * allocator may call another (glibc realloc() reaches malloc()), and nested
+ * calls on one thread must not clobber each other's saved arguments.
+ *
+ * `valid` marks which slots hold a value, so a zero argument is still
+ * distinguishable from an absent one, and a return probe that fires without a
+ * matching entry probe (attach raced with a call already in flight) is ignored.
+ */
+enum arg_slot {
+    SLOT_MALLOC,
+    SLOT_CALLOC,
+    SLOT_REALLOC,
+    SLOT_ALIGNED_ALLOC,
+    SLOT_MEMALIGN,
+    SLOT_POSIX_MEMALIGN,
+    SLOT_MMAP,
+    SLOT_BRK,
+    SLOT__COUNT,
+};
+
+struct memtrack_task_state {
+    __u64 arg0[SLOT__COUNT];
+    __u64 arg1[SLOT__COUNT];
+    __u32 valid;
+    /* Memoized positive result of is_tracked(). Tracking is monotonic: pids are
+     * only ever added to tracked_pids (from userspace or on fork), never
+     * removed, so a task that is tracked stays tracked and the answer can be
+     * cached. A negative result is never cached, since the tracker may register
+     * this task later. */
+    __u8 tracked;
+};
+
+BPF_TASK_STORAGE(task_state, struct memtrack_task_state);
+
+/* Task state for the current task if it is tracked, else NULL.
+ *
+ * Hot path is a single task-storage lookup; the hashed is_tracked() walk runs
+ * once per task, on the first hook that observes it. */
+static __always_inline struct memtrack_task_state* tracked_state(void) {
+    struct task_struct* task = (struct task_struct*)bpf_get_current_task_btf();
+    struct memtrack_task_state* st = bpf_task_storage_get(&task_state, task, NULL, 0);
+    if (st && st->tracked) {
+        return st;
     }
+
+    if (!is_tracked(current_tgid())) {
+        return NULL;
+    }
+
+    if (!st) {
+        st = bpf_task_storage_get(&task_state, task, NULL, BPF_LOCAL_STORAGE_GET_F_CREATE);
+        if (!st) {
+            return NULL;
+        }
+    }
+    st->tracked = 1;
+    return st;
+}
+
+static __always_inline int store_arg(enum arg_slot slot, __u64 value) {
+    struct memtrack_task_state* st = tracked_state();
+    if (!st) {
+        return 0;
+    }
+    st->arg0[slot] = value;
+    st->valid |= (1u << slot);
     return 0;
 }
 
-static __always_inline __u64* take_param(void* map) {
-    __u64 tid = current_tid();
-    __u64* value = bpf_map_lookup_elem(map, &tid);
-    if (value) {
-        bpf_map_delete_elem(map, &tid);
+static __always_inline int store_args(enum arg_slot slot, __u64 arg0, __u64 arg1) {
+    struct memtrack_task_state* st = tracked_state();
+    if (!st) {
+        return 0;
     }
-    return value;
+    st->arg0[slot] = arg0;
+    st->arg1[slot] = arg1;
+    st->valid |= (1u << slot);
+    return 0;
 }
 
 /* Submission is split into two classes:
@@ -49,6 +131,18 @@ static __always_inline __u64* take_param(void* map) {
  *  - gated events (e.g. malloc/free/mmap/...): high-volume and only meaningful
  *    inside a measurement window, so they stay behind is_enabled().
  */
+/* Consume a slot: returns the state with the slot cleared, or NULL if the entry
+ * probe never ran for this call. */
+static __always_inline struct memtrack_task_state* take_slot(enum arg_slot slot) {
+    struct task_struct* task = (struct task_struct*)bpf_get_current_task_btf();
+    struct memtrack_task_state* st = bpf_task_storage_get(&task_state, task, NULL, 0);
+    if (!st || !(st->valid & (1u << slot))) {
+        return NULL;
+    }
+    st->valid &= ~(1u << slot);
+    return st;
+}
+
 #define SUBMIT_EVENT_AS(owner_pid, evt_type, fill_data)                 \
     {                                                                   \
         struct task_ids ids = current_task_ids();                       \
@@ -70,7 +164,7 @@ static __always_inline __u64* take_param(void* map) {
                                                                         \
         fill_data;                                                      \
                                                                         \
-        bpf_ringbuf_submit(e, wake_flags());                            \
+        bpf_ringbuf_submit(e, wake_flags(sizeof(*e)));                  \
         return 0;                                                       \
     }
 
