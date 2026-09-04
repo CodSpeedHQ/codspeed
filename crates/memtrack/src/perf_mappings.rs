@@ -22,7 +22,7 @@ pub(crate) struct PerfMappingPoller {
 impl PerfMappingPoller {
     pub(crate) fn start(
         pid: libc::pid_t,
-        tx: Sender<MemtrackEvent>,
+        tx: Sender<Vec<MemtrackEvent>>,
         lost: Arc<AtomicU64>,
     ) -> Result<Self> {
         let mut builder = Self::sampler_builder(pid);
@@ -65,8 +65,8 @@ impl PerfMappingPoller {
                 Self::drain(sampler, parse_info, &mut mappings, &lost);
             }
             mappings.sort_unstable_by_key(|event| (event.pid, event.timestamp));
-            for mapping in mappings {
-                let _ = tx.send(mapping);
+            if !mappings.is_empty() {
+                let _ = tx.send(mappings);
             }
         });
 
