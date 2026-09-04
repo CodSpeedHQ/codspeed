@@ -1,0 +1,206 @@
+# COD-3440 spike — throwaway workflow, NOT for merging.
+#
+# Purpose: prove the musl recipe on a real x86_64 kernel, which is the one gap
+# the local spike could not close (the local host is aarch64; an x86_64 build
+# cross-compiled there cannot load its BPF skeleton against an aarch64 kernel).
+#
+# To use it: push the spike branch, then
+#
+#   gh workflow run cod-3440-musl-check.yml --ref spike/cod-3440-memtrack-musl
+#
+# Manual trigger only, so it never fires on its own. Note that the very first
+# dispatch of a workflow that lives only on a non-default branch 404s until
+# GitHub has registered it; once it has appeared in the Actions list, --ref
+# dispatch works. Delete the file once the question is answered -- it must not
+# reach main.
+#
+# Deliberately does NOT touch release.yml, dist-workspace.toml or any
+# Cargo.toml — it only adds one manually-triggered job.
+#
+# Two differences from the local spike recipe, both simplifications:
+#   - musl-tools provides x86_64-linux-musl-gcc, which cc-rs finds on its own,
+#     so no compiler wrapper and no -lgcc / -fno-link-libatomic.
+#   - no zig, so none of the zig artifacts (crt duplication, UBSan trap,
+#     unknown warning options) apply.
+# The only thing carried over is what the spike is actually about: the three
+# autoconf cache seeds and the crates/memtrack/musl/argp.h stub.
+
+name: COD-3440 musl check
+
+on:
+  workflow_dispatch:
+
+env:
+  TARGET: x86_64-unknown-linux-musl
+  # Absolute, because the test step runs with working-directory: crates/memtrack,
+  # where a $PWD-relative path would resolve to the wrong place.
+  STUB_INCLUDE: ${{ github.workspace }}/crates/memtrack/musl
+  # libbpf includes <asm/unistd.h> and <asm/types.h>; Debian's musl-gcc runs with
+  # -nostdinc and only /usr/include/x86_64-linux-musl on the include path, so the
+  # kernel UAPI headers from linux-libc-dev have to be added back. -idirafter puts
+  # them last, behind musl's own headers. build.rs forwards this to libbpf's make;
+  # CFLAGS alone would not reach it the same way.
+  LIBBPF_SYS_EXTRA_CFLAGS: -idirafter /usr/include/x86_64-linux-gnu -idirafter /usr/include
+  # Approach A: pre-seed autoconf's cache so the vendored elfutils never runs
+  # the checks musl cannot satisfy. "none required" = available with no -l flag.
+  ac_cv_search_argp_parse: none required
+  ac_cv_search__obstack_free: none required
+  ac_cv_search_fts_close: none required
+
+jobs:
+  build:
+    name: build ${{ matrix.profile }}
+    runs-on: ubuntu-latest # x86_64
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [dev, dist]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: true
+      - uses: ./.github/actions/install-rust
+        with:
+          cache-key: musl-${{ matrix.profile }}
+      - uses: ./.github/actions/install-bpf-deps
+
+      - name: Install musl toolchain
+        run: |
+          sudo apt-get install -y musl-tools pkg-config linux-libc-dev
+          rustup target add "$TARGET"
+
+      - name: Build
+        # elfutils only honours CFLAGS/CPPFLAGS, not LIBBPF_SYS_EXTRA_CFLAGS.
+        # The stub header exists because elfutils #include <argp.h> even though
+        # a libelf-only build never calls into it.
+        run: |
+          export CFLAGS="-I$STUB_INCLUDE"
+          cargo build -p memtrack --profile ${{ matrix.profile }} --target "$TARGET"
+
+      - name: Verify the artifact is genuinely static
+        run: |
+          BIN=target/$TARGET/${{ matrix.profile == 'dev' && 'debug' || matrix.profile }}/codspeed-memtrack
+          file "$BIN"
+          ldd "$BIN" || true            # expected: "not a dynamic executable"
+          readelf -d "$BIN" || true     # expected: no dynamic section at all
+          echo "size: $(stat -c %s "$BIN") bytes"
+          # Fail loudly if anything reintroduced a dynamic dependency or an rpath.
+          # `if` rather than `grep ... && exit 1`, because a grep that matches
+          # nothing exits 1 and would fail the step under bash -e.
+          if readelf -d "$BIN" 2>/dev/null | grep -qE 'NEEDED|RPATH|RUNPATH'; then
+            echo "unexpected dynamic dependency or rpath"
+            exit 1
+          fi
+          echo "OK: static, no NEEDED, no RPATH/RUNPATH"
+
+      - name: Compare against the gnu build
+        if: matrix.profile == 'dist'
+        run: |
+          unset CFLAGS
+          cargo build -p memtrack --profile dist
+          echo "musl: $(stat -c %s target/$TARGET/dist/codspeed-memtrack) bytes"
+          echo "gnu:  $(stat -c %s target/dist/codspeed-memtrack) bytes"
+
+      - name: Smoke test the BPF path
+        run: |
+          BIN=$PWD/target/$TARGET/${{ matrix.profile == 'dev' && 'debug' || matrix.profile }}/codspeed-memtrack
+          mkdir -p /tmp/memtrack-out
+          sudo env "RUST_LOG=info" "$BIN" track -o /tmp/memtrack-out "/bin/ls /tmp"
+          ls -la /tmp/memtrack-out
+          # A run that loads no probes still exits 0 but writes nothing.
+          test -n "$(ls -A /tmp/memtrack-out)" || { echo "no artifact written"; exit 1; }
+
+  tests:
+    name: ${{ matrix.test }} (musl)
+    runs-on: ubuntu-latest # x86_64
+    strategy:
+      fail-fast: false
+      # Each memtrack integration test binary runs its cases serially (the eBPF
+      # tracker can't overlap with itself in one process), so shard by binary.
+      matrix:
+        test: [c_tests, cpp_tests, rust_tests, spawn_tests, dlopen_tests, rss_tests]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          lfs: true
+          submodules: true
+      - uses: ./.github/actions/install-rust
+        with:
+          cache-key: musl-${{ matrix.test }}
+      - uses: ./.github/actions/install-bpf-deps
+
+      - name: Install musl toolchain
+        run: |
+          sudo apt-get install -y musl-tools pkg-config linux-libc-dev
+          rustup target add "$TARGET"
+
+      - name: Install additional allocators
+        run: sudo apt-get install -y libmimalloc-dev libjemalloc-dev
+
+      # Built separately from the run because test-with's env(GITHUB_ACTIONS)
+      # gate is evaluated at COMPILE time. GITHUB_ACTIONS is set by the runner,
+      # so this is automatic here -- but if the tests are ever built outside
+      # Actions, the sudo-gated cases silently become #[ignore]d and the run
+      # reports a green "0 passed; N ignored".
+      - name: Build tests
+        run: |
+          export CFLAGS="-I$STUB_INCLUDE"
+          cargo test -p memtrack --target "$TARGET" --no-run
+
+      - name: Run tests
+        env:
+          RUST_LOG: debug
+        # Ubuntu 26.04 ships sudo-rs, which ignores `-E`; pass the env the
+        # rustup shims and the test gate need through `env` instead.
+        run: |
+          sudo env \
+            "HOME=$HOME" \
+            "PATH=$PATH" \
+            "CARGO_HOME=${CARGO_HOME:-$HOME/.cargo}" \
+            "RUSTUP_HOME=${RUSTUP_HOME:-$HOME/.rustup}" \
+            "CARGO_INCREMENTAL=$CARGO_INCREMENTAL" \
+            "RUST_LOG=$RUST_LOG" \
+            "GITHUB_ACTIONS=$GITHUB_ACTIONS" \
+            "CFLAGS=-I$STUB_INCLUDE" \
+            "LIBBPF_SYS_EXTRA_CFLAGS=$LIBBPF_SYS_EXTRA_CFLAGS" \
+            "TARGET=$TARGET" \
+            "ac_cv_search_argp_parse=$ac_cv_search_argp_parse" \
+            "ac_cv_search__obstack_free=$ac_cv_search__obstack_free" \
+            "ac_cv_search_fts_close=$ac_cv_search_fts_close" \
+            $(which cargo) test --target "$TARGET" --test ${{ matrix.test }} \
+              -- --test-threads 1 --nocapture
+        working-directory: crates/memtrack
+
+      # Since we ran the tests with sudo, the build artifacts will have root ownership
+      - name: Clean up
+        run: sudo chown -R $USER:$USER . ~/.cargo
+
+  unit:
+    name: unit tests (musl)
+    runs-on: ubuntu-latest # x86_64
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: true
+      - uses: ./.github/actions/install-rust
+        with:
+          cache-key: musl-unit
+      - uses: ./.github/actions/install-bpf-deps
+
+      - name: Install musl toolchain
+        run: |
+          sudo apt-get install -y musl-tools pkg-config linux-libc-dev
+          rustup target add "$TARGET"
+
+      # Split out from the sharded job because of one known failure:
+      # ebpf::memtrack::tests::libc_allocator_symbols_resolve_to_offsets reads
+      # /proc/self/maps of the TEST BINARY and requires a mapped libc.so.6,
+      # which a statically linked musl binary does not have by construction.
+      # The production path resolves symbols in the *traced* process, so this is
+      # a test assumption, not a defect (report §4). Drop the --skip to check
+      # whether it has since been fixed; everything else must stay green.
+      - name: Run unit tests
+        run: |
+          export CFLAGS="-I$STUB_INCLUDE"
+          cargo test -p memtrack --target "$TARGET" --lib \
+            -- --skip libc_allocator_symbols_resolve_to_offsets
