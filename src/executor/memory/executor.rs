@@ -8,6 +8,7 @@ use crate::executor::helpers::get_bench_command::get_bench_command;
 use crate::executor::helpers::run_command_with_log_pipe::run_command_with_log_pipe_and_callback;
 use crate::executor::helpers::run_with_env::prefix_command_with_env;
 use crate::executor::helpers::run_with_sudo::is_root_user;
+use crate::executor::memory::module_artifacts::save_module_artifacts;
 use crate::executor::memory::tunables::MemoryTunables;
 use crate::executor::shared::fifo::RunnerFifo;
 use crate::executor::{ExecutionContext, Executor};
@@ -24,6 +25,7 @@ use runner_shared::artifacts::{ArtifactExt, ExecutionTimestamps};
 use runner_shared::fifo::Command as FifoCommand;
 use runner_shared::fifo::IntegrationMode;
 use semver::Version;
+use std::cell::RefCell;
 use std::fs::canonicalize;
 use std::path::Path;
 use std::rc::Rc;
@@ -163,7 +165,8 @@ impl Executor for MemoryExecutor {
         let _tunables = MemoryTunables::apply();
 
         // Create the results/ directory inside the profile folder to avoid having memtrack create it with wrong permissions
-        std::fs::create_dir_all(execution_context.profile_folder.join("results"))?;
+        let results_folder = execution_context.profile_folder.join("results");
+        std::fs::create_dir_all(&results_folder)?;
 
         Self::ensure_privileges()?;
 
@@ -172,16 +175,18 @@ impl Executor for MemoryExecutor {
         debug!("cmd: {cmd:?}");
 
         let runner_fifo = RunnerFifo::new()?;
-        let on_process_started = |mut child: std::process::Child| async move {
-            let (marker_result, exit_status) =
-                Self::handle_fifo(runner_fifo, ipc, &mut child).await?;
+        let integration = Rc::new(RefCell::new(None));
+        let on_process_started = {
+            let integration = integration.clone();
+            |mut child: std::process::Child| async move {
+                let (marker_result, fifo_data, exit_status) =
+                    Self::handle_fifo(runner_fifo, ipc, &mut child).await?;
+                *integration.borrow_mut() = fifo_data.integration;
 
-            // Directly write to the profile folder, to avoid having to define another field
-            marker_result
-                .save_to(execution_context.profile_folder.join("results"))
-                .unwrap();
+                marker_result.save_to(&results_folder).unwrap();
 
-            Ok(exit_status)
+                Ok(exit_status)
+            }
         };
 
         let status = run_command_with_log_pipe_and_callback(cmd, on_process_started).await?;
@@ -189,6 +194,19 @@ impl Executor for MemoryExecutor {
 
         if !status.success() {
             bail!("failed to execute memory tracker process: {status}");
+        }
+
+        if let Some(integration) = integration.borrow_mut().take() {
+            let results_folder = execution_context.profile_folder.join("results");
+            if let Err(e) = save_module_artifacts(
+                &execution_context.profile_folder,
+                &results_folder,
+                integration,
+            ) {
+                // The memory results are complete without them; only offline
+                // stack attribution is lost.
+                error!("Failed to save memtrack module artifacts: {e:#}");
+            }
         }
 
         Ok(())
@@ -228,7 +246,11 @@ impl MemoryExecutor {
         mut runner_fifo: RunnerFifo,
         ipc: MemtrackIpcServer,
         child: &mut std::process::Child,
-    ) -> anyhow::Result<(ExecutionTimestamps, std::process::ExitStatus)> {
+    ) -> anyhow::Result<(
+        ExecutionTimestamps,
+        crate::executor::shared::fifo::FifoBenchmarkData,
+        std::process::ExitStatus,
+    )> {
         // Accept the IPC connection from memtrack and get the sender it sends us
         // Use a timeout to prevent hanging if the process doesn't start properly
         // https://github.com/servo/ipc-channel/issues/261
@@ -300,9 +322,9 @@ impl MemoryExecutor {
             Ok(None)
         };
 
-        let (marker_result, _, exit_status) =
+        let (marker_result, fifo_data, exit_status) =
             runner_fifo.handle_fifo_messages(child, on_cmd).await?;
 
-        Ok((marker_result, exit_status))
+        Ok((marker_result, fifo_data, exit_status))
     }
 }

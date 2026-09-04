@@ -1,6 +1,6 @@
-use super::loaded_module::{LoadedModule, ProcessLoadedModule};
-use super::module_symbols::ModuleSymbols;
-use super::unwind_data::unwind_data_from_elf;
+use crate::executor::shared::module_artifacts::loaded_module::{LoadedModule, ProcessLoadedModule};
+use crate::executor::shared::module_artifacts::module_symbols::ModuleSymbols;
+use crate::executor::shared::module_artifacts::unwind_data::unwind_data_from_elf;
 use crate::prelude::*;
 use libc::pid_t;
 use linux_perf_data::PerfFileReader;

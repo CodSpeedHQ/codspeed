@@ -6,7 +6,8 @@ use std::collections::HashMap;
 use std::mem::MaybeUninit;
 use std::path::Path;
 
-use crate::ebpf::poller::RingBufferPoller;
+use crate::ebpf::poller::{RingBufferPoller, ThreadedRingBufferPoller};
+use crate::ebpf::tracker::TrackerOptions;
 
 mod token {
     include!(concat!(env!("OUT_DIR"), "/memtrack_token.skel.rs"));
@@ -119,25 +120,29 @@ pub struct MemtrackBpf {
     pub(super) skel: Skel,
     pub(super) probes: Vec<Link>,
     rmap: RmapSupport,
+    /// `(lib_path, offset)` pairs already instrumented. glibc exports
+    /// symbols like `cfree` (and `free_sized`/`__libc_free` elsewhere) at
+    /// the same file offset as their canonical function; attaching each
+    /// alias would double-instrument the one underlying function.
+    attached_offsets: std::collections::HashSet<(std::path::PathBuf, usize)>,
 }
 
 impl MemtrackBpf {
-    /// Load the skeleton, picking the variant a BPF token is available for.
-    pub fn new_with_rmap(track_rmap: bool) -> Result<Self> {
-        let variant = if has_delegated_bpf_token() {
-            BpfVariant::Token
-        } else {
-            BpfVariant::Legacy
-        };
-        Self::with_variant(variant, track_rmap)
-    }
-
-    /// Load a specific variant rather than the one [`Self::new_with_rmap`]
-    /// would detect. Either attaches given host privileges; the token only
-    /// matters when `bpf()` is called from an unprivileged user namespace.
-    pub fn with_variant(variant: BpfVariant, track_rmap: bool) -> Result<Self> {
+    /// Load the skeleton using the requested configuration.
+    pub fn new(options: &TrackerOptions) -> Result<Self> {
         crate::kernel::KernelBtf::ensure_available()?;
 
+        let variant = options.variant.unwrap_or_else(|| {
+            if has_delegated_bpf_token() {
+                BpfVariant::Token
+            } else {
+                BpfVariant::Legacy
+            }
+        });
+        let track_rmap = options.rmap;
+        let capture_stacks = options.stack_capture;
+        let stack_copy_budget = ((options.stack_budget / 512) * 512)
+            .clamp(512, crate::ebpf::events::bindings::MEMTRACK_MAX_STACK_COPY);
         let page_shift = page_shift()?;
         let rmap = if track_rmap {
             RmapSupport::detect()
@@ -166,6 +171,19 @@ impl MemtrackBpf {
                         rodata.target_pidns_dev = dev;
                         rodata.target_pidns_ino = ino;
                     }
+                    if capture_stacks {
+                        rodata.capture_stacks_enabled = 1;
+                        rodata.stack_copy_budget = stack_copy_budget;
+                    }
+                }
+
+                // Avoid reserving the stack maps when capture is disabled. A
+                // ring buffer's size must stay a power-of-two page count.
+                if !capture_stacks {
+                    open_skel.maps.stacks.set_max_entries(4096)?;
+                    open_skel.maps.stack_traces.set_max_entries(1)?;
+                    open_skel.maps.seen_stack_hashes.set_max_entries(1)?;
+                    open_skel.maps.pending_stack_hash.set_max_entries(1)?;
                 }
 
                 // Autoload is decided before load(), so fentries whose targets
@@ -211,6 +229,7 @@ impl MemtrackBpf {
             skel,
             probes: Vec::new(),
             rmap,
+            attached_offsets: std::collections::HashSet::new(),
         })
     }
 
@@ -224,6 +243,42 @@ impl MemtrackBpf {
         with_skel!(self, skel => RingBufferPoller::new(
             &skel.maps.events,
             crate::ebpf::events::parse_event,
+            tx,
+            poll_interval_ms,
+        ))
+    }
+
+    /// Poll the stack-record ring buffer into `tx`. The map lookup for each
+    /// stack's frame-pointer chain is a syscall, so it runs on a resolver
+    /// thread rather than the ring poll thread: see [`ThreadedRingBufferPoller`].
+    pub(crate) fn poll_stacks(
+        &self,
+        poll_interval_ms: u64,
+        tx: std::sync::mpsc::Sender<runner_shared::artifacts::MemtrackEvent>,
+    ) -> Result<ThreadedRingBufferPoller> {
+        use crate::ebpf::events;
+        use runner_shared::artifacts::MemtrackEventKind;
+
+        // The resolver thread outlives this borrow of the skeleton, so the
+        // chain lookup needs an owned handle rather than a reference to the
+        // skeleton map.
+        let stack_traces = with_skel!(self, skel => {
+            libbpf_rs::MapHandle::try_from(&skel.maps.stack_traces)
+                .context("Failed to create handle for stack_traces map")?
+        });
+
+        let resolve =
+            move |(mut event, stackid): (runner_shared::artifacts::MemtrackEvent, i64)| {
+                if let MemtrackEventKind::Stack { record } = &mut event.kind {
+                    record.fp_chain = events::fp_chain(&stack_traces, stackid);
+                }
+                event
+            };
+
+        with_skel!(self, skel => ThreadedRingBufferPoller::new(
+            &skel.maps.stacks,
+            events::parse_stack,
+            resolve,
             tx,
             poll_interval_ms,
         ))

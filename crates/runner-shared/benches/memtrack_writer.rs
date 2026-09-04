@@ -1,7 +1,22 @@
 use divan::Bencher;
+use divan::counter::{BytesCount, ItemsCount};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-use runner_shared::artifacts::{MemtrackEvent, MemtrackEventKind, MemtrackWriter, encode_events};
+use runner_shared::artifacts::{
+    MemtrackEvent, MemtrackEventKind, MemtrackWriter, StackRecord, encode_events,
+};
+
+/// Reports allocation counts and bytes next to the timings for local runs. Only
+/// tallies the thread running the benchmark, so the parallel encoder's
+/// per-worker allocations show up in the single-threaded writer benches
+/// instead.
+///
+/// Left out of CodSpeed builds: wrapping the allocator costs ~15% on
+/// allocation-heavy benchmarks, and the memory instrument reports allocations
+/// there anyway.
+#[cfg(not(codspeed))]
+#[global_allocator]
+static ALLOC: divan::AllocProfiler = divan::AllocProfiler::system();
 
 fn main() {
     divan::main();
@@ -14,14 +29,24 @@ fn generate_events(n: usize) -> Vec<MemtrackEvent> {
     for _ in 0..n {
         let size = rng.gen_range(8..8192);
         let kind = match rng.gen_range(0..10) {
-            0 => MemtrackEventKind::Malloc { size },
-            1 => MemtrackEventKind::Free,
+            0 => MemtrackEventKind::Malloc {
+                size,
+                stack_hash: 0,
+            },
+            1 => MemtrackEventKind::Free { stack_hash: 0 },
             2 => MemtrackEventKind::Realloc {
                 old_addr: Some(rng.r#gen()),
                 size,
+                stack_hash: 0,
             },
-            3 => MemtrackEventKind::Calloc { size },
-            4 => MemtrackEventKind::AlignedAlloc { size },
+            3 => MemtrackEventKind::Calloc {
+                size,
+                stack_hash: 0,
+            },
+            4 => MemtrackEventKind::AlignedAlloc {
+                size,
+                stack_hash: 0,
+            },
             5 => MemtrackEventKind::Mmap { size },
             6 => MemtrackEventKind::Munmap { size },
             7 => MemtrackEventKind::Brk { size },
@@ -48,18 +73,25 @@ fn generate_events(n: usize) -> Vec<MemtrackEvent> {
     events
 }
 
-#[divan::bench(args = [10_000, 100_000, 500_000, 1_000_000])]
+/// Throughput of the single-threaded writer path: one zstd frame, no pool.
+/// This is the per-worker ceiling the parallel encoder scales from.
+#[divan::bench(args = [10_000, 100_000], max_time = 5.0)]
 fn write_events(bencher: Bencher, n: usize) {
     let events = generate_events(n);
+    let artifact_bytes = write_frame(&events).len();
 
-    bencher.bench_local(|| {
-        let mut output = Vec::new();
-        let mut writer = MemtrackWriter::new(&mut output).unwrap();
-        for event in &events {
-            writer.write_event(event).unwrap();
-        }
-        writer.finish().unwrap();
-    });
+    bencher
+        .counter(ItemsCount::new(n))
+        .counter(BytesCount::new(artifact_bytes))
+        .bench_local(|| write_frame(&events));
+}
+
+fn write_frame(events: &[MemtrackEvent]) -> Vec<u8> {
+    let mut writer = MemtrackWriter::new(Vec::new()).unwrap();
+    for event in events {
+        writer.write_event(event).unwrap();
+    }
+    writer.finish().unwrap()
 }
 
 fn generate_realistic_events(n: usize) -> Vec<MemtrackEvent> {
@@ -90,12 +122,18 @@ fn generate_realistic_events(n: usize) -> Vec<MemtrackEvent> {
                 addr
             });
             let kind = match rng.gen_range(0..20) {
-                0 => MemtrackEventKind::Calloc { size },
+                0 => MemtrackEventKind::Calloc {
+                    size,
+                    stack_hash: 0,
+                },
                 1 => MemtrackEventKind::Mmap { size },
-                _ => MemtrackEventKind::Malloc { size },
+                _ => MemtrackEventKind::Malloc {
+                    size,
+                    stack_hash: 0,
+                },
             };
-            if let MemtrackEventKind::Mmap { size } = kind {
-                live_mmap.push((addr, size));
+            if let MemtrackEventKind::Mmap { size } = &kind {
+                live_mmap.push((addr, *size));
             } else {
                 live_heap.push(addr);
             }
@@ -105,7 +143,7 @@ fn generate_realistic_events(n: usize) -> Vec<MemtrackEvent> {
             if idx < live_heap.len() {
                 let addr = live_heap.swap_remove(idx);
                 free_list.push(addr);
-                (addr, MemtrackEventKind::Free)
+                (addr, MemtrackEventKind::Free { stack_hash: 0 })
             } else {
                 let (addr, size) = live_mmap.swap_remove(idx - live_heap.len());
                 free_list.push(addr);
@@ -127,6 +165,7 @@ fn generate_realistic_events(n: usize) -> Vec<MemtrackEvent> {
                 MemtrackEventKind::Realloc {
                     old_addr: Some(old_addr),
                     size,
+                    stack_hash: 0,
                 },
             )
         };
@@ -142,15 +181,84 @@ fn generate_realistic_events(n: usize) -> Vec<MemtrackEvent> {
     events
 }
 
-const REALISTIC_EVENTS: usize = 1_000_000;
+/// One event per frame slot of a full window, so every worker count from 1 to
+/// `WINDOW_FRAMES` has a frame to take. Sizing below this hides pool scaling:
+/// the encoder can only parallelize across whole frames.
+const REALISTIC_EVENTS: usize = 16 * 64 * 1024;
 
-#[divan::bench(args = [16, 8, 4], max_time = 10.0)]
+/// Throughput of the artifact encoder over a realistic allocation mix, as a
+/// function of the worker pool size.
+#[divan::bench(args = [1, 2, 4, 8, 16], max_time = 10.0)]
 fn encode_events_realistic(bencher: Bencher, n_workers: usize) {
     let events = generate_realistic_events(REALISTIC_EVENTS);
+    let artifact_bytes = encode(&events, n_workers).len();
 
-    bencher.bench_local(|| {
-        let mut output = Vec::new();
-        encode_events(events.iter().copied(), &mut output, n_workers).unwrap();
-        output
-    });
+    bencher
+        .counter(ItemsCount::new(events.len()))
+        .counter(BytesCount::new(artifact_bytes))
+        .bench_local(|| encode(&events, n_workers));
+}
+
+/// Single-frame throughput on captured stacks: each `Stack` event carries a
+/// register set and a raw stack copy, so payloads are orders of magnitude
+/// larger than an allocation record and the byte rate is what matters.
+#[divan::bench(max_time = 10.0)]
+fn write_stack_events(bencher: Bencher) {
+    let events = generate_stack_events(16 * 1024);
+    let artifact_bytes = write_frame(&events).len();
+
+    bencher
+        .counter(ItemsCount::new(events.len()))
+        .counter(BytesCount::new(artifact_bytes))
+        .bench_local(|| write_frame(&events));
+}
+
+fn encode(events: &[MemtrackEvent], n_workers: usize) -> Vec<u8> {
+    let mut output = Vec::new();
+    encode_events(events.iter().cloned(), &mut output, n_workers).unwrap();
+    output
+}
+
+/// A stack-capture heavy stream: one `Stack` record per allocation, sized like
+/// the kernel's stack copies (2 KiB payload, x86_64 register set).
+fn generate_stack_events(n: usize) -> Vec<MemtrackEvent> {
+    const STACK_BYTES: usize = 2048;
+    let mut rng = StdRng::seed_from_u64(7);
+    let mut events = Vec::with_capacity(n * 2);
+
+    while events.len() < n * 2 {
+        let hash: u64 = rng.r#gen();
+        let record = StackRecord {
+            hash,
+            sp: 0x7fff_0000_0000 | (rng.gen_range(0..1u64 << 20) << 4),
+            regs: (0..33).map(|_| rng.r#gen()).collect(),
+            bytes: (0..STACK_BYTES).map(|_| rng.r#gen()).collect(),
+            fp_chain: (0..16).map(|_| rng.r#gen()).collect(),
+            truncated: false,
+        };
+        let addr: u64 = rng.r#gen();
+        let timestamp: u64 = rng.r#gen();
+
+        events.push(MemtrackEvent {
+            pid: 4242,
+            tid: 4242,
+            timestamp,
+            addr,
+            kind: MemtrackEventKind::Stack {
+                record: Box::new(record),
+            },
+        });
+        events.push(MemtrackEvent {
+            pid: 4242,
+            tid: 4242,
+            timestamp: timestamp + 1,
+            addr,
+            kind: MemtrackEventKind::Malloc {
+                size: rng.gen_range(8..8192),
+                stack_hash: hash,
+            },
+        });
+    }
+
+    events
 }

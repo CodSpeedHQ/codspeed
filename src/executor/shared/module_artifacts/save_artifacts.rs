@@ -1,23 +1,22 @@
 use super::debug_info::debug_info_by_path;
 use super::loaded_module::LoadedModule;
+use super::naming;
 use crate::executor::valgrind::helpers::ignored_objects_path::get_objects_path_to_ignore;
-use crate::executor::wall_time::profiler::perf::naming;
 use crate::prelude::*;
 use libc::pid_t;
 use rayon::prelude::*;
 use runner_shared::debug_info::{MappedProcessDebugInfo, ModuleDebugInfo};
+use runner_shared::metadata::ModuleArtifacts;
 use runner_shared::module_symbols::MappedProcessModuleSymbols;
 use runner_shared::unwind_data::{MappedProcessUnwindData, ProcessUnwindData, UnwindData};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 pub struct SavedArtifacts {
-    pub symbol_pid_mappings_by_pid: HashMap<pid_t, Vec<MappedProcessModuleSymbols>>,
-    pub debug_info: HashMap<String, ModuleDebugInfo>,
-    pub mapped_process_debug_info_by_pid: HashMap<pid_t, Vec<MappedProcessDebugInfo>>,
-    pub mapped_process_unwind_data_by_pid: HashMap<pid_t, Vec<MappedProcessUnwindData>>,
+    pub artifacts: ModuleArtifacts,
+    /// Kept out of [`ModuleArtifacts`] because only the folded walltime trace
+    /// drops modules; other modes carry every module they mapped.
     pub ignored_modules_by_pid: HashMap<pid_t, Vec<(String, u64, u64)>>,
-    pub key_to_path: HashMap<String, PathBuf>,
 }
 
 /// Save all artifacts (symbols, debug info, unwind data) from mounted modules and JIT data.
@@ -30,7 +29,7 @@ pub fn save_artifacts(
 
     register_paths(&mut path_to_key, loaded_modules_by_path);
 
-    let symbol_pid_mappings_by_pid =
+    let mapped_process_module_symbols =
         save_symbols(profile_folder, loaded_modules_by_path, &path_to_key);
 
     let (debug_info, mapped_process_debug_info_by_pid) =
@@ -45,18 +44,20 @@ pub fn save_artifacts(
 
     let ignored_modules_by_pid = collect_ignored_modules(loaded_modules_by_path);
 
-    let key_to_path = path_to_key
+    let path_key_to_path = path_to_key
         .into_iter()
         .map(|(path, key)| (key, path))
         .collect();
 
     SavedArtifacts {
-        symbol_pid_mappings_by_pid,
-        debug_info,
-        mapped_process_debug_info_by_pid,
-        mapped_process_unwind_data_by_pid,
+        artifacts: ModuleArtifacts {
+            debug_info,
+            mapped_process_debug_info_by_pid,
+            mapped_process_unwind_data_by_pid,
+            mapped_process_module_symbols,
+            path_key_to_path,
+        },
         ignored_modules_by_pid,
-        key_to_path,
     }
 }
 

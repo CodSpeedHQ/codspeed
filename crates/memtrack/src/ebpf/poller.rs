@@ -77,3 +77,63 @@ impl Drop for RingBufferPoller {
         }
     }
 }
+
+/// A [`RingBufferPoller`] whose parsed items need a further, potentially
+/// expensive step (e.g. a BPF map lookup, which is a syscall) before they are
+/// forwarded on `tx`. That step runs on a dedicated resolver thread instead
+/// of the poll thread, so a slow per-record resolve can't make the poll
+/// thread fall behind the ring and drop records.
+pub struct ThreadedRingBufferPoller {
+    // Declaration order is the shutdown order: dropping `ring` first
+    // disconnects its control channel and joins its poll thread, which drops
+    // the internal sender the resolver reads from. Only then can the
+    // resolver's `recv` loop observe disconnection, finish forwarding
+    // whatever it already has, and let `resolver`'s join below return. This
+    // gives callers the same "disconnect, fully drain, then join" contract
+    // as a plain `RingBufferPoller`.
+    ring: Option<RingBufferPoller>,
+    resolver: Option<JoinHandle<()>>,
+}
+
+impl ThreadedRingBufferPoller {
+    /// Poll `rb_map` with `parse` like [`RingBufferPoller::new`], but run
+    /// `resolve` on a separate thread: `parse` results are forwarded over an
+    /// internal channel, and `resolve` turns each one into the value sent on
+    /// `tx`.
+    pub fn new<M, T, U, F, R>(
+        rb_map: &M,
+        parse: F,
+        resolve: R,
+        tx: Sender<U>,
+        poll_interval_ms: u64,
+    ) -> Result<Self>
+    where
+        M: MapCore,
+        T: Send + 'static,
+        U: Send + 'static,
+        F: Fn(&[u8]) -> Option<T> + Send + 'static,
+        R: Fn(T) -> U + Send + 'static,
+    {
+        let (parsed_tx, parsed_rx) = mpsc::channel::<T>();
+        let ring = RingBufferPoller::new(rb_map, parse, parsed_tx, poll_interval_ms)?;
+        let resolver = std::thread::spawn(move || {
+            for item in parsed_rx {
+                let _ = tx.send(resolve(item));
+            }
+        });
+
+        Ok(Self {
+            ring: Some(ring),
+            resolver: Some(resolver),
+        })
+    }
+}
+
+impl Drop for ThreadedRingBufferPoller {
+    fn drop(&mut self) {
+        drop(self.ring.take());
+        if let Some(resolver) = self.resolver.take() {
+            let _ = resolver.join();
+        }
+    }
+}
