@@ -16,7 +16,7 @@ required-features = ["ebpf"]
 
 [features]
 default = ["ebpf"]
-ebpf = ["dep:libbpf-rs", "dep:libbpf-cargo", "dep:vmlinux"]
+ebpf = ["dep:libbpf-rs", "dep:libbpf-cargo", "dep:vmlinux", "dep:mimalloc"]
 
 [dependencies]
 anyhow = { workspace = true }
@@ -38,6 +38,7 @@ perf-event-open-sys = { workspace = true }
 rayon = "1.12"
 parking_lot = "0.12"
 typed-builder = "0.23.2"
+mimalloc = { version = "0.1", optional = true }
 
 [build-dependencies]
 libbpf-cargo = { version = "0.26", optional = true }
