@@ -282,29 +282,31 @@ pub async fn install_valgrind(
             return Ok(());
         }
 
-        // No package to publish means nothing to install automatically: try to build
-        // valgrind-codspeed from source instead. This is a best effort, the build toolchain may be
-        // missing or the build may fail, in which case the user is pointed to a manual installation.
+        // No package to publish means nothing to install automatically. Offer to build
+        // valgrind-codspeed from source instead: the build compiles for a few minutes and
+        // installs system-wide, so the user decides whether we do it or they install by hand.
         warn!(
-            "CodSpeed does not publish a valgrind package for {}, falling back to building it from source",
+            "CodSpeed does not publish a valgrind package for {}",
             system_info.os
         );
-        let build_error = match build_from_source::build_and_install(system_info).await {
-            Ok(()) => {
-                if is_valgrind_installed() {
+
+        if build_from_source::is_wanted() {
+            // A best effort: the toolchain may be missing or the build may fail, in which case
+            // the user is pointed to a manual installation like a declined build would be.
+            match build_from_source::build_and_install(system_info).await {
+                Ok(()) if is_valgrind_installed() => {
                     info!("valgrind-codspeed has been built and installed from source");
                     warn_on_missing_libc_debug_symbols(system_info);
                     return Ok(());
                 }
-                anyhow!("the freshly built valgrind is not usable, see the logs above")
+                Ok(()) => warn!("The freshly built valgrind is not usable, see the logs above"),
+                Err(error) => warn!("Building valgrind from source failed: {error}"),
             }
-            Err(error) => error,
-        };
+        }
 
         bail!(
-            "CodSpeed does not publish a valgrind package for {}, and building it from source failed: {build_error}. \
-            Install valgrind-codspeed {} or higher manually, see https://github.com/CodSpeedHQ/valgrind-codspeed",
-            system_info.os,
+            "valgrind-codspeed {} or higher is required and could not be installed automatically. \
+            Install it manually, see https://github.com/CodSpeedHQ/valgrind-codspeed",
             VALGRIND_CODSPEED_VERSION_STRING.as_str()
         );
     }
