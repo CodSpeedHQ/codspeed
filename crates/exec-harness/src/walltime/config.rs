@@ -12,14 +12,14 @@ const DEFAULT_MAX_TIME_NS: u64 = 3_000_000_000; // 3 seconds
 fn parse_duration_to_ns(s: &str) -> Result<u64> {
     let s = s.trim();
 
-    // Try parsing as pure number first (interpret as seconds)
-    if let Ok(seconds) = s.parse::<f64>() {
-        return Ok((seconds * 1_000_000_000.0) as u64);
-    }
-
-    // Try parsing with humantime
-    let duration: Duration = humantime::parse_duration(s)
-        .with_context(|| format!("Invalid duration format: '{s}'. Expected format like '1s', '500ms', '2m', '1h' or a number in seconds"))?;
+    let duration: Duration = match s.parse::<f64>() {
+        // Pure numbers are interpreted as seconds. `try_from_secs_f64` rejects negative, NaN and
+        // infinite values, which a bare `as u64` cast would silently turn into 0 or u64::MAX.
+        Ok(seconds) => Duration::try_from_secs_f64(seconds).with_context(|| {
+            format!("Invalid duration: '{s}'. Expected a finite, non-negative number of seconds")
+        })?,
+        Err(_) => humantime::parse_duration(s).with_context(|| format!("Invalid duration format: '{s}'. Expected format like '1s', '500ms', '2m', '1h' or a number in seconds"))?,
+    };
 
     Ok(duration.as_nanos() as u64)
 }
@@ -243,6 +243,8 @@ mod tests {
         assert_eq!(parse_duration_to_ns("2").unwrap(), 2_000_000_000); // 2 seconds
         assert_eq!(parse_duration_to_ns("0.5").unwrap(), 500_000_000); // 0.5 seconds
         assert_eq!(parse_duration_to_ns("0").unwrap(), 0);
+        // `-0` parses as `-0.0`, which is still a valid way to disable warmup
+        assert_eq!(parse_duration_to_ns("-0").unwrap(), 0);
         assert_eq!(parse_duration_to_ns("1.5").unwrap(), 1_500_000_000); // 1.5 seconds
     }
 
@@ -272,6 +274,16 @@ mod tests {
         assert!(parse_duration_to_ns("invalid").is_err());
         assert!(parse_duration_to_ns("1x").is_err());
         assert!(parse_duration_to_ns("").is_err());
+    }
+
+    #[test]
+    fn test_parse_duration_to_ns_rejects_negative_and_non_finite_numbers() {
+        for input in ["-1", "-0.5", "NaN", "inf", "-inf"] {
+            assert!(
+                parse_duration_to_ns(input).is_err(),
+                "expected '{input}' to be rejected"
+            );
+        }
     }
 
     #[test]
@@ -326,6 +338,25 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("Invalid warmup_time")
+        );
+    }
+
+    #[test]
+    fn test_execution_options_from_args_negative_max_time() {
+        let result: Result<ExecutionOptions> = WalltimeExecutionArgs {
+            warmup_time: None,
+            max_time: Some("-1".to_string()),
+            min_time: None,
+            max_rounds: None,
+            min_rounds: None,
+        }
+        .try_into();
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("Invalid max_time"),
+            "Expected error about max_time, got: {err}"
         );
     }
 
