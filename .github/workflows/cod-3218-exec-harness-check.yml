@@ -350,3 +350,69 @@ jobs:
               "$(awk '/^totals:/ {s+=$2} END {print s+0}' "$f")"
           done
           echo "TOTAL_IR(main-preload)=$TOTAL"
+
+  # Quantifies breaking change #1 properly, which the single fixed-size probe
+  # above cannot: it reports one number (+26 %) that is dominated by fixed
+  # per-process startup and so says nothing about a real benchmark.
+  #
+  # The process shape is held IDENTICAL across sizes (exec-harness -> sh -> seq)
+  # and only the work varies, which makes the model falsifiable: if the shift
+  # really is a fixed per-process cost, then `branch - main` stays roughly
+  # CONSTANT in absolute Ir as N grows while the ratio collapses towards 1. If
+  # instead the delta grows with N, the cost is proportional and the whole
+  # "it only matters for tiny benchmarks" reading is wrong.
+  #
+  # Both variants run the same sizes through the same script, so the pairs are
+  # directly comparable. Delete this job once the number is recorded on the
+  # ticket.
+  cost-sweep:
+    name: cost sweep (${{ matrix.variant }})
+    runs-on: ubuntu-latest # x86_64
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [branch, main]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # github.sha rather than the branch name: the branch may have moved on
+          # by the time this runs, and the two variants must be pinned commits
+          # for the comparison to mean anything.
+          ref: ${{ matrix.variant == 'main' && 'main' || github.sha }}
+          submodules: true
+      - uses: ./.github/actions/install-rust
+        with:
+          cache-key: cod3218-sweep-${{ matrix.variant }}
+
+      - name: Install the exec-harness under test
+        run: |
+          cargo install --path crates/exec-harness --locked
+          exec-harness --version
+
+      - name: Sweep
+        run: |
+          # Same tamper guard as the instrumentation job: if the runner swapped
+          # in the released exec-harness, the sweep would silently measure the
+          # wrong binary on the branch variant.
+          BEFORE=$(sha256sum "$(which exec-harness)" | cut -d' ' -f1)
+
+          for N in 1000 10000 100000 1000000; do
+            D=$RUNNER_TEMP/sweep-$N
+            mkdir -p "$D"
+            CODSPEED_LOG=warn cargo run -q -- exec \
+              -m simulation \
+              --skip-upload \
+              --profile-folder "$D" \
+              --name "sweep_$N" \
+              -- sh -c "seq 1 $N > /dev/null"
+
+            mapfile -t OUTS < <(find "$D" -name '*.out*' -type f | sort)
+            TOTAL=$(awk '/^totals:/ {s+=$2} END {print s+0}' "${OUTS[@]}")
+            echo "SWEEP variant=${{ matrix.variant }} N=$N files=${#OUTS[@]} TOTAL_IR=$TOTAL"
+          done
+
+          AFTER=$(sha256sum "$(which exec-harness)" | cut -d' ' -f1)
+          if [ "$BEFORE" != "$AFTER" ]; then
+            echo "the runner replaced exec-harness mid-sweep; results are not trustworthy"
+            exit 1
+          fi
