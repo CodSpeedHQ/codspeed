@@ -5,6 +5,29 @@
 
 
 
+## [5.3.0] - 2026-09-07
+
+### <!-- 0 -->🚀 Features
+- Add --memory-track-physical experimental flag by @not-matthias
+- Fail early when the kernel has no BTF by @not-matthias in [#524](https://github.com/CodSpeedHQ/runner/pull/524)
+- Add --track-allocators toggle for memory mode by @not-matthias in [#469](https://github.com/CodSpeedHQ/runner/pull/469)
+- Log which authentication method the run uses by @fargito in [#521](https://github.com/CodSpeedHQ/runner/pull/521)
+- Apply kernel memory tunables before memory-mode runs by @not-matthias
+
+### <!-- 1 -->🐛 Bug Fixes
+- Silence dead-code lint on non-Linux for memory_track_physical by @not-matthias in [#529](https://github.com/CodSpeedHQ/runner/pull/529)
+- Restore profiling sysctls by @not-matthias in [#507](https://github.com/CodSpeedHQ/runner/pull/507)
+
+### <!-- 2 -->🏗️ Refactor
+- Take TrackerOptions in the loading entry points by @not-matthias in [#526](https://github.com/CodSpeedHQ/runner/pull/526)
+- Rename track-rmap toggle to track-physical by @not-matthias
+- Extract kernel_release helper by @not-matthias
+- Move linux_sysctl into executor helpers by @not-matthias
+
+### <!-- 7 -->⚙️ Internals
+- Pin memtrack 1.5.0 (#530) by @adriencaccia in [#530](https://github.com/CodSpeedHQ/runner/pull/530)
+
+
 ## [5.2.1] - 2026-08-24
 
 ### <!-- 0 -->🚀 Features
@@ -1491,6 +1514,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[5.3.0]: https://github.com/CodSpeedHQ/runner/compare/v5.2.1..v5.3.0
 [5.2.1]: https://github.com/CodSpeedHQ/runner/compare/v5.2.0..v5.2.1
 [5.2.0]: https://github.com/CodSpeedHQ/runner/compare/v5.1.0..v5.2.0
 [5.1.0]: https://github.com/CodSpeedHQ/runner/compare/v5.0.2..v5.1.0
