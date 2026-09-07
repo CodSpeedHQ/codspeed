@@ -1,0 +1,41 @@
+$schema: https://raw.githubusercontent.com/CodSpeedHQ/codspeed/refs/heads/main/schemas/codspeed.schema.json
+
+# Walltime benchmarks measure codspeed-memtrack's own overhead across a few
+# representative workloads, not the memory usage of the tracked command. Each
+# workload's RSS-only and RSS+rmap variants run back to back so rmap's overhead
+# is directly comparable.
+#
+# The warmup/max times are generous because a single tracked run already pays a
+# fixed BPF load + uprobe attach cost, which is far above the defaults tuned
+# for near-instant commands.
+#
+# The write workloads overwrite archives pre-created by CI before measurement:
+# a first-time multi-GB allocation on the runner disk would dominate one
+# variant's warmup round purely from I/O ordering, not tracking overhead.
+options:
+  warmup-time: "5s"
+  max-time: "60s"
+
+benchmarks:
+  # Read-only, low-allocation baseline. The tracked command string is run
+  # through `bash -c`, so output can be redirected away: otherwise every round
+  # dumps the whole listing into the runner log.
+  - name: "memtrack track ls"
+    exec: env CODSPEED_MEMTRACK_TRACK_RMAP=0 codspeed-memtrack track "ls -la /usr/lib/x86_64-linux-gnu > /dev/null" --output /tmp/codspeed-memtrack-bench
+
+  - name: "memtrack track ls (rmap)"
+    exec: env CODSPEED_MEMTRACK_TRACK_RMAP=1 codspeed-memtrack track "ls -la /usr/lib/x86_64-linux-gnu > /dev/null" --output /tmp/codspeed-memtrack-bench
+
+  # I/O-heavy with minimal allocation.
+  - name: "memtrack track dd"
+    exec: env CODSPEED_MEMTRACK_TRACK_RMAP=0 codspeed-memtrack track "dd if=/dev/zero of=/tmp/memtrack-bench-dd.bin bs=1M count=64 2> /dev/null" --output /tmp/codspeed-memtrack-bench
+
+  - name: "memtrack track dd (rmap)"
+    exec: env CODSPEED_MEMTRACK_TRACK_RMAP=1 codspeed-memtrack track "dd if=/dev/zero of=/tmp/memtrack-bench-dd.bin bs=1M count=64 2> /dev/null" --output /tmp/codspeed-memtrack-bench
+
+  # Allocation- and I/O-heavy: many small file reads.
+  - name: "memtrack track tar"
+    exec: env CODSPEED_MEMTRACK_TRACK_RMAP=0 codspeed-memtrack track "tar -cf /tmp/memtrack-bench.tar /usr/lib/x86_64-linux-gnu" --output /tmp/codspeed-memtrack-bench
+
+  - name: "memtrack track tar (rmap)"
+    exec: env CODSPEED_MEMTRACK_TRACK_RMAP=1 codspeed-memtrack track "tar -cf /tmp/memtrack-bench.tar /usr/lib/x86_64-linux-gnu" --output /tmp/codspeed-memtrack-bench
