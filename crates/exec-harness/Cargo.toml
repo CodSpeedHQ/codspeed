@@ -20,10 +20,6 @@ serde = { workspace = true }
 humantime = "2.3"
 runner-shared = { path = "../runner-shared" }
 tempfile = { workspace = true }
-object = { workspace = true }
-
-[build-dependencies]
-cc = "1"
 
 [package.metadata.dist]
 targets = ["aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"]

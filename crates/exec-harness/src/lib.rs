@@ -74,11 +74,8 @@ pub fn execute_benchmarks(
         Some(MeasurementMode::Walltime) | None => {
             walltime::perform(commands)?;
         }
-        Some(MeasurementMode::Memory) => {
-            analysis::perform(commands)?;
-        }
-        Some(MeasurementMode::Simulation) => {
-            analysis::perform_with_valgrind(commands)?;
+        Some(mode @ (MeasurementMode::Memory | MeasurementMode::Simulation)) => {
+            analysis::perform(commands, mode)?;
         }
     }
 
