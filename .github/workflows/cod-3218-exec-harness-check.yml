@@ -147,11 +147,22 @@ jobs:
           exec-harness --version
           file "$BIN"
           # Prove the musl matrix leg is really exercising the musl artifact,
-          # rather than a leftover gnu build earlier on PATH.
+          # rather than a leftover gnu build earlier on PATH. Asserted through
+          # readelf and not a `file` string: rustc emits a static-PIE for
+          # x86_64 musl, which `file` calls "static-pie linked" rather than
+          # "statically linked" (aarch64 gets the non-PIE spelling), so matching
+          # that wording tests the wrong axis and fails on a perfectly static
+          # binary. What matters is that nothing is loaded at runtime.
           if [ "${{ matrix.libc }}" = "musl" ]; then
-            file "$BIN" | grep -q 'statically linked' \
-              || { echo "the installed exec-harness is not static"; exit 1; }
-            echo "OK: the exec-harness under test is statically linked"
+            if readelf -d "$BIN" 2>/dev/null | grep -qE 'NEEDED|RPATH|RUNPATH'; then
+              echo "the installed exec-harness has a dynamic dependency"
+              exit 1
+            fi
+            if readelf -lW "$BIN" 2>/dev/null | grep -q 'INTERP'; then
+              echo "the installed exec-harness requests a dynamic loader"
+              exit 1
+            fi
+            echo "OK: no NEEDED and no interpreter -- nothing is loaded at runtime"
           fi
 
       - name: Run a simulation-mode benchmark
@@ -206,10 +217,30 @@ jobs:
           URI="exec_harness::$BENCH_NAME"
 
           fail() { echo "FAIL: $*"; exit 1; }
-          # awk rather than `grep | awk`: awk always exits 0, so a benchmark
-          # that recorded nothing reaches the explicit check below instead of
-          # aborting the step through pipefail with no diagnosis.
-          cost_of() { awk '/^(summary|totals):/ {s+=$2} END {print s+0}' "$@"; }
+
+          # `totals:` only, NOT `summary:`. Child dumps carry both, with nearly
+          # equal values (a part's summary and the file's totals), so summing
+          # both silently doubles the reported cost -- and it doubles it only
+          # for some files, which made the branch/main comparison meaningless.
+          # awk rather than `grep | awk` because awk always exits 0, so a
+          # benchmark that recorded nothing reaches the explicit check below
+          # instead of aborting the step through pipefail with no diagnosis.
+          cost_of() { awk '/^totals:/ {s+=$2} END {print s+0}' "$@"; }
+
+          # Spawned pids of the dump part that carries the URI. This is the
+          # invariant the backend actually walks: the URI and the spawn edge
+          # have to be on the SAME part, not merely in the same file, since
+          # attribution starts from the URI-bearing part and follows its edges.
+          spawns_of_uri_part() {
+            awk -v uri="$1" '
+              /^part: / { if (hasuri && pids != "") { print pids; found=1; exit }
+                          hasuri=0; pids=""; next }
+              index($0, "Client Request: " uri) { hasuri=1 }
+              /^desc: Spawned pid:/ { p=$0; sub(/.*Spawned pid:[[:space:]]*/,"",p)
+                                      pids = pids " " p }
+              END { if (!found && hasuri && pids != "") print pids }
+            ' "$2"
+          }
 
           mapfile -t OUTS < <(find "$PROFILE_DIR" -name '*.out*' -type f | sort)
           echo "found ${#OUTS[@]} callgrind out file(s)"
@@ -218,21 +249,18 @@ jobs:
 
           # 1. Some part must carry the benchmark URI. Without this the cost
           #    exists but is anonymous, and the backend has nothing to attribute
-          #    it to.
+          #    it to. Post-preload this is exec-harness's own dump: the children
+          #    are NOT labelled any more, which is exactly why 2. and 3. matter.
           mapfile -t URI_FILES < <(grep -lF -- "$URI" "${OUTS[@]}")
           [ "${#URI_FILES[@]}" -ge 1 ] || fail "no out file mentions the benchmark URI '$URI'"
           echo "OK: URI '$URI' found in: ${URI_FILES[*]}"
 
-          # 2. That same file must record the spawn edge to the benchmark child.
-          #    Asserted per file rather than per part: splitting parts apart in
-          #    shell is not worth it, and the headers printed above show the
-          #    part association for a human to confirm.
+          # 2. The URI-bearing part must record the spawn edge to the child.
           URI_FILE=${URI_FILES[0]}
-          mapfile -t SPAWNED < <(grep -oiE 'Spawned pid:[[:space:]]*[0-9]+' "$URI_FILE" \
-            | grep -oE '[0-9]+' | sort -u)
+          read -r -a SPAWNED <<< "$(spawns_of_uri_part "$URI" "$URI_FILE")"
           [ "${#SPAWNED[@]}" -ge 1 ] || fail \
-            "the URI-bearing part in $URI_FILE records no 'Spawned pid:' edge, so the child's cost cannot be attributed to the benchmark"
-          echo "OK: $URI_FILE spawned pid(s): ${SPAWNED[*]}"
+            "the URI-bearing part of $URI_FILE records no 'Spawned pid:' edge, so the child's cost cannot be attributed to the benchmark"
+          echo "OK: the URI-bearing part of $URI_FILE spawned pid(s): ${SPAWNED[*]}"
 
           # 3. Walk the whole spawn chain. Each process must have its own out
           #    file with non-zero cost, and may itself have spawned more
@@ -266,6 +294,11 @@ jobs:
 
           echo
           echo "PASS: URI attributed, ${#SEEN[@]} spawned process(es) all carry cost"
+          # Per-file breakdown, so the branch/main comparison can be read
+          # without digging through the headers above.
+          for f in "${OUTS[@]}"; do
+            printf '  %-14s Ir=%s\n' "$(basename "$f")" "$(cost_of "$f")"
+          done
           echo "TOTAL_IR(${{ matrix.libc }})=$(cost_of "${OUTS[@]}")"
 
   # The baseline for breaking change #1: the same benchmark on main, where the
@@ -308,5 +341,12 @@ jobs:
             grep -nE '^(pid|part|desc|cmd|summary|totals):' "$f" || true
           done
           mapfile -t OUTS < <(find "$PROFILE_DIR" -name '*.out*' -type f | sort)
-          TOTAL=$(awk '/^(summary|totals):/ {s+=$2} END {print s+0}' "${OUTS[@]}")
+          # `totals:` only, to match the instrumentation job -- see the comment
+          # on cost_of there. Summing `summary:` as well doubles the figure for
+          # some files and not others, which would make this comparison lie.
+          TOTAL=$(awk '/^totals:/ {s+=$2} END {print s+0}' "${OUTS[@]}")
+          for f in "${OUTS[@]}"; do
+            printf '  %-14s Ir=%s\n' "$(basename "$f")" \
+              "$(awk '/^totals:/ {s+=$2} END {print s+0}' "$f")"
+          done
           echo "TOTAL_IR(main-preload)=$TOTAL"
