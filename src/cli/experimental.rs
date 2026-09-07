@@ -17,6 +17,15 @@ pub struct ExperimentalArgs {
     )]
     pub experimental_fair_sched: bool,
 
+    /// Capture allocation call stacks in memory mode.
+    #[arg(
+        long,
+        default_value_t = false,
+        help_heading = "Experimental",
+        env = "CODSPEED_EXPERIMENTAL_MEMORY_CAPTURE_STACK"
+    )]
+    pub experimental_memory_capture_stack: bool,
+
     /// Deprecated: cycle estimation is enabled by default and this flag has no effect.
     #[arg(long, hide = true, env = "CODSPEED_EXPERIMENTAL_CYCLE_ESTIMATION")]
     pub experimental_cycle_estimation: bool,
@@ -32,6 +41,9 @@ impl ExperimentalArgs {
         let mut flags = Vec::new();
         if self.experimental_fair_sched {
             flags.push("--experimental-fair-sched");
+        }
+        if self.experimental_memory_capture_stack {
+            flags.push("--experimental-memory-capture-stack");
         }
         flags
     }

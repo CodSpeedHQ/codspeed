@@ -71,6 +71,9 @@ impl MemoryExecutor {
         cmd_builder.arg("--ipc-server");
         cmd_builder.arg(server_name);
         cmd_builder.arg(bench_command);
+        if execution_context.config.memory_capture_stack {
+            cmd_builder.env("CODSPEED_MEMTRACK_CAPTURE_STACKS", "1");
+        }
 
         // Set working directory if specified
         if let Some(cwd) = &execution_context.config.working_directory {
