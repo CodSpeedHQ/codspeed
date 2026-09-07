@@ -100,6 +100,7 @@ fn build_orchestrator_config(
             .shared
             .experimental
             .experimental_disable_pythonmalloc_override,
+        memory_capture_stack: args.shared.experimental.experimental_memory_capture_stack,
     })
 }
 

@@ -102,6 +102,9 @@ pub struct OrchestratorConfig {
     pub memory_track_physical: bool,
     /// Do not set PYTHONMALLOC for simulation runs.
     pub disable_pythonmalloc_override: bool,
+    /// Capture allocation call stacks in memory mode, so allocations can be
+    /// attributed to the code that made them.
+    pub memory_capture_stack: bool,
 }
 
 /// Per-execution configuration passed to executors.
@@ -149,6 +152,12 @@ pub struct ExecutorConfig {
     pub memory_track_physical: bool,
     /// Do not set PYTHONMALLOC for simulation runs.
     pub disable_pythonmalloc_override: bool,
+    /// Capture allocation call stacks in memory mode, so allocations can be
+    /// attributed to the code that made them.
+    ///
+    /// Only read by the memory executor, which is Linux-only.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub memory_capture_stack: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -223,6 +232,7 @@ impl OrchestratorConfig {
             simulation_track_subprocess: self.simulation_track_subprocess,
             memory_track_physical: self.memory_track_physical,
             disable_pythonmalloc_override: self.disable_pythonmalloc_override,
+            memory_capture_stack: self.memory_capture_stack,
         }
     }
 }
@@ -260,6 +270,7 @@ impl OrchestratorConfig {
             simulation_track_subprocess: false,
             memory_track_physical: false,
             disable_pythonmalloc_override: false,
+            memory_capture_stack: false,
         }
     }
 }
