@@ -1,0 +1,418 @@
+# COD-3218 spike — throwaway workflow, NOT for merging.
+#
+# Purpose: close the one gap the local work could not. Removing the LD_PRELOAD
+# hack moves the callgrind client requests from inside the benchmark child up
+# into exec-harness, so the measurement now depends on valgrind propagating
+# instrumentation state across fork/exec and on the spawn edges recorded by
+# valgrind-codspeed. None of that is observable locally: this host is aarch64
+# Arch with no valgrind, and the CodSpeed valgrind .deb is published for Ubuntu
+# only. It also runs the whole flow with a *musl* exec-harness, which is the
+# COD-3440 half.
+#
+# Exit code 0 proves nothing here: the harness runs, valgrind runs, the
+# benchmark completes, and the measurement can still be empty. So this workflow
+# asserts on the CONTENT of the .out files, per the verification bar:
+#   - a part carries the benchmark URI, and lists `desc: Spawned pid: <child>`
+#   - every process in the spawn chain has its own .out with non-zero cost
+#   - the summed cost is printed, and the baseline job prints the same number
+#     from main so the step change can be quantified (breaking change #1)
+#
+# To use it: push this branch. The push itself runs the workflow -- see the
+# `on:` block for why a push trigger is required rather than optional. After
+# that first run has registered the file, it can also be re-run by hand:
+#
+#   gh workflow run cod-3218-exec-harness-check.yml --ref spike/cod-3440-memtrack-musl
+#
+# The push trigger is scoped to the spike branch, so it cannot fire anywhere
+# else. Delete the file once the question is answered -- it must not reach main.
+#
+# Deliberately does NOT touch ci.yml, release.yml, dist-workspace.toml or any
+# Cargo.toml: it only adds jobs that run on this branch.
+
+name: COD-3218 exec-harness check
+
+on:
+  workflow_dispatch:
+  # The push trigger is what makes this workflow dispatchable at all, and it is
+  # not optional. A workflow_dispatch-only file that has never existed on the
+  # default branch is never registered by GitHub: `gh workflow run` answers
+  # "HTTP 404: workflow ... not found on the default branch" indefinitely, and
+  # it does NOT register itself over time -- retrying is useless. A push trigger
+  # forces registration, because GitHub runs the file on push and assigns it an
+  # id, after which `--ref` dispatch works too. The COD-3440 workflow next door
+  # was registered exactly this way; its first run is a `push` one from a commit
+  # that temporarily added this same trigger.
+  #
+  # Scoped to the spike branch so it cannot fire anywhere else, and it goes away
+  # when this throwaway file is deleted.
+  push:
+    branches: [spike/cod-3440-memtrack-musl]
+
+env:
+  MUSL_TARGET: x86_64-unknown-linux-musl
+  # Distinctive so it can be grepped out of the .out files unambiguously. The
+  # harness derives the URI as `exec_harness::<name>`.
+  BENCH_NAME: cod3218_probe
+  # Passed as `sh -c "$BENCH_SCRIPT"`, so it holds no quoting of its own -- an
+  # env var cannot carry shell quotes through word splitting.
+  # A nested spawn on purpose: the harness forks `sh`, which forks `seq` and
+  # `wc`. That exercises the intermediate-forwarding case in the backend's
+  # spawn-chain walk, not just a single parent -> child edge.
+  BENCH_SCRIPT: seq 1 50000 | wc -l
+
+jobs:
+  # The COD-3440 half: the artifact the preload removal unblocks.
+  build-musl:
+    name: musl build is static
+    runs-on: ubuntu-latest # x86_64
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: true
+      - uses: ./.github/actions/install-rust
+        with:
+          cache-key: cod3218-musl
+
+      - name: Install musl toolchain
+        # musl-tools provides x86_64-linux-musl-gcc, which cc-rs finds unaided,
+        # so instrument-hooks' core.c compiles for the target. Without it the
+        # bindings build script now fails the build outright rather than
+        # silently compiling the noop implementation.
+        run: |
+          sudo apt-get install -y musl-tools
+          rustup target add "$MUSL_TARGET"
+
+      - name: Build
+        run: cargo build -p exec-harness --target "$MUSL_TARGET"
+
+      - name: Verify the artifact is genuinely static
+        run: |
+          BIN=target/$MUSL_TARGET/debug/exec-harness
+          file "$BIN"
+          ldd "$BIN" || true            # expected: "not a dynamic executable"
+          readelf -d "$BIN" || true     # expected: no dynamic section at all
+          echo "size: $(stat -c %s "$BIN") bytes"
+          # `if` rather than `grep ... && exit 1`, because a grep that matches
+          # nothing exits 1 and would fail the step under bash -e.
+          if readelf -d "$BIN" 2>/dev/null | grep -qE 'NEEDED|RPATH|RUNPATH'; then
+            echo "unexpected dynamic dependency or rpath"
+            exit 1
+          fi
+          echo "OK: static, no NEEDED, no RPATH/RUNPATH"
+
+      - name: Verify no preload artifact is produced any more
+        run: |
+          if find target -name 'libcodspeed_preload*' | grep .; then
+            echo "the preload library is still being built"
+            exit 1
+          fi
+          echo "OK: no preload library in the build output"
+
+  # The COD-3218 half: does the measurement actually land anywhere?
+  instrumentation:
+    name: instrumentation (${{ matrix.libc }})
+    runs-on: ubuntu-latest # x86_64
+    strategy:
+      fail-fast: false
+      matrix:
+        libc: [gnu, musl]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: true
+      - uses: ./.github/actions/install-rust
+        with:
+          cache-key: cod3218-${{ matrix.libc }}
+
+      - name: Install musl toolchain
+        if: matrix.libc == 'musl'
+        run: |
+          sudo apt-get install -y musl-tools
+          rustup target add "$MUSL_TARGET"
+
+      # The runner resolves exec-harness off PATH and only downloads the
+      # released build when `which exec-harness` is missing or reports a
+      # version other than the pin (src/binary_installer/mod.rs). Installing
+      # our build first is therefore what makes this job test anything -- see
+      # the tamper guard in the next step.
+      - name: Install the exec-harness under test
+        run: |
+          if [ "${{ matrix.libc }}" = "musl" ]; then
+            cargo install --path crates/exec-harness --locked --target "$MUSL_TARGET"
+          else
+            cargo install --path crates/exec-harness --locked
+          fi
+          BIN=$(which exec-harness)
+          echo "$BIN"
+          exec-harness --version
+          file "$BIN"
+          # Prove the musl matrix leg is really exercising the musl artifact,
+          # rather than a leftover gnu build earlier on PATH. Asserted through
+          # readelf and not a `file` string: rustc emits a static-PIE for
+          # x86_64 musl, which `file` calls "static-pie linked" rather than
+          # "statically linked" (aarch64 gets the non-PIE spelling), so matching
+          # that wording tests the wrong axis and fails on a perfectly static
+          # binary. What matters is that nothing is loaded at runtime.
+          if [ "${{ matrix.libc }}" = "musl" ]; then
+            if readelf -d "$BIN" 2>/dev/null | grep -qE 'NEEDED|RPATH|RUNPATH'; then
+              echo "the installed exec-harness has a dynamic dependency"
+              exit 1
+            fi
+            if readelf -lW "$BIN" 2>/dev/null | grep -q 'INTERP'; then
+              echo "the installed exec-harness requests a dynamic loader"
+              exit 1
+            fi
+            echo "OK: no NEEDED and no interpreter -- nothing is loaded at runtime"
+          fi
+
+      - name: Run a simulation-mode benchmark
+        id: run
+        run: |
+          PROFILE_DIR=$RUNNER_TEMP/profile
+          mkdir -p "$PROFILE_DIR"
+          echo "profile_dir=$PROFILE_DIR" >> "$GITHUB_OUTPUT"
+
+          # If the runner swapped in the *released* exec-harness, that would be
+          # the preload build and this whole job would pass while proving
+          # nothing. Pin the binary's hash across the run.
+          BEFORE=$(sha256sum "$(which exec-harness)" | cut -d' ' -f1)
+
+          CODSPEED_LOG=debug cargo run -- exec \
+            -m simulation \
+            --skip-upload \
+            --profile-folder "$PROFILE_DIR" \
+            --name "$BENCH_NAME" \
+            -- sh -c "$BENCH_SCRIPT"
+
+          AFTER=$(sha256sum "$(which exec-harness)" | cut -d' ' -f1)
+          if [ "$BEFORE" != "$AFTER" ]; then
+            echo "the runner replaced exec-harness with the released (preload) build"
+            echo "=> this run measured the old code path, not the change under test"
+            exit 1
+          fi
+          echo "OK: the exec-harness under test was the one used"
+
+      - name: Show what was produced
+        if: always() && steps.run.outputs.profile_dir != ''
+        run: |
+          PROFILE_DIR=${{ steps.run.outputs.profile_dir }}
+          echo "=== files ==="
+          find "$PROFILE_DIR" -type f -printf '%10s  %p\n' | sort -k2
+          echo
+          echo "=== headers of every callgrind out file ==="
+          # Printed in full and unfiltered on purpose: the exact header spelling
+          # of a client-request dump is what the backend's parser keys off, and
+          # eyeballing it here is cheaper than guessing at it from this repo.
+          find "$PROFILE_DIR" -name '*.out*' -type f | sort | while read -r f; do
+            echo "--- $f"
+            grep -nE '^(version|creator|pid|part|desc|cmd|events|summary|totals):' "$f" || true
+            echo
+          done
+          echo "=== valgrind logs ==="
+          find "$PROFILE_DIR" -name 'valgrind.*.log' -type f -exec tail -n 30 {} + || true
+
+      - name: Verify the URI is attributed and every spawned process has cost
+        run: |
+          PROFILE_DIR=${{ steps.run.outputs.profile_dir }}
+          URI="exec_harness::$BENCH_NAME"
+
+          fail() { echo "FAIL: $*"; exit 1; }
+
+          # `totals:` only, NOT `summary:`. Child dumps carry both, with nearly
+          # equal values (a part's summary and the file's totals), so summing
+          # both silently doubles the reported cost -- and it doubles it only
+          # for some files, which made the branch/main comparison meaningless.
+          # awk rather than `grep | awk` because awk always exits 0, so a
+          # benchmark that recorded nothing reaches the explicit check below
+          # instead of aborting the step through pipefail with no diagnosis.
+          cost_of() { awk '/^totals:/ {s+=$2} END {print s+0}' "$@"; }
+
+          # Spawned pids of the dump part that carries the URI. This is the
+          # invariant the backend actually walks: the URI and the spawn edge
+          # have to be on the SAME part, not merely in the same file, since
+          # attribution starts from the URI-bearing part and follows its edges.
+          spawns_of_uri_part() {
+            awk -v uri="$1" '
+              /^part: / { if (hasuri && pids != "") { print pids; found=1; exit }
+                          hasuri=0; pids=""; next }
+              index($0, "Client Request: " uri) { hasuri=1 }
+              /^desc: Spawned pid:/ { p=$0; sub(/.*Spawned pid:[[:space:]]*/,"",p)
+                                      pids = pids " " p }
+              END { if (!found && hasuri && pids != "") print pids }
+            ' "$2"
+          }
+
+          mapfile -t OUTS < <(find "$PROFILE_DIR" -name '*.out*' -type f | sort)
+          echo "found ${#OUTS[@]} callgrind out file(s)"
+          [ "${#OUTS[@]}" -ge 2 ] || fail \
+            "expected at least two out files (exec-harness plus the benchmark child), got ${#OUTS[@]}"
+
+          # 1. Some part must carry the benchmark URI. Without this the cost
+          #    exists but is anonymous, and the backend has nothing to attribute
+          #    it to. Post-preload this is exec-harness's own dump: the children
+          #    are NOT labelled any more, which is exactly why 2. and 3. matter.
+          mapfile -t URI_FILES < <(grep -lF -- "$URI" "${OUTS[@]}")
+          [ "${#URI_FILES[@]}" -ge 1 ] || fail "no out file mentions the benchmark URI '$URI'"
+          echo "OK: URI '$URI' found in: ${URI_FILES[*]}"
+
+          # 2. The URI-bearing part must record the spawn edge to the child.
+          URI_FILE=${URI_FILES[0]}
+          read -r -a SPAWNED <<< "$(spawns_of_uri_part "$URI" "$URI_FILE")"
+          [ "${#SPAWNED[@]}" -ge 1 ] || fail \
+            "the URI-bearing part of $URI_FILE records no 'Spawned pid:' edge, so the child's cost cannot be attributed to the benchmark"
+          echo "OK: the URI-bearing part of $URI_FILE spawned pid(s): ${SPAWNED[*]}"
+
+          # 3. Walk the whole spawn chain. Each process must have its own out
+          #    file with non-zero cost, and may itself have spawned more
+          #    (here: exec-harness -> sh -> seq/wc).
+          declare -A SEEN=()
+          WORK=("${SPAWNED[@]}")
+          while [ "${#WORK[@]}" -gt 0 ]; do
+            PID=${WORK[0]}
+            WORK=("${WORK[@]:1}")
+            # `if` rather than `[ ... ] && continue`, which returns non-zero on
+            # the miss and would abort the step under bash -e.
+            if [ -n "${SEEN[$PID]:-}" ]; then
+              continue
+            fi
+            SEEN[$PID]=1
+
+            mapfile -t CHILD < <(find "$PROFILE_DIR" -name "$PID.out*" -type f)
+            [ "${#CHILD[@]}" -ge 1 ] || fail \
+              "spawned pid $PID has no out file, so its cost was never recorded"
+
+            COST=$(cost_of "${CHILD[@]}")
+            [ "$COST" -gt 0 ] || fail "spawned pid $PID recorded zero cost (file: ${CHILD[*]})"
+            echo "OK: pid $PID -> ${CHILD[*]} (Ir: $COST)"
+
+            mapfile -t MORE < <(grep -hoiE 'Spawned pid:[[:space:]]*[0-9]+' "${CHILD[@]}" \
+              | grep -oE '[0-9]+' | sort -u)
+            if [ "${#MORE[@]}" -gt 0 ]; then
+              WORK+=("${MORE[@]}")
+            fi
+          done
+
+          echo
+          echo "PASS: URI attributed, ${#SEEN[@]} spawned process(es) all carry cost"
+          # Per-file breakdown, so the branch/main comparison can be read
+          # without digging through the headers above.
+          for f in "${OUTS[@]}"; do
+            printf '  %-14s Ir=%s\n' "$(basename "$f")" "$(cost_of "$f")"
+          done
+          echo "TOTAL_IR(${{ matrix.libc }})=$(cost_of "${OUTS[@]}")"
+
+  # The baseline for breaking change #1: the same benchmark on main, where the
+  # preload starts the measured region inside the child instead. The delta
+  # between this number and the one above IS the step change in reported cost.
+  baseline-main:
+    name: baseline on main (preload)
+    runs-on: ubuntu-latest # x86_64
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: main
+          submodules: true
+      - uses: ./.github/actions/install-rust
+        with:
+          cache-key: cod3218-baseline
+
+      - name: Install the exec-harness from main
+        run: |
+          cargo install --path crates/exec-harness --locked
+          exec-harness --version
+
+      - name: Run the same benchmark
+        # main's exec-harness is the preload build, and its LD_PRELOAD check
+        # rejects statically linked executables -- so this leg is gnu only.
+        run: |
+          PROFILE_DIR=$RUNNER_TEMP/profile
+          mkdir -p "$PROFILE_DIR"
+
+          CODSPEED_LOG=debug cargo run -- exec \
+            -m simulation \
+            --skip-upload \
+            --profile-folder "$PROFILE_DIR" \
+            --name "$BENCH_NAME" \
+            -- sh -c "$BENCH_SCRIPT"
+
+          find "$PROFILE_DIR" -type f -printf '%10s  %p\n' | sort -k2
+          find "$PROFILE_DIR" -name '*.out*' -type f | sort | while read -r f; do
+            echo "--- $f"
+            grep -nE '^(pid|part|desc|cmd|summary|totals):' "$f" || true
+          done
+          mapfile -t OUTS < <(find "$PROFILE_DIR" -name '*.out*' -type f | sort)
+          # `totals:` only, to match the instrumentation job -- see the comment
+          # on cost_of there. Summing `summary:` as well doubles the figure for
+          # some files and not others, which would make this comparison lie.
+          TOTAL=$(awk '/^totals:/ {s+=$2} END {print s+0}' "${OUTS[@]}")
+          for f in "${OUTS[@]}"; do
+            printf '  %-14s Ir=%s\n' "$(basename "$f")" \
+              "$(awk '/^totals:/ {s+=$2} END {print s+0}' "$f")"
+          done
+          echo "TOTAL_IR(main-preload)=$TOTAL"
+
+  # Quantifies breaking change #1 properly, which the single fixed-size probe
+  # above cannot: it reports one number (+26 %) that is dominated by fixed
+  # per-process startup and so says nothing about a real benchmark.
+  #
+  # The process shape is held IDENTICAL across sizes (exec-harness -> sh -> seq)
+  # and only the work varies, which makes the model falsifiable: if the shift
+  # really is a fixed per-process cost, then `branch - main` stays roughly
+  # CONSTANT in absolute Ir as N grows while the ratio collapses towards 1. If
+  # instead the delta grows with N, the cost is proportional and the whole
+  # "it only matters for tiny benchmarks" reading is wrong.
+  #
+  # Both variants run the same sizes through the same script, so the pairs are
+  # directly comparable. Delete this job once the number is recorded on the
+  # ticket.
+  cost-sweep:
+    name: cost sweep (${{ matrix.variant }})
+    runs-on: ubuntu-latest # x86_64
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [branch, main]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # github.sha rather than the branch name: the branch may have moved on
+          # by the time this runs, and the two variants must be pinned commits
+          # for the comparison to mean anything.
+          ref: ${{ matrix.variant == 'main' && 'main' || github.sha }}
+          submodules: true
+      - uses: ./.github/actions/install-rust
+        with:
+          cache-key: cod3218-sweep-${{ matrix.variant }}
+
+      - name: Install the exec-harness under test
+        run: |
+          cargo install --path crates/exec-harness --locked
+          exec-harness --version
+
+      - name: Sweep
+        run: |
+          # Same tamper guard as the instrumentation job: if the runner swapped
+          # in the released exec-harness, the sweep would silently measure the
+          # wrong binary on the branch variant.
+          BEFORE=$(sha256sum "$(which exec-harness)" | cut -d' ' -f1)
+
+          for N in 1000 10000 100000 1000000; do
+            D=$RUNNER_TEMP/sweep-$N
+            mkdir -p "$D"
+            CODSPEED_LOG=warn cargo run -q -- exec \
+              -m simulation \
+              --skip-upload \
+              --profile-folder "$D" \
+              --name "sweep_$N" \
+              -- sh -c "seq 1 $N > /dev/null"
+
+            mapfile -t OUTS < <(find "$D" -name '*.out*' -type f | sort)
+            TOTAL=$(awk '/^totals:/ {s+=$2} END {print s+0}' "${OUTS[@]}")
+            echo "SWEEP variant=${{ matrix.variant }} N=$N files=${#OUTS[@]} TOTAL_IR=$TOTAL"
+          done
+
+          AFTER=$(sha256sum "$(which exec-harness)" | cut -d' ' -f1)
+          if [ "$BEFORE" != "$AFTER" ]; then
+            echo "the runner replaced exec-harness mid-sweep; results are not trustworthy"
+            exit 1
+          fi
