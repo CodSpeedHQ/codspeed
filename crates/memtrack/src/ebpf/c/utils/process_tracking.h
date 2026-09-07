@@ -6,7 +6,7 @@
 
 BPF_HASH_MAP(tracked_pids, __u32, __u8, 10000);
 BPF_HASH_MAP(pids_ppid, __u32, __u32, 10000);
-BPF_ARRAY_MAP(tracking_enabled, __u8, 1);
+__u8 tracking_enabled = 0;
 
 static __always_inline int is_tracked(__u32 pid) {
     if (bpf_map_lookup_elem(&tracked_pids, &pid)) {
@@ -29,13 +29,7 @@ static __always_inline int is_tracked(__u32 pid) {
 }
 
 static __always_inline int is_enabled(void) {
-    __u32 key = 0;
-    __u8* enabled = bpf_map_lookup_elem(&tracking_enabled, &key);
-    /* ARRAY-map lookups can't fail for a valid index; fail closed if one ever does. */
-    if (!enabled) {
-        return 0;
-    }
-    return *enabled;
+    return tracking_enabled;
 }
 
 static __always_inline void track_child(__u32 child_pid, __u32 parent_pid) {
