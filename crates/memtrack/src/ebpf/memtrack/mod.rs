@@ -26,6 +26,7 @@ pub use maps::OwnershipMaps;
 pub use rmap::RmapSupport;
 
 use crate::bpf_token::has_delegated_bpf_token;
+use crate::ebpf::TrackerOptions;
 
 /// Which attach mechanism a loaded skeleton uses for its uprobes. See
 /// `src/ebpf/c/utils/variant.h` for why only one of them is delegatable.
@@ -119,35 +120,30 @@ pub struct MemtrackBpf {
     pub(super) skel: Skel,
     pub(super) probes: Vec<Link>,
     rmap: RmapSupport,
+    physical: bool,
 }
 
 impl MemtrackBpf {
-    /// Load the skeleton, picking the variant a BPF token is available for.
-    pub fn new_with_rmap(track_rmap: bool) -> Result<Self> {
-        let variant = if has_delegated_bpf_token() {
-            BpfVariant::Token
-        } else {
-            BpfVariant::Legacy
-        };
-        Self::with_variant(variant, track_rmap)
-    }
-
-    /// Load a specific variant rather than the one [`Self::new_with_rmap`]
-    /// would detect. Either attaches given host privileges; the token only
-    /// matters when `bpf()` is called from an unprivileged user namespace.
-    pub fn with_variant(variant: BpfVariant, track_rmap: bool) -> Result<Self> {
+    /// Load the skeleton, defaulting to the variant a BPF token is available for.
+    pub fn load(options: TrackerOptions) -> Result<Self> {
+        let variant = options.variant.unwrap_or_else(|| {
+            if has_delegated_bpf_token() {
+                BpfVariant::Token
+            } else {
+                BpfVariant::Legacy
+            }
+        });
+        let physical = options.physical;
         crate::kernel::KernelBtf::ensure_available()?;
 
         let page_shift = page_shift()?;
-        let rmap = if track_rmap {
+        let rmap = if physical {
             RmapSupport::detect()
         } else {
             RmapSupport::Unsupported
         };
 
-        // Both variants expose `rodata_data` and `progs` under the same field
-        // names, but as distinct generated types, so this can't be a function
-        // over the two.
+        // Both variants expose the same fields as distinct types, so this can't be a function.
         macro_rules! open_and_load {
             ($builder:expr, $skel:path) => {{
                 let open_object = Box::leak(Box::new(MaybeUninit::uninit()));
@@ -168,9 +164,7 @@ impl MemtrackBpf {
                     }
                 }
 
-                // Autoload is decided before load(), so fentries whose targets
-                // the kernel lacks have to be turned off here or the whole
-                // skeleton fails to load.
+                // Autoload is decided before load(), so missing fentry targets must be off here.
                 macro_rules! disable_rmap_prog {
                     ($name:ident) => {
                         paste::paste! {
@@ -188,6 +182,10 @@ impl MemtrackBpf {
                         for_each_rmap_pud_prog!(disable_rmap_prog);
                     }
                     RmapSupport::CoreAndPud => {}
+                }
+
+                if !physical {
+                    open_skel.progs.tracepoint_rss_stat.set_autoload(false);
                 }
 
                 $skel(Box::new(
@@ -211,6 +209,7 @@ impl MemtrackBpf {
             skel,
             probes: Vec::new(),
             rmap,
+            physical,
         })
     }
 

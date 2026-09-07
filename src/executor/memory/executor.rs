@@ -63,6 +63,9 @@ impl MemoryExecutor {
 
         // Build the memtrack command
         let mut cmd_builder = CommandBuilder::new(MEMTRACK_COMMAND);
+        if execution_context.config.memory_track_physical {
+            cmd_builder.env("CODSPEED_MEMTRACK_TRACK_PHYSICAL", "1");
+        }
         cmd_builder.arg("track");
         cmd_builder.arg("--output");
         cmd_builder.arg(execution_context.profile_folder.join("results"));
