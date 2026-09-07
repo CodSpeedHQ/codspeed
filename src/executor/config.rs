@@ -186,12 +186,26 @@ impl OrchestratorConfig {
 
     /// Produce a per-execution [`ExecutorConfig`] for the given command and mode.
     ///
-    /// `enable_introspection` controls whether language-level wrappers (Node.js, Go)
-    /// are injected into `PATH`. This should be `false` for exec-harness targets.
+    /// `uses_exec_harness` says whether this run is driven by exec-harness rather
+    /// than being a plain entrypoint command. Two things are derived from it:
+    ///
+    /// - Language-level wrappers (Node.js, Go) are injected into `PATH` only for
+    ///   entrypoint runs.
+    /// - Subprocess tracking is forced on for exec-harness runs. exec-harness
+    ///   toggles instrumentation in its own process and then forks the benchmark,
+    ///   so the benchmarked child is measured only if valgrind propagates that
+    ///   state across `fork`/`exec` — which is what `--instr-atstart=inherit`
+    ///   enables. Measured: with `--instr-atstart=no` the child dumps a single
+    ///   zero-cost part and the benchmark reports nothing at all.
+    ///
+    /// Deriving it here rather than making `--instr-atstart=inherit`
+    /// unconditional keeps entrypoint runs on their current behaviour. That
+    /// matters: an entrypoint benchmark that forks would otherwise start having
+    /// its children instrumented and counted, silently changing its numbers.
     pub fn executor_config_for_command(
         &self,
         command: String,
-        enable_introspection: bool,
+        uses_exec_harness: bool,
     ) -> ExecutorConfig {
         ExecutorConfig {
             working_directory: self.working_directory.clone(),
@@ -205,11 +219,11 @@ impl OrchestratorConfig {
             allow_empty: self.allow_empty,
             go_runner_version: self.go_runner_version.clone(),
             extra_env: self.extra_env.clone(),
-            enable_introspection,
+            enable_introspection: !uses_exec_harness,
             fair_sched: self.fair_sched,
             cycle_estimation: self.cycle_estimation,
             exclude_allocations: self.exclude_allocations,
-            simulation_track_subprocess: self.simulation_track_subprocess,
+            simulation_track_subprocess: self.simulation_track_subprocess || uses_exec_harness,
         }
     }
 }
@@ -253,7 +267,7 @@ impl OrchestratorConfig {
 impl ExecutorConfig {
     /// Constructs a new `ExecutorConfig` with default values for testing purposes
     pub fn test() -> Self {
-        OrchestratorConfig::test().executor_config_for_command("".into(), true)
+        OrchestratorConfig::test().executor_config_for_command("".into(), false)
     }
 }
 
