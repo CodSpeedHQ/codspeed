@@ -140,8 +140,10 @@ pub struct ExecutorConfig {
     /// Inherit valgrind's instrumentation state across a traced exec, so the cost of
     /// subprocesses spawned by a benchmark is measured too.
     pub simulation_track_subprocess: bool,
-    /// Enable physical (resident) memory tracking in memory mode. Forwarded to
-    /// the memtrack subprocess as `CODSPEED_MEMTRACK_TRACK_PHYSICAL`.
+    /// Enable physical (resident) memory tracking in memory mode.
+    ///
+    /// Only read by the memory executor, which is Linux-only.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub memory_track_physical: bool,
 }
 
