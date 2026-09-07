@@ -17,6 +17,16 @@ pub struct ExperimentalArgs {
     )]
     pub experimental_fair_sched: bool,
 
+    /// Enable physical (resident) memory tracking in memory mode.
+    #[arg(
+        long,
+        default_value_t = false,
+        help_heading = "Experimental",
+        env = "CODSPEED_MEMTRACK_TRACK_PHYSICAL",
+        value_parser = clap::builder::FalseyValueParser::new()
+    )]
+    pub experimental_memory_track_physical: bool,
+
     /// Deprecated: cycle estimation is enabled by default and this flag has no effect.
     #[arg(long, hide = true, env = "CODSPEED_EXPERIMENTAL_CYCLE_ESTIMATION")]
     pub experimental_cycle_estimation: bool,
@@ -32,6 +42,9 @@ impl ExperimentalArgs {
         let mut flags = Vec::new();
         if self.experimental_fair_sched {
             flags.push("--experimental-fair-sched");
+        }
+        if self.experimental_memory_track_physical {
+            flags.push("--experimental-memory-track-physical");
         }
         flags
     }
