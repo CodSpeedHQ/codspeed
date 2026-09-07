@@ -1,6 +1,7 @@
 use std::io::Read;
 use std::time::Duration;
 
+use super::status::{check_mark, cross_mark};
 use crate::api_client::{
     Authentication, CodSpeedAPIClient, RepositoryOverviewPayload,
     SessionAndRepositoryOverviewError, SessionAndRepositoryOverviewVars, SessionError,
@@ -10,13 +11,12 @@ use crate::cli::run::helpers::{
     ParsedRepository, find_repository_root, parse_repository_from_remote,
 };
 use crate::config::CodSpeedConfig;
+use crate::exit_code::auth_failed;
 use crate::prelude::*;
 use clap::{Args, Subcommand};
 use console::style;
 use git2::Repository;
 use tokio::time::{Instant, sleep};
-
-use super::status::{check_mark, cross_mark};
 
 #[derive(Debug, Args)]
 pub struct AuthArgs {
@@ -118,9 +118,9 @@ async fn login(
         .session()
         .await
         .map_err(|err| match err {
-            SessionError::Unauthenticated => {
-                anyhow!("Invalid token. The token is either malformed or has expired.")
-            }
+            SessionError::Unauthenticated => auth_failed(anyhow!(
+                "Invalid token. The token is either malformed or has expired."
+            )),
             SessionError::Other(err) => err,
         })?;
 

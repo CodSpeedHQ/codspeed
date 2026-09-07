@@ -6,6 +6,7 @@ use crate::executor::helpers::get_bench_command::get_bench_command;
 use crate::executor::helpers::run_command_with_log_pipe::run_command_with_log_pipe;
 use crate::executor::valgrind::helpers::ignored_objects_path::get_objects_path_to_ignore;
 use crate::executor::valgrind::helpers::python::is_free_threaded_python;
+use crate::exit_code::benchmark_failed;
 use crate::instruments::mongo_tracer::MongoTracer;
 use crate::prelude::*;
 use log::log_enabled;
@@ -220,7 +221,9 @@ pub async fn measure(
     };
     debug!("Program exit code = {cmd_status}");
     if cmd_status != 0 {
-        bail!("failed to execute the benchmark process, exit code: {cmd_status}");
+        return Err(benchmark_failed(anyhow!(
+            "failed to execute the benchmark process, exit code: {cmd_status}"
+        )));
     }
 
     Ok(())

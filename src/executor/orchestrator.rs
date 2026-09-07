@@ -7,6 +7,7 @@ use crate::cli::run::logger::Logger;
 use crate::executor::config::BenchmarkTarget;
 use crate::executor::config::OrchestratorConfig;
 use crate::executor::helpers::profile_folder::create_profile_folder;
+use crate::exit_code::{auth_failed, upload_failed};
 use crate::prelude::*;
 use crate::run_environment::{self, RunEnvironment, RunEnvironmentProvider};
 use crate::runner_mode::RunnerMode;
@@ -223,7 +224,10 @@ impl Orchestrator {
 
         if !skip_upload {
             start_group!("Uploading results");
-            let last_upload_result = self.upload_all(&mut completed_runs, api_client).await?;
+            let last_upload_result = self
+                .upload_all(&mut completed_runs, api_client)
+                .await
+                .map_err(upload_failed)?;
             end_group!();
 
             if self.is_local() {
@@ -267,7 +271,10 @@ impl Orchestrator {
         let total_runs = completed_runs.len();
         for (run_part_index, (ctx, executor_name)) in completed_runs.iter_mut().enumerate() {
             // OIDC tokens can expire quickly, so refresh just before each upload
-            self.provider.set_oidc_token(api_client).await?;
+            self.provider
+                .set_oidc_token(api_client)
+                .await
+                .map_err(auth_failed)?;
 
             if run_part_index == 0 {
                 // After the mint, so this names the token the upload actually uses
