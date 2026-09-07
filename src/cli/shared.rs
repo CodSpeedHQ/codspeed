@@ -135,11 +135,7 @@ pub struct ExecAndRunSharedArgs {
     )]
     pub exclude_allocations: bool,
 
-    /// Emit per-thread dumps for the benchmarked process in simulation mode.
-    ///
-    /// Subprocesses spawned by the benchmarked process are now always measured,
-    /// so this only controls Valgrind's `--separate-threads`. The flag keeps its
-    /// name for compatibility; renaming it would break existing invocations.
+    /// Measure the subprocesses spawned by the benchmarked process in simulation mode.
     #[arg(long, env = "CODSPEED_SIMULATION_TRACK_SUBPROCESS")]
     pub simulation_track_subprocess: bool,
 

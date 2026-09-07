@@ -33,16 +33,11 @@ fn get_valgrind_args(tool: &SimulationTool, config: &ExecutorConfig) -> Vec<Stri
     .map(|x| x.to_string())
     .collect();
 
-    // `inherit` is what makes the benchmarked process measurable at all: the
-    // harness toggles instrumentation in its own process and the benchmark
-    // inherits that state across `fork`/`exec`. It is not optional — with
-    // `no`, a benchmark spawned by exec-harness runs uninstrumented and the
-    // measurement comes out empty.
-    args.push("--instr-atstart=inherit".to_string());
-
     if config.simulation_track_subprocess {
+        args.push("--instr-atstart=inherit".to_string());
         args.push("--separate-threads=yes".to_string());
     } else {
+        args.push("--instr-atstart=no".to_string());
         args.push("--separate-threads=no".to_string());
     }
 
