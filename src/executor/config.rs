@@ -98,6 +98,9 @@ pub struct OrchestratorConfig {
     /// Inherit valgrind's instrumentation state across a traced exec, so the cost of
     /// subprocesses spawned by a benchmark is measured too.
     pub simulation_track_subprocess: bool,
+    /// Capture allocation call stacks in memory mode, so allocations can be
+    /// attributed to the code that made them.
+    pub memory_capture_stack: bool,
 }
 
 /// Per-execution configuration passed to executors.
@@ -138,6 +141,9 @@ pub struct ExecutorConfig {
     /// Inherit valgrind's instrumentation state across a traced exec, so the cost of
     /// subprocesses spawned by a benchmark is measured too.
     pub simulation_track_subprocess: bool,
+    /// Capture allocation call stacks in memory mode, so allocations can be
+    /// attributed to the code that made them.
+    pub memory_capture_stack: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -210,6 +216,7 @@ impl OrchestratorConfig {
             cycle_estimation: self.cycle_estimation,
             exclude_allocations: self.exclude_allocations,
             simulation_track_subprocess: self.simulation_track_subprocess,
+            memory_capture_stack: self.memory_capture_stack,
         }
     }
 }
@@ -245,6 +252,7 @@ impl OrchestratorConfig {
             cycle_estimation: true,
             exclude_allocations: false,
             simulation_track_subprocess: false,
+            memory_capture_stack: false,
         }
     }
 }

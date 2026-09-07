@@ -81,6 +81,7 @@ impl RunArgs {
                 },
                 experimental: ExperimentalArgs {
                     experimental_fair_sched: false,
+                    experimental_memory_capture_stack: false,
                     experimental_cycle_estimation: false,
                     experimental_exclude_allocations: false,
                 },
@@ -135,6 +136,7 @@ fn build_orchestrator_config(
         cycle_estimation: args.shared.cycle_estimation,
         exclude_allocations: args.shared.exclude_allocations,
         simulation_track_subprocess: args.shared.simulation_track_subprocess,
+        memory_capture_stack: args.shared.experimental.experimental_memory_capture_stack,
     })
 }
 

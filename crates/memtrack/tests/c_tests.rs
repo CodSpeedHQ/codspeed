@@ -2,13 +2,9 @@
 mod shared;
 
 use rstest::rstest;
+use shared::AllocationTestCase;
 use std::process::Command;
 use tempfile::TempDir;
-
-struct AllocationTestCase {
-    name: &'static str,
-    source: &'static str,
-}
 
 const ALLOCATION_TEST_CASES: &[AllocationTestCase] = &[
     AllocationTestCase {
@@ -89,7 +85,7 @@ fn test_track_allocators_disabled_skips_allocations() -> Result<(), Box<dyn std:
         temp_dir.path(),
     )?;
 
-    let (events, thread_handle) = shared::track_command_with_opts(
+    let (events, thread_handle) = shared::track_command(
         std::process::Command::new(&binary),
         memtrack::TrackerOptions::builder()
             .allocators(false)
@@ -110,7 +106,7 @@ fn test_track_allocators_disabled_skips_allocations() -> Result<(), Box<dyn std:
             matches!(
                 e.kind,
                 MemtrackEventKind::Malloc { .. }
-                    | MemtrackEventKind::Free
+                    | MemtrackEventKind::Free { .. }
                     | MemtrackEventKind::Calloc { .. }
                     | MemtrackEventKind::Realloc { .. }
                     | MemtrackEventKind::AlignedAlloc { .. }

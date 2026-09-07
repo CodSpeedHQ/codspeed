@@ -1,3 +1,6 @@
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use clap::Parser;
 use ipc_channel::ipc;
 use memtrack::prelude::*;
@@ -158,6 +161,13 @@ fn track_command(
     // Stop the attach worker and surface any fatal error it recorded (missed
     // exec mappings mean incomplete allocator coverage).
     tracker.finish()?;
+
+    if tracker.stack_capture_enabled() {
+        let stats = tracker
+            .stack_capture_stats()
+            .context("Failed to read stack capture stats")?;
+        debug!("stack capture stats: {stats:?}");
+    }
 
     // Detach probes explicitly: the IPC thread still holds an Arc clone, so the
     // tracker would otherwise never be dropped before process::exit and the

@@ -4,9 +4,14 @@ publish = false
 version = "0.1.0"
 edition = "2024"
 
+# Set by `cargo codspeed build` for the whole build; benches branch on it.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(codspeed)'] }
+
 [dependencies]
 anyhow = { workspace = true }
 serde = { workspace = true }
+serde_bytes = "0.11"
 serde_json = { workspace = true }
 # Pinned to 1.x: 2.0 changes the wire format and serde integration
 bincode = "1.3"

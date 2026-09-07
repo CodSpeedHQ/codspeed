@@ -1,12 +1,12 @@
+use crate::ebpf::poller::{RingBufferPoller, ThreadedRingBufferPoller};
 use crate::prelude::*;
 use libbpf_rs::Link;
 use libbpf_rs::skel::OpenSkel;
 use libbpf_rs::skel::SkelBuilder;
 use std::collections::HashMap;
 use std::mem::MaybeUninit;
+use std::os::fd::{AsFd, AsRawFd, RawFd};
 use std::path::Path;
-
-use crate::ebpf::poller::RingBufferPoller;
 
 mod token {
     include!(concat!(env!("OUT_DIR"), "/memtrack_token.skel.rs"));
@@ -18,10 +18,10 @@ mod legacy {
 #[macro_use]
 mod macros;
 mod allocator;
+mod fd_holder;
 mod maps;
 mod rmap;
 mod tracking;
-
 pub use maps::OwnershipMaps;
 pub use rmap::RmapSupport;
 
@@ -121,11 +121,17 @@ pub struct MemtrackBpf {
     pub(super) probes: Vec<Link>,
     rmap: RmapSupport,
     physical: bool,
+    /// `(lib_path, offset)` pairs already instrumented. glibc exports
+    /// symbols like `cfree` (and `free_sized`/`__libc_free` elsewhere) at
+    /// the same file offset as their canonical function; attaching each
+    /// alias would double-instrument the one underlying function.
+    attached_offsets: std::collections::HashSet<(std::path::PathBuf, usize)>,
 }
 
 impl MemtrackBpf {
-    /// Load the skeleton, defaulting to the variant a BPF token is available for.
-    pub fn load(options: TrackerOptions) -> Result<Self> {
+    pub fn new(options: &TrackerOptions) -> Result<Self> {
+        crate::kernel::KernelBtf::ensure_available()?;
+
         let variant = options.variant.unwrap_or_else(|| {
             if has_delegated_bpf_token() {
                 BpfVariant::Token
@@ -134,8 +140,9 @@ impl MemtrackBpf {
             }
         });
         let physical = options.physical;
-        crate::kernel::KernelBtf::ensure_available()?;
-
+        let capture_stacks = options.stack_capture;
+        let stack_copy_budget = ((options.stack_budget / 512) * 512)
+            .clamp(512, crate::ebpf::events::bindings::MEMTRACK_MAX_STACK_COPY);
         let page_shift = page_shift()?;
         let rmap = if physical {
             RmapSupport::detect()
@@ -162,6 +169,19 @@ impl MemtrackBpf {
                         rodata.target_pidns_dev = dev;
                         rodata.target_pidns_ino = ino;
                     }
+                    if capture_stacks {
+                        rodata.capture_stacks_enabled = 1;
+                        rodata.stack_copy_budget = stack_copy_budget;
+                    }
+                }
+
+                // Avoid reserving the stack maps when capture is disabled. A
+                // ring buffer's size must stay a power-of-two page count.
+                if !capture_stacks {
+                    open_skel.maps.stacks.set_max_entries(4096)?;
+                    open_skel.maps.stack_traces.set_max_entries(1)?;
+                    open_skel.maps.seen_stack_hashes.set_max_entries(1)?;
+                    open_skel.maps.pending_stack_hash.set_max_entries(1)?;
                 }
 
                 // Autoload is decided before load(), so missing fentry targets must be off here.
@@ -172,7 +192,6 @@ impl MemtrackBpf {
                         }
                     };
                 }
-                // Mirrors the attach match in `tracking.rs`.
                 match rmap {
                     RmapSupport::Unsupported => {
                         for_each_rmap_core_prog!(disable_rmap_prog);
@@ -210,6 +229,7 @@ impl MemtrackBpf {
             probes: Vec::new(),
             rmap,
             physical,
+            attached_offsets: std::collections::HashSet::new(),
         })
     }
 
@@ -223,6 +243,39 @@ impl MemtrackBpf {
         with_skel!(self, skel => RingBufferPoller::new(
             &skel.maps.events,
             crate::ebpf::events::parse_event,
+            tx,
+            poll_interval_ms,
+        ))
+    }
+
+    /// Poll stack records and resolve their frame-pointer chains on a worker thread.
+    /// Map lookups are syscalls and must not stall the ring-buffer poller.
+    pub(crate) fn poll_stacks(
+        &self,
+        poll_interval_ms: u64,
+        tx: std::sync::mpsc::Sender<runner_shared::artifacts::MemtrackEvent>,
+    ) -> Result<ThreadedRingBufferPoller> {
+        use crate::ebpf::events;
+        use runner_shared::artifacts::MemtrackEventKind;
+
+        // The resolver owns the map handle because it outlives this skeleton borrow.
+        let stack_traces = with_skel!(self, skel => {
+            libbpf_rs::MapHandle::try_from(&skel.maps.stack_traces)
+                .context("Failed to create handle for stack_traces map")?
+        });
+
+        let resolve =
+            move |(mut event, stackid): (runner_shared::artifacts::MemtrackEvent, i64)| {
+                if let MemtrackEventKind::Stack { record } = &mut event.kind {
+                    record.fp_chain = events::fp_chain(&stack_traces, stackid);
+                }
+                event
+            };
+
+        with_skel!(self, skel => ThreadedRingBufferPoller::new(
+            &skel.maps.stacks,
+            events::parse_stack,
+            resolve,
             tx,
             poll_interval_ms,
         ))
@@ -248,27 +301,31 @@ impl MemtrackBpf {
         self.probes.len()
     }
 
-    /// Detach all BPF links in parallel. Closing a uprobe link blocks on two
-    /// RCU grace periods in the kernel, but concurrent waiters share grace
-    /// periods, so closing from many threads scales near-linearly.
+    /// Detach all BPF links without blocking on kernel link teardown: forked
+    /// holders own disjoint fd chunks and perform the terminal close in
+    /// parallel, while this process only drops its duplicate references.
     pub fn detach_probes(&mut self) {
-        const DETACH_THREADS: usize = 32;
-
-        let mut probes = std::mem::take(&mut self.probes);
+        let probes = std::mem::take(&mut self.probes);
         if probes.is_empty() {
             return;
         }
 
         debug!("Detaching {} BPF links", probes.len());
         let start = std::time::Instant::now();
-        let chunk_size = probes.len().div_ceil(DETACH_THREADS);
-        std::thread::scope(|scope| {
-            while !probes.is_empty() {
-                let split_at = probes.len().saturating_sub(chunk_size);
-                let chunk = probes.split_off(split_at);
-                scope.spawn(move || drop(chunk));
-            }
-        });
+
+        let fds: Vec<RawFd> = probes.iter().map(|p| p.as_fd().as_raw_fd()).collect();
+        let holders = fd_holder::FdHolderSet::spawn(&fds, 32);
+        let holder_count = holders.len();
+
+        drop(probes);
+
+        if !holders.is_empty() && !holders.release_all(std::time::Duration::from_secs(30)) {
+            warn!(
+                "Link teardown is stuck in the kernel; abandoning {holder_count} fd holder processes"
+            );
+            return;
+        }
+
         debug!("Detached BPF links in {:?}", start.elapsed());
     }
 }
