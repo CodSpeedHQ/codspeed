@@ -17,22 +17,36 @@
 #   - the summed cost is printed, and the baseline job prints the same number
 #     from main so the step change can be quantified (breaking change #1)
 #
-# To use it: push this branch, then
+# To use it: push this branch. The push itself runs the workflow -- see the
+# `on:` block for why a push trigger is required rather than optional. After
+# that first run has registered the file, it can also be re-run by hand:
 #
 #   gh workflow run cod-3218-exec-harness-check.yml --ref spike/cod-3440-memtrack-musl
 #
-# Manual trigger only, so it never fires on its own. Note that the very first
-# dispatch of a workflow living only on a non-default branch 404s until GitHub
-# has registered it; once it shows up in the Actions list, --ref dispatch works.
-# Delete the file once the question is answered -- it must not reach main.
+# The push trigger is scoped to the spike branch, so it cannot fire anywhere
+# else. Delete the file once the question is answered -- it must not reach main.
 #
 # Deliberately does NOT touch ci.yml, release.yml, dist-workspace.toml or any
-# Cargo.toml: it only adds manually-triggered jobs.
+# Cargo.toml: it only adds jobs that run on this branch.
 
 name: COD-3218 exec-harness check
 
 on:
   workflow_dispatch:
+  # The push trigger is what makes this workflow dispatchable at all, and it is
+  # not optional. A workflow_dispatch-only file that has never existed on the
+  # default branch is never registered by GitHub: `gh workflow run` answers
+  # "HTTP 404: workflow ... not found on the default branch" indefinitely, and
+  # it does NOT register itself over time -- retrying is useless. A push trigger
+  # forces registration, because GitHub runs the file on push and assigns it an
+  # id, after which `--ref` dispatch works too. The COD-3440 workflow next door
+  # was registered exactly this way; its first run is a `push` one from a commit
+  # that temporarily added this same trigger.
+  #
+  # Scoped to the spike branch so it cannot fire anywhere else, and it goes away
+  # when this throwaway file is deleted.
+  push:
+    branches: [spike/cod-3440-memtrack-musl]
 
 env:
   MUSL_TARGET: x86_64-unknown-linux-musl
