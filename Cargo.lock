@@ -1179,13 +1179,11 @@ name = "exec-harness"
 version = "1.3.0"
 dependencies = [
  "anyhow",
- "cc",
  "clap",
  "env_logger",
  "humantime",
  "instrument-hooks-bindings",
  "log",
- "object",
  "runner-shared",
  "serde",
  "serde_json",
