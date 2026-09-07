@@ -16,27 +16,23 @@ impl MemtrackBpf {
     }
 
     pub fn enable_tracking(&mut self) -> Result<()> {
-        let key = 0u32;
-        let value = true as u8;
-        with_skel!(self, skel => skel.maps.tracking_enabled.update(
-            &key.to_le_bytes(),
-            &value.to_le_bytes(),
-            libbpf_rs::MapFlags::ANY,
-        ))
-        .context("Failed to enable tracking")?;
-        Ok(())
+        self.set_tracking(true)
     }
 
     pub fn disable_tracking(&mut self) -> Result<()> {
-        let key = 0u32;
-        let value = false as u8;
-        with_skel!(self, skel => skel.maps.tracking_enabled.update(
-            &key.to_le_bytes(),
-            &value.to_le_bytes(),
-            libbpf_rs::MapFlags::ANY,
-        ))
-        .context("Failed to disable tracking")?;
-        Ok(())
+        self.set_tracking(false)
+    }
+
+    fn set_tracking(&mut self, enabled: bool) -> Result<()> {
+        with_skel!(mut self, skel => {
+            let bss = skel
+                .maps
+                .bss_data
+                .as_deref_mut()
+                .context("bss map missing")?;
+            bss.tracking_enabled = enabled as u8;
+            Ok(())
+        })
     }
 
     /// Mark a (dev, ino) as classified so the watcher stops re-signalling for it.
