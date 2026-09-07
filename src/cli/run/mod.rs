@@ -81,6 +81,7 @@ impl RunArgs {
                 },
                 experimental: ExperimentalArgs {
                     experimental_fair_sched: false,
+                    experimental_memory_capture_stack: false,
                     experimental_cycle_estimation: false,
                     experimental_exclude_allocations: false,
                     experimental_memory_track_physical: false,
@@ -142,6 +143,7 @@ fn build_orchestrator_config(
             .shared
             .experimental
             .experimental_disable_pythonmalloc_override,
+        memory_capture_stack: args.shared.experimental.experimental_memory_capture_stack,
     })
 }
 
