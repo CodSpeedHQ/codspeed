@@ -1,12 +1,12 @@
+use crate::ebpf::poller::{RingBufferPoller, ThreadedRingBufferPoller};
 use crate::prelude::*;
 use libbpf_rs::Link;
 use libbpf_rs::skel::OpenSkel;
 use libbpf_rs::skel::SkelBuilder;
 use std::collections::HashMap;
 use std::mem::MaybeUninit;
+use std::os::fd::{AsFd, AsRawFd, RawFd};
 use std::path::Path;
-
-use crate::ebpf::poller::{RingBufferPoller, ThreadedRingBufferPoller};
 
 mod token {
     include!(concat!(env!("OUT_DIR"), "/memtrack_token.skel.rs"));
@@ -18,10 +18,10 @@ mod legacy {
 #[macro_use]
 mod macros;
 mod allocator;
+mod fd_holder;
 mod maps;
 mod rmap;
 mod tracking;
-
 pub use maps::OwnershipMaps;
 pub use rmap::RmapSupport;
 
@@ -301,27 +301,31 @@ impl MemtrackBpf {
         self.probes.len()
     }
 
-    /// Detach all BPF links in parallel. Closing a uprobe link blocks on two
-    /// RCU grace periods in the kernel, but concurrent waiters share grace
-    /// periods, so closing from many threads scales near-linearly.
+    /// Detach all BPF links without blocking on kernel link teardown: forked
+    /// holders own disjoint fd chunks and perform the terminal close in
+    /// parallel, while this process only drops its duplicate references.
     pub fn detach_probes(&mut self) {
-        const DETACH_THREADS: usize = 32;
-
-        let mut probes = std::mem::take(&mut self.probes);
+        let probes = std::mem::take(&mut self.probes);
         if probes.is_empty() {
             return;
         }
 
         debug!("Detaching {} BPF links", probes.len());
         let start = std::time::Instant::now();
-        let chunk_size = probes.len().div_ceil(DETACH_THREADS);
-        std::thread::scope(|scope| {
-            while !probes.is_empty() {
-                let split_at = probes.len().saturating_sub(chunk_size);
-                let chunk = probes.split_off(split_at);
-                scope.spawn(move || drop(chunk));
-            }
-        });
+
+        let fds: Vec<RawFd> = probes.iter().map(|p| p.as_fd().as_raw_fd()).collect();
+        let holders = fd_holder::FdHolderSet::spawn(&fds, 32);
+        let holder_count = holders.len();
+
+        drop(probes);
+
+        if !holders.is_empty() && !holders.release_all(std::time::Duration::from_secs(30)) {
+            warn!(
+                "Link teardown is stuck in the kernel; abandoning {holder_count} fd holder processes"
+            );
+            return;
+        }
+
         debug!("Detached BPF links in {:?}", start.elapsed());
     }
 }
