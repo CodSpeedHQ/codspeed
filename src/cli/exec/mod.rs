@@ -58,6 +58,8 @@ fn build_orchestrator_config(
     poll_results_options: PollResultsOptions,
 ) -> Result<OrchestratorConfig> {
     let modes = args.shared.resolve_modes()?;
+    let cycle_estimation = args.shared.resolve_cycle_estimation();
+    let exclude_allocations = args.shared.resolve_exclude_allocations();
     let raw_upload_url = args
         .shared
         .upload_url
@@ -90,8 +92,8 @@ fn build_orchestrator_config(
         poll_results_options,
         extra_env: HashMap::new(),
         fair_sched: args.shared.experimental.experimental_fair_sched,
-        cycle_estimation: args.shared.cycle_estimation,
-        exclude_allocations: args.shared.exclude_allocations,
+        cycle_estimation,
+        exclude_allocations,
         simulation_track_subprocess: args.shared.simulation_track_subprocess,
         memory_track_physical: args.shared.experimental.experimental_memory_track_physical,
     })
