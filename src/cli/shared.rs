@@ -168,6 +168,18 @@ impl ExecAndRunSharedArgs {
 
         Ok(modes)
     }
+
+    /// Resolves cycle estimation, honoring the deprecated
+    /// `--experimental-cycle-estimation` alias.
+    pub fn resolve_cycle_estimation(&self) -> bool {
+        self.cycle_estimation || self.experimental.experimental_cycle_estimation
+    }
+
+    /// Resolves allocation exclusion, honoring the deprecated
+    /// `--experimental-exclude-allocations` alias.
+    pub fn resolve_exclude_allocations(&self) -> bool {
+        self.exclude_allocations || self.experimental.experimental_exclude_allocations
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, ValueEnum, Default)]

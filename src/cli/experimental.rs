@@ -27,11 +27,11 @@ pub struct ExperimentalArgs {
     )]
     pub experimental_memory_track_physical: bool,
 
-    /// Deprecated: cycle estimation is enabled by default and this flag has no effect.
+    /// Deprecated alias for `--cycle-estimation`, still honored for now.
     #[arg(long, hide = true, env = "CODSPEED_EXPERIMENTAL_CYCLE_ESTIMATION")]
     pub experimental_cycle_estimation: bool,
 
-    /// Deprecated: allocation exclusion is controlled by `--exclude-allocations` and this flag has no effect.
+    /// Deprecated alias for `--exclude-allocations`, still honored for now.
     #[arg(long, hide = true, env = "CODSPEED_EXPERIMENTAL_EXCLUDE_ALLOCATIONS")]
     pub experimental_exclude_allocations: bool,
 }
@@ -72,31 +72,25 @@ impl ExperimentalArgs {
         );
     }
 
-    /// Warns about deprecated flags that were graduated to default-on options and
-    /// no longer have any effect.
+    /// Warns about deprecated flags that graduated to stable options. They are still
+    /// honored, but will be removed in a future release.
     pub fn warn_if_deprecated(&self) {
         let deprecated = [
             (
                 self.experimental_cycle_estimation,
                 "--experimental-cycle-estimation",
-                "cycle estimation",
                 "--cycle-estimation",
             ),
             (
                 self.experimental_exclude_allocations,
                 "--experimental-exclude-allocations",
-                "allocation exclusion",
                 "--exclude-allocations",
             ),
         ];
 
-        for (_, flag, feature, new_flag) in deprecated.iter().filter(|(set, ..)| *set) {
-            eprintln!(
-                "  {} {} has no effect: {} is now controlled by {}.",
-                style(Icon::Warning.to_string()).yellow(),
-                style(*flag).bold(),
-                feature,
-                style(*new_flag).bold(),
+        for (_, flag, new_flag) in deprecated.iter().filter(|(set, ..)| *set) {
+            log::warn!(
+                "{flag} is deprecated and will be removed in a future release: use {new_flag} instead."
             );
         }
     }
