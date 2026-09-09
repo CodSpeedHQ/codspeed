@@ -36,6 +36,11 @@ pub struct BenchmarkCommand {
     /// Walltime execution options (flattened into the JSON object)
     #[serde(default)]
     pub walltime_args: walltime::WalltimeExecutionArgs,
+
+    /// When true, a non-zero exit from the command is logged as a warning
+    /// instead of aborting execution.
+    #[serde(default)]
+    pub ignore_failure: bool,
 }
 
 /// Read and parse benchmark commands from stdin as JSON
