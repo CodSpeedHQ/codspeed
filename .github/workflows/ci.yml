@@ -153,6 +153,49 @@ jobs:
           mode: ${{ matrix.mode }}
           run: cargo codspeed run -p runner-shared
 
+  memtrack-benchmarks:
+    runs-on: codspeed-macro
+    strategy:
+      fail-fast: false
+      matrix:
+        # One config file per workload so each job stays short; both physical
+        # variants of a workload live in the same file to be measured back to back.
+        workload: [ls, dd, tar]
+    env:
+      CODSPEED_REV: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: true
+
+      - uses: ./.github/actions/install-rust
+      - uses: ./.github/actions/install-bpf-deps
+
+      - name: Install memtrack
+        run: cargo install --git https://github.com/CodSpeedHQ/codspeed --rev "$CODSPEED_REV" --locked memtrack
+
+      - name: Grant memtrack file capabilities
+        run: cargo r -- setup --mode memory
+
+      - name: Verify memtrack binary
+        run: codspeed-memtrack --version
+
+      # The write benchmarks overwrite these files every round; creating them
+      # inside a measured round would time one-off disk allocation.
+      - name: Pre-create benchmark archives
+        run: |
+          mkdir -p /tmp/codspeed-memtrack-bench
+          tar -cf /tmp/memtrack-bench.tar /usr/bin
+          dd if=/dev/zero of=/tmp/memtrack-bench-dd.bin bs=1M count=64 2> /dev/null
+
+      - name: Run memtrack walltime benchmarks (${{ matrix.workload }})
+        uses: CodSpeedHQ/action@3194d9a39c4d46684cb44bf7207fc56626aad8fd # v4
+        with:
+          config: crates/memtrack/benchmarks/${{ matrix.workload }}.yml
+          mode: walltime
+          runner-version: rev:${{ env.CODSPEED_REV }}
+          skip-hash-check-warning: true
+
   check:
     runs-on: ubuntu-latest
     if: always()
@@ -164,6 +207,7 @@ jobs:
       - macos-basic-run-test
       - bpf-tests
       - benchmarks
+      - memtrack-benchmarks
     steps:
       - uses: re-actors/alls-green@release/v1
         with:

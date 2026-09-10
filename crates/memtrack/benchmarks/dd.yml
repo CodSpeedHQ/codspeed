@@ -1,0 +1,18 @@
+$schema: https://raw.githubusercontent.com/CodSpeedHQ/codspeed/refs/heads/main/schemas/codspeed.schema.json
+
+# Each tracked run pays a fixed BPF load + uprobe attach cost, so the default
+# 1s warmup / 3s max budgets fit only a handful of rounds.
+options:
+  warmup-time: "5s"
+  max-time: "60s"
+
+# The output file is pre-created by CI before measurement: a first-time
+# allocation on the runner disk would dominate one variant's warmup round
+# purely from I/O ordering, not tracking overhead.
+benchmarks:
+  # I/O-heavy with minimal allocation.
+  - name: "memtrack track dd"
+    exec: env CODSPEED_MEMTRACK_TRACK_PHYSICAL=0 codspeed-memtrack track "dd if=/dev/zero of=/tmp/memtrack-bench-dd.bin bs=1M count=64 2> /dev/null" --output /tmp/codspeed-memtrack-bench
+
+  - name: "memtrack track dd (with physical)"
+    exec: env CODSPEED_MEMTRACK_TRACK_PHYSICAL=1 codspeed-memtrack track "dd if=/dev/zero of=/tmp/memtrack-bench-dd.bin bs=1M count=64 2> /dev/null" --output /tmp/codspeed-memtrack-bench

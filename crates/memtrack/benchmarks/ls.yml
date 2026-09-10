@@ -1,0 +1,17 @@
+$schema: https://raw.githubusercontent.com/CodSpeedHQ/codspeed/refs/heads/main/schemas/codspeed.schema.json
+
+# Each tracked run pays a fixed BPF load + uprobe attach cost, so the default
+# 1s warmup / 3s max budgets fit only a handful of rounds.
+options:
+  warmup-time: "5s"
+  max-time: "60s"
+
+benchmarks:
+  # Read-only, low-allocation baseline. The tracked command string is run
+  # through `bash -c`, so output can be redirected away: otherwise every round
+  # dumps the whole listing into the runner log.
+  - name: "memtrack track ls"
+    exec: env CODSPEED_MEMTRACK_TRACK_PHYSICAL=0 codspeed-memtrack track "ls -la /usr/bin > /dev/null" --output /tmp/codspeed-memtrack-bench
+
+  - name: "memtrack track ls (with physical)"
+    exec: env CODSPEED_MEMTRACK_TRACK_PHYSICAL=1 codspeed-memtrack track "ls -la /usr/bin > /dev/null" --output /tmp/codspeed-memtrack-bench
