@@ -40,8 +40,8 @@ int BPF_PROG(tracepoint_sched_process_fork, struct task_struct* parent, struct t
     SUBMIT_EVENT_AS(child_pid, EVENT_TYPE_FORK, { e->data.fork.parent_pid = parent_pid; });
 }
 
-SEC("tracepoint/sched/sched_process_exec")
-int tracepoint_sched_process_exec(void* ctx) {
+SEC("tp_btf/sched_process_exec")
+int BPF_PROG(tracepoint_sched_process_exec) {
     __u32 pid = current_tgid();
     if (!is_tracked(pid)) {
         return 0;
@@ -58,8 +58,8 @@ int tracepoint_sched_process_exec(void* ctx) {
     SUBMIT_EVENT_AS(pid, EVENT_TYPE_EXEC, {});
 }
 
-SEC("tracepoint/sched/sched_process_exit")
-int tracepoint_sched_process_exit(void* ctx) {
+SEC("tp_btf/sched_process_exit")
+int BPF_PROG(tracepoint_sched_process_exit) {
     __u32 pid = current_tgid();
     if (!is_tracked(pid)) {
         return 0;
