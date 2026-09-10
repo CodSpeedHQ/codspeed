@@ -245,31 +245,49 @@ fn process_mmap2_record(
         record.protection,
     );
 
-    let load_bias = match ModuleSymbols::compute_load_bias(
+    add_module_mapping(
+        loaded_modules_by_path,
         &record_path,
+        &record_path_string,
         record.address,
         end_addr,
         record.page_offset,
-    ) {
-        Ok(load_bias) => load_bias,
-        Err(e) => {
-            debug!("Failed to compute load bias for {record_path_string}: {e}");
-            return;
-        }
-    };
+        record.pid,
+    );
+}
+
+/// Record one executable module mapping for `pid`: compute its load bias, extract
+/// the module's ELF symbols (once per module) and its per-process unwind data.
+///
+/// Shared by the perf `MMAP2` path and the `/proc/<pid>/maps` fallback, which both
+/// supply the same `(path, start, end, file offset)` for an executable mapping.
+pub(super) fn add_module_mapping(
+    loaded_modules_by_path: &mut HashMap<PathBuf, LoadedModule>,
+    record_path: &Path,
+    record_path_string: &str,
+    start_addr: u64,
+    end_addr: u64,
+    page_offset: u64,
+    pid: pid_t,
+) {
+    let load_bias =
+        match ModuleSymbols::compute_load_bias(record_path, start_addr, end_addr, page_offset) {
+            Ok(load_bias) => load_bias,
+            Err(e) => {
+                debug!("Failed to compute load bias for {record_path_string}: {e}");
+                return;
+            }
+        };
 
     let loaded_module = loaded_modules_by_path
-        .entry(record_path.clone())
+        .entry(record_path.to_path_buf())
         .or_default();
 
-    let process_loaded_module = loaded_module
-        .process_loaded_modules
-        .entry(record.pid)
-        .or_default();
+    let process_loaded_module = loaded_module.process_loaded_modules.entry(pid).or_default();
 
     // Extract module symbols if it's no module symbol from path
     if loaded_module.module_symbols.is_none() {
-        match ModuleSymbols::from_elf(&record_path) {
+        match ModuleSymbols::from_elf(record_path) {
             Ok(symbols) => loaded_module.module_symbols = Some(symbols),
             Err(error) => {
                 debug!("Failed to load symbols for module {record_path_string}: {error}");
@@ -283,7 +301,7 @@ fn process_mmap2_record(
     // Extract unwind_data
     match unwind_data_from_elf(
         record_path_string.as_bytes(),
-        record.address,
+        start_addr,
         end_addr,
         None,
         load_bias,
