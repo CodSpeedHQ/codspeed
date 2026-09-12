@@ -9,7 +9,7 @@ use crate::run_environment::interfaces::RepositoryProvider;
 use crate::upload::poll_results::PollResultsOptions;
 use clap::{Args, ValueEnum};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use url::Url;
 
 pub mod helpers;
@@ -20,7 +20,7 @@ pub struct RunArgs {
     #[command(flatten)]
     pub shared: ExecAndRunSharedArgs,
 
-    /// Comma-separated list of instruments to enable. Possible values: mongodb.
+    /// Comma-separated list of instruments to enable. Possible values: mongodb, postgres.
     #[arg(long, value_delimiter = ',')]
     pub instruments: Vec<String>,
 
@@ -30,6 +30,11 @@ pub struct RunArgs {
     /// Only used if the `mongodb` instrument is enabled.
     #[arg(long)]
     pub mongo_uri_env_name: Option<String>,
+
+    /// Host path to the Postgres analytics dump written by the codspeed/postgres
+    /// image's poller. Required when the `postgres` instrument is enabled.
+    #[arg(long)]
+    pub postgres_dump_path: Option<PathBuf>,
 
     #[arg(long, hide = true)]
     pub message_format: Option<MessageFormat>,
@@ -87,6 +92,7 @@ impl RunArgs {
             },
             instruments: vec![],
             mongo_uri_env_name: None,
+            postgres_dump_path: None,
             message_format: None,
             command: vec![],
         }
