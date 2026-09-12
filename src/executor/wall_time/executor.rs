@@ -19,6 +19,7 @@ use crate::executor::shared::fifo::FifoBenchmarkData;
 use crate::executor::shared::fifo::RunnerFifo;
 use crate::executor::{ExecutionContext, ExecutorName, ExecutorSupport};
 use crate::instruments::mongo_tracer::MongoTracer;
+use crate::instruments::postgres::PostgresInstrument;
 use crate::prelude::*;
 use crate::runner_mode::RunnerMode;
 use crate::system::{SupportedOs, SystemInfo};
@@ -151,6 +152,18 @@ impl Executor for WallTimeExecutor {
 
         let status = match profiler.as_mut() {
             Some(profiler) if execution_context.config.enable_profiler => {
+                // Open the runner's own connection for per-benchmark pg_stat_statements
+                // capture; a failure disables the instrument but never fails the run.
+                let pg_observer = match &execution_context.config.instruments.postgres {
+                    Some(cfg) => match PostgresInstrument::connect(cfg).await {
+                        Ok(observer) => Some(observer),
+                        Err(e) => {
+                            warn!("Postgres instrument disabled: {e:#}");
+                            None
+                        }
+                    },
+                    None => None,
+                };
                 run_with_profiler(
                     profiler.as_mut(),
                     cmd_builder,
@@ -158,6 +171,7 @@ impl Executor for WallTimeExecutor {
                     &execution_context.profile_folder,
                     requires_sudo,
                     benchmark_state,
+                    pg_observer,
                 )
                 .await
             }
@@ -213,6 +227,7 @@ async fn run_with_profiler(
     profile_folder: &Path,
     requires_sudo: bool,
     benchmark_state: &OnceCell<(FifoBenchmarkData, ExecutionTimestamps)>,
+    mut pg_observer: Option<PostgresInstrument>,
 ) -> Result<std::process::ExitStatus> {
     let wrapped = profiler
         .wrap_command(cmd_builder, config, profile_folder, requires_sudo)
@@ -223,13 +238,26 @@ async fn run_with_profiler(
     let mut runner_fifo = RunnerFifo::new()?;
 
     run_command_with_log_pipe_and_callback(cmd, async move |mut child| {
+        // The Postgres instrument runs its reset/snapshot on the runner's own
+        // connection in the pre-Ack window, so the SQL is outside the measured
+        // region; failures are logged and never abort the run.
         let on_cmd = async |c: &FifoCommand| match c {
             FifoCommand::StartProfiler => {
                 profiler.on_start_profiler().await?;
+                if let Some(pg) = pg_observer.as_ref()
+                    && let Err(e) = pg.reset().await
+                {
+                    warn!("Postgres reset at benchmark start failed: {e:#}");
+                }
                 Ok(None)
             }
             FifoCommand::StopProfiler => {
                 profiler.on_stop_profiler().await?;
+                if let Some(pg) = pg_observer.as_mut()
+                    && let Err(e) = pg.snapshot().await
+                {
+                    warn!("Postgres snapshot at benchmark stop failed: {e:#}");
+                }
                 Ok(None)
             }
             #[allow(deprecated)]
@@ -246,6 +274,12 @@ async fn run_with_profiler(
 
         let (timestamps, fifo_data, exit_status) =
             runner_fifo.handle_fifo_messages(&mut child, on_cmd).await?;
+
+        if let Some(mut pg) = pg_observer
+            && let Err(e) = pg.finalize(&timestamps, profile_folder).await
+        {
+            warn!("Failed to write Postgres analytics: {e:#}");
+        }
 
         let _ = benchmark_state.set((fifo_data, timestamps));
 

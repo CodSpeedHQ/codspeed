@@ -14,7 +14,6 @@ mod valgrind;
 mod wall_time;
 
 use crate::instruments::mongo_tracer::{MongoTracer, install_mongodb_tracer};
-use crate::instruments::postgres::PostgresInstrument;
 use crate::local_logger::rolling_buffer::{activate_rolling_buffer, deactivate_rolling_buffer};
 use crate::prelude::*;
 use crate::runner_mode::RunnerMode;
@@ -212,18 +211,6 @@ pub async fn run_executor(
         // TODO: refactor and move directly in the Instruments struct as a `stop` method
         if let Some(mut mongo_tracer) = mongo_tracer {
             mongo_tracer.stop().await?;
-        }
-
-        // A benchmark run must not fail over analytics enrichment, so a collect
-        // error is logged and swallowed rather than propagated.
-        if let Some(postgres_config) = &execution_context.config.instruments.postgres {
-            if let Err(e) =
-                PostgresInstrument::new(&execution_context.profile_folder, postgres_config)
-                    .collect()
-                    .await
-            {
-                warn!("Failed to collect Postgres analytics: {e:#}");
-            }
         }
         debug!("Tearing down the executor");
         executor.teardown(execution_context).await?;

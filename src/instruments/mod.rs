@@ -16,8 +16,9 @@ pub struct MongoDBConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PostgresConfig {
-    /// Host path to the analytics dump written by the codspeed/postgres poller.
-    pub dump_path: std::path::PathBuf,
+    /// Connection string for the runner's own superuser connection, used to
+    /// reset and snapshot `pg_stat_statements` at benchmark boundaries.
+    pub dsn: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,15 +84,13 @@ impl TryFrom<&RunArgs> for Instruments {
         };
 
         let postgres = if validated_instrument_names.contains(&InstrumentName::Postgres) {
-            let dump_path = args.postgres_dump_path.clone().ok_or_else(|| {
-                anyhow!(
-                    "The Postgres instrument is enabled but --postgres-dump-path was not provided"
-                )
+            let dsn = args.postgres_dsn.clone().ok_or_else(|| {
+                anyhow!("The Postgres instrument is enabled but --postgres-dsn was not provided")
             })?;
-            Some(PostgresConfig { dump_path })
-        } else if args.postgres_dump_path.is_some() {
+            Some(PostgresConfig { dsn })
+        } else if args.postgres_dsn.is_some() {
             warn!(
-                "The Postgres instrument is disabled but a Postgres dump path was provided, ignoring it"
+                "The Postgres instrument is disabled but a Postgres DSN was provided, ignoring it"
             );
             None
         } else {
@@ -173,19 +172,19 @@ mod tests {
     fn test_from_args_postgres() {
         let args = RunArgs {
             instruments: vec!["postgres".into()],
-            postgres_dump_path: Some("/tmp/x/dump.json".into()),
+            postgres_dsn: Some("postgresql://codspeed@localhost/codspeed_bench".into()),
             ..RunArgs::test()
         };
         let instruments = Instruments::try_from(&args).unwrap();
         assert!(instruments.is_postgres_enabled());
         assert_eq!(
-            instruments.postgres.unwrap().dump_path,
-            std::path::PathBuf::from("/tmp/x/dump.json")
+            instruments.postgres.unwrap().dsn,
+            "postgresql://codspeed@localhost/codspeed_bench"
         );
     }
 
     #[test]
-    fn test_from_args_postgres_without_dump_path() {
+    fn test_from_args_postgres_without_dsn() {
         let args = RunArgs {
             instruments: vec!["postgres".into()],
             ..RunArgs::test()
@@ -194,7 +193,7 @@ mod tests {
         assert!(instruments.is_err());
         assert_eq!(
             instruments.unwrap_err().to_string(),
-            "The Postgres instrument is enabled but --postgres-dump-path was not provided"
+            "The Postgres instrument is enabled but --postgres-dsn was not provided"
         );
     }
 }
