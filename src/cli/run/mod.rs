@@ -31,11 +31,13 @@ pub struct RunArgs {
     #[arg(long)]
     pub mongo_uri_env_name: Option<String>,
 
-    /// Connection string for the runner's own superuser connection to the
-    /// benchmarked database, used to reset/snapshot pg_stat_statements at
-    /// benchmark boundaries. Required when the `postgres` instrument is enabled.
+    /// Name of the environment variable holding the connection string for the
+    /// runner's own superuser connection to the benchmarked database, used to
+    /// reset/snapshot pg_stat_statements at benchmark boundaries. Passed by name
+    /// (not value) so the DSN never lands on the command line or in logs.
+    /// Required when the `postgres` instrument is enabled.
     #[arg(long)]
-    pub postgres_dsn: Option<String>,
+    pub postgres_dsn_env_name: Option<String>,
 
     #[arg(long, hide = true)]
     pub message_format: Option<MessageFormat>,
@@ -93,7 +95,7 @@ impl RunArgs {
             },
             instruments: vec![],
             mongo_uri_env_name: None,
-            postgres_dsn: None,
+            postgres_dsn_env_name: None,
             message_format: None,
             command: vec![],
         }

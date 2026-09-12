@@ -16,9 +16,10 @@ pub struct MongoDBConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PostgresConfig {
-    /// Connection string for the runner's own superuser connection, used to
-    /// reset and snapshot `pg_stat_statements` at benchmark boundaries.
-    pub dsn: String,
+    /// Name of the environment variable holding the DSN for the runner's own
+    /// superuser connection. Resolved at connect time so the DSN is never stored
+    /// in the config (and thus never dumped to logs or the uploaded archive).
+    pub dsn_env_name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,13 +85,15 @@ impl TryFrom<&RunArgs> for Instruments {
         };
 
         let postgres = if validated_instrument_names.contains(&InstrumentName::Postgres) {
-            let dsn = args.postgres_dsn.clone().ok_or_else(|| {
-                anyhow!("The Postgres instrument is enabled but --postgres-dsn was not provided")
+            let dsn_env_name = args.postgres_dsn_env_name.clone().ok_or_else(|| {
+                anyhow!(
+                    "The Postgres instrument is enabled but --postgres-dsn-env-name was not provided"
+                )
             })?;
-            Some(PostgresConfig { dsn })
-        } else if args.postgres_dsn.is_some() {
+            Some(PostgresConfig { dsn_env_name })
+        } else if args.postgres_dsn_env_name.is_some() {
             warn!(
-                "The Postgres instrument is disabled but a Postgres DSN was provided, ignoring it"
+                "The Postgres instrument is disabled but a Postgres DSN env var name was provided, ignoring it"
             );
             None
         } else {
@@ -172,19 +175,16 @@ mod tests {
     fn test_from_args_postgres() {
         let args = RunArgs {
             instruments: vec!["postgres".into()],
-            postgres_dsn: Some("postgresql://codspeed@localhost/codspeed_bench".into()),
+            postgres_dsn_env_name: Some("PGTRACER_DSN".into()),
             ..RunArgs::test()
         };
         let instruments = Instruments::try_from(&args).unwrap();
         assert!(instruments.is_postgres_enabled());
-        assert_eq!(
-            instruments.postgres.unwrap().dsn,
-            "postgresql://codspeed@localhost/codspeed_bench"
-        );
+        assert_eq!(instruments.postgres.unwrap().dsn_env_name, "PGTRACER_DSN");
     }
 
     #[test]
-    fn test_from_args_postgres_without_dsn() {
+    fn test_from_args_postgres_without_dsn_env_name() {
         let args = RunArgs {
             instruments: vec!["postgres".into()],
             ..RunArgs::test()
@@ -193,7 +193,7 @@ mod tests {
         assert!(instruments.is_err());
         assert_eq!(
             instruments.unwrap_err().to_string(),
-            "The Postgres instrument is enabled but --postgres-dsn was not provided"
+            "The Postgres instrument is enabled but --postgres-dsn-env-name was not provided"
         );
     }
 }

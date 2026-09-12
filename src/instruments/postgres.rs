@@ -65,9 +65,15 @@ pub struct PostgresInstrument {
 }
 
 impl PostgresInstrument {
-    /// Connect on the given DSN and ensure the extension exists.
+    /// Resolve the DSN from its env var, connect, and ensure the extension exists.
     pub async fn connect(config: &PostgresConfig) -> Result<Self> {
-        let (client, connection) = tokio_postgres::connect(&config.dsn, NoTls)
+        let dsn = std::env::var(&config.dsn_env_name).with_context(|| {
+            format!(
+                "reading the Postgres DSN from ${} (--postgres-dsn-env-name)",
+                config.dsn_env_name
+            )
+        })?;
+        let (client, connection) = tokio_postgres::connect(&dsn, NoTls)
             .await
             .context("connecting the Postgres instrument to the database")?;
         tokio::spawn(async move {
@@ -141,7 +147,13 @@ impl PostgresInstrument {
     ) -> Result<()> {
         self.attach_plans().await;
 
-        let benchmarks = zip_benchmarks(&timestamps.uri_by_ts, &self.snapshots);
+        // On a URI/snapshot count mismatch, skip the artifact entirely rather than
+        // zip by index — that would misattribute queries to the wrong benchmark,
+        // which is worse than emitting nothing (nothing downstream can detect it).
+        let Some(benchmarks) = zip_benchmarks(&timestamps.uri_by_ts, &self.snapshots) else {
+            return Ok(());
+        };
+        let count = benchmarks.len();
 
         let out_dir = profile_folder.join("instruments");
         tokio::fs::create_dir_all(&out_dir)
@@ -149,9 +161,7 @@ impl PostgresInstrument {
             .with_context(|| format!("creating {}", out_dir.display()))?;
         let dest = out_dir.join("postgres.json");
         let tmp = out_dir.join("postgres.json.tmp");
-        let bytes = serde_json::to_vec_pretty(&PostgresDump {
-            benchmarks: benchmarks.clone(),
-        })?;
+        let bytes = serde_json::to_vec_pretty(&PostgresDump { benchmarks })?;
         tokio::fs::write(&tmp, &bytes)
             .await
             .with_context(|| format!("writing {}", tmp.display()))?;
@@ -160,8 +170,7 @@ impl PostgresInstrument {
             .with_context(|| format!("renaming {} to {}", tmp.display(), dest.display()))?;
 
         debug!(
-            "Collected Postgres analytics for {} benchmark(s) into {}",
-            benchmarks.len(),
+            "Collected Postgres analytics for {count} benchmark(s) into {}",
             dest.display()
         );
         Ok(())
@@ -201,22 +210,25 @@ impl PostgresInstrument {
 fn zip_benchmarks(
     uri_by_ts: &[(u64, String)],
     snapshots: &[Vec<PostgresQuery>],
-) -> Vec<BenchmarkQueries> {
+) -> Option<Vec<BenchmarkQueries>> {
     if uri_by_ts.len() != snapshots.len() {
         warn!(
-            "Postgres: {} benchmark URIs but {} snapshots; zipping by index",
+            "Postgres: {} benchmark URIs but {} snapshots; skipping artifact to avoid misattribution",
             uri_by_ts.len(),
             snapshots.len()
         );
+        return None;
     }
-    uri_by_ts
-        .iter()
-        .zip(snapshots.iter())
-        .map(|((_, uri), queries)| BenchmarkQueries {
-            uri: uri.clone(),
-            queries: queries.clone(),
-        })
-        .collect()
+    Some(
+        uri_by_ts
+            .iter()
+            .zip(snapshots.iter())
+            .map(|((_, uri), queries)| BenchmarkQueries {
+                uri: uri.clone(),
+                queries: queries.clone(),
+            })
+            .collect(),
+    )
 }
 
 /// The instrument's own bookkeeping queries, which must not appear in the dump.
@@ -275,7 +287,7 @@ mod tests {
         let uri_by_ts = vec![(10, "bench::a".to_string()), (20, "bench::b".to_string())];
         let snapshots = vec![vec![q("select 1", 3)], vec![q("select 2", 5)]];
 
-        let out = zip_benchmarks(&uri_by_ts, &snapshots);
+        let out = zip_benchmarks(&uri_by_ts, &snapshots).unwrap();
 
         assert_eq!(
             out,
@@ -293,12 +305,11 @@ mod tests {
     }
 
     #[test]
-    fn zip_tolerates_length_mismatch_by_truncating() {
+    fn zip_skips_on_length_mismatch() {
         let uri_by_ts = vec![(10, "bench::a".to_string())];
         let snapshots = vec![vec![q("select 1", 1)], vec![q("select 2", 2)]];
-        let out = zip_benchmarks(&uri_by_ts, &snapshots);
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].uri, "bench::a");
+        // A mismatch must yield None (skip the artifact) rather than misattribute.
+        assert!(zip_benchmarks(&uri_by_ts, &snapshots).is_none());
     }
 
     #[test]
@@ -313,5 +324,86 @@ mod tests {
         assert!(is_self_query("EXPLAIN (FORMAT JSON) select 1"));
         assert!(is_self_query("SELECT pg_stat_statements_reset()"));
         assert!(!is_self_query("select * from users"));
+    }
+
+    /// Isolation invariant against a real database: `reset()` at each benchmark
+    /// boundary must prevent one benchmark's queries from leaking into the next,
+    /// and `EXPLAIN (GENERIC_PLAN)` must capture a plan for `$1`-parameterized SQL.
+    ///
+    /// A no-op unless `PG_SMOKE_DSN` is set. To run it:
+    ///   docker run -d --name pg -e POSTGRES_USER=codspeed -e POSTGRES_PASSWORD=codspeed \
+    ///     -e POSTGRES_DB=codspeed_bench -p 5546:5432 fargito/test-pg-tracer:16
+    ///   psql "$DSN" -c "create table t(id int primary key, v text)"
+    ///   PG_SMOKE_DSN="postgresql://codspeed:codspeed@127.0.0.1:5546/codspeed_bench?sslmode=disable" \
+    ///     cargo test --lib instruments::postgres::tests::capture_isolates_benchmarks_against_real_db
+    #[tokio::test]
+    async fn capture_isolates_benchmarks_against_real_db() {
+        let Ok(dsn) = std::env::var("PG_SMOKE_DSN") else {
+            return;
+        };
+        let mut obs = PostgresInstrument::connect(&PostgresConfig {
+            dsn_env_name: "PG_SMOKE_DSN".into(),
+        })
+        .await
+        .unwrap();
+        let (app, conn) = tokio_postgres::connect(&dsn, NoTls).await.unwrap();
+        tokio::spawn(async move {
+            let _ = conn.await;
+        });
+        app.simple_query("create table if not exists t(id int primary key, v text)")
+            .await
+            .unwrap();
+
+        obs.reset().await.unwrap();
+        for _ in 0..3 {
+            app.execute("select count(*) from t where id = $1", &[&7i32])
+                .await
+                .unwrap();
+        }
+        obs.snapshot().await.unwrap();
+
+        obs.reset().await.unwrap();
+        for _ in 0..2 {
+            app.execute("select count(*) from t where v = $1", &[&"v9"])
+                .await
+                .unwrap();
+        }
+        obs.snapshot().await.unwrap();
+
+        let ts = ExecutionTimestamps {
+            uri_by_ts: vec![(1, "bench::a".into()), (2, "bench::b".into())],
+            markers: vec![],
+        };
+        let dir = std::env::temp_dir().join(format!("pg-smoke-{}", std::process::id()));
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+        obs.finalize(&ts, &dir).await.unwrap();
+
+        let out = tokio::fs::read_to_string(dir.join("instruments/postgres.json"))
+            .await
+            .unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        let b = v["benchmarks"].as_array().unwrap();
+        assert_eq!(b.len(), 2);
+        assert_eq!(b[0]["uri"], "bench::a");
+        assert_eq!(b[1]["uri"], "bench::b");
+        let a_has_id_with_plan = b[0]["queries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|q| q["sql"].as_str().unwrap().contains("where id =") && !q["plan"].is_null());
+        assert!(
+            a_has_id_with_plan,
+            "bench A must have the id query with a plan: {out}"
+        );
+        let b_leaked = b[1]["queries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|q| q["sql"].as_str().unwrap().contains("where id ="));
+        assert!(
+            !b_leaked,
+            "reset failed: bench B leaked bench A's queries: {out}"
+        );
+        let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 }
