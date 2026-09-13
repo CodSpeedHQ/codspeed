@@ -83,10 +83,9 @@ mod tests {
 
         let output = Command::new("bash")
             .arg("-c")
-            .arg(format!(
-                "source {} && printf %s \"$CODSPEED_TEST_VALUE\"",
-                env_file.path().display()
-            ))
+            .arg("source \"$1\" && printf %s \"$CODSPEED_TEST_VALUE\"")
+            .arg("bash")
+            .arg(env_file.path())
             .output()
             .unwrap();
 
