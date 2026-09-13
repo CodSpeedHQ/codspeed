@@ -61,7 +61,7 @@ fn create_env_file(extra_env: &HashMap<String, String>) -> Result<NamedTempFile>
     let system_env = get_exported_system_env()?;
     let base_injected_env = extra_env
         .iter()
-        .map(|(k, v)| format!("export {k}='{v}'"))
+        .map(|(k, v)| format!("export {k}='{}'", v.replace('\'', r"'\''")))
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -69,4 +69,32 @@ fn create_env_file(extra_env: &HashMap<String, String>) -> Result<NamedTempFile>
     let mut env_file = NamedTempFile::new()?;
     env_file.write_all(format!("{system_env}\n{base_injected_env}").as_bytes())?;
     Ok(env_file)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_env_file_preserves_single_quotes() {
+        let value = "/tmp/it's a profile folder";
+        let extra_env = HashMap::from([("CODSPEED_TEST_VALUE".to_string(), value.to_string())]);
+        let env_file = create_env_file(&extra_env).unwrap();
+
+        let output = Command::new("bash")
+            .arg("-c")
+            .arg(format!(
+                "source {} && printf %s \"$CODSPEED_TEST_VALUE\"",
+                env_file.path().display()
+            ))
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&output.stdout), value);
+    }
 }
