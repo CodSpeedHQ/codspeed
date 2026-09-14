@@ -17,6 +17,9 @@ use std::path::Path;
 use std::{env::consts::ARCH, process::Command};
 use tempfile::TempPath;
 
+/// Number of caller frames callgrind keeps as a separate context for each function.
+const SEPARATE_CALLERS_DEPTH: u32 = 3;
+
 /// Builds the Valgrind argument list for the given simulation tool.
 fn get_valgrind_args(tool: &SimulationTool, config: &ExecutorConfig) -> Vec<String> {
     let mut args: Vec<String> = [
@@ -51,13 +54,20 @@ fn get_valgrind_args(tool: &SimulationTool, config: &ExecutorConfig) -> Vec<Stri
             args.push("--compress-strings=no".to_string());
             args.push("--combine-dumps=yes".to_string());
             args.push("--dump-line=no".to_string());
+            args.push(format!(
+                "--separate-callers={}",
+                std::env::var("CODSPEED_SEPARATE_CALLERS")
+                    .ok()
+                    .and_then(|depth| depth.parse().ok())
+                    .unwrap_or(SEPARATE_CALLERS_DEPTH)
+            ));
         }
         SimulationTool::Tracegrind => {
             args.push("--tool=tracegrind".to_string());
         }
     }
 
-    let children_skip_patterns = ["*esbuild"];
+    let children_skip_patterns = ["*esbuild", "*vgdb"];
     args.push(format!(
         "--trace-children-skip={}",
         children_skip_patterns.join(",")
