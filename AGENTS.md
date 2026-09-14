@@ -104,3 +104,19 @@ Test files include snapshots in `snapshots/` directories for various run environ
 **Important**:
 
 - Some tests require `sudo` access. They are skipped by default unless the `GITHUB_ACTIONS` env var is set.
+
+## Browser Benchmarks
+
+The browser runs as a child process of the bench command, so the runner traces it like any other child. The Chromium switches and V8 flags (`--single-process`, `--js-flags=--perf-prof …`, `--no-sandbox`) belong to the integration's launch arguments, not to the runner.
+
+- **Simulation**: `--trace-children=yes` covers the browser, and its `/tmp/perf-<pid>.map` is harvested from the `<pid>.out` it produces. The measured window is driven from outside the traced process, with `callgrind_control -i on|off <pid>` and `callgrind_control --dump=<uri> <pid>`; a dump requested that way is recorded as `dump <uri>`, not as the `Client Request: <uri>` an in-process client request produces.
+- **Walltime**: force `--walltime-profiler perf`, since samply harvests neither perf maps nor jit dumps, and report the browser process with `setExecutedBenchmark(<pid>, uri)`. Record with `--perf-unwinding-mode fp`: on the same benchmark, `perf script` resolved 84731 JS frames out of the frame-pointer recording (4746 samples, 54.7 frames deep) and none at all out of the dwarf one (4754 samples, 5.8 frames deep).
+
+Running it locally needs no token and creates no run on CodSpeed:
+
+```bash
+cargo run -- run -m walltime --walltime-profiler perf --perf-unwinding-mode fp \
+  --skip-upload --allow-empty --profile-folder /tmp/pf '<bench command>'
+# the tarball is only built by the uploader, so build it by hand to feed the parser
+tar czf sample.tar.gz -C /tmp/pf .
+```
