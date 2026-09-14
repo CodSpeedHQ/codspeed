@@ -16,6 +16,7 @@ pub struct MemmapRecordsOutput {
     /// Module symbols and the computed load bias for each pid that maps the ELF path.
     pub loaded_modules_by_path: HashMap<PathBuf, LoadedModule>,
     pub tracked_pids: HashSet<pid_t>,
+    pub jit_dump_paths_by_pid: HashMap<pid_t, PathBuf>,
 }
 
 /// Parse the perf file at `perf_file_path` and look for MMAP2 records for the given `pids`.
@@ -27,6 +28,7 @@ pub fn parse_for_memmap2<P: AsRef<Path>>(
     mut pid_filter: PidFilter,
 ) -> Result<MemmapRecordsOutput> {
     let mut loaded_modules_by_path = HashMap::<PathBuf, LoadedModule>::new();
+    let mut jit_dump_paths_by_pid = HashMap::<pid_t, PathBuf>::new();
 
     // 1MiB buffer
     let reader = std::io::BufReader::with_capacity(
@@ -115,6 +117,18 @@ pub fn parse_for_memmap2<P: AsRef<Path>>(
                     continue;
                 }
 
+                if let Some(jit_dump_path) =
+                    jit_dump_path(&mmap2_record.path.as_slice(), mmap2_record.pid)
+                {
+                    trace!(
+                        "Jit dump: Pid {} writes to {}",
+                        mmap2_record.pid,
+                        jit_dump_path.display()
+                    );
+                    jit_dump_paths_by_pid.insert(mmap2_record.pid, jit_dump_path);
+                    continue;
+                }
+
                 process_mmap2_record(mmap2_record, &mut loaded_modules_by_path);
             }
             _ => continue,
@@ -133,6 +147,7 @@ pub fn parse_for_memmap2<P: AsRef<Path>>(
     Ok(MemmapRecordsOutput {
         loaded_modules_by_path,
         tracked_pids,
+        jit_dump_paths_by_pid,
     })
 }
 
@@ -206,6 +221,26 @@ fn purge_process_mappings(loaded_modules_by_path: &mut HashMap<PathBuf, LoadedMo
     for loaded_module in loaded_modules_by_path.values_mut() {
         loaded_module.process_loaded_modules.remove(&pid);
     }
+}
+
+/// Returns the jit dump the process writes to, if this record is the marker mapping a JIT creates
+/// over its dump file so that profilers can locate it.
+///
+/// The dump is written in the process' working directory unless the runtime is told otherwise,
+/// so its location cannot be assumed.
+fn jit_dump_path(mapped_path: &[u8], pid: pid_t) -> Option<PathBuf> {
+    if !mapped_path.ends_with(b".dump") {
+        return None;
+    }
+
+    let file_name = mapped_path.rsplit(|byte| *byte == b'/').next()?;
+    if file_name != format!("jit-{pid}.dump").as_bytes() {
+        return None;
+    }
+
+    Some(PathBuf::from(
+        String::from_utf8_lossy(mapped_path).into_owned(),
+    ))
 }
 
 /// Process a single MMAP2 record and add it to the symbols and unwind data maps
@@ -397,5 +432,15 @@ mod tests {
                 .symbols_load_bias,
             Some(0xaaaaaaaa0000)
         );
+    }
+
+    #[test]
+    fn jit_dump_path_only_matches_the_dump_of_the_mapping_process() {
+        assert_eq!(
+            jit_dump_path(b"/bench/cwd/jit-42.dump", 42),
+            Some(PathBuf::from("/bench/cwd/jit-42.dump"))
+        );
+        assert_eq!(jit_dump_path(b"/tmp/jit-43.dump", 42), None);
+        assert_eq!(jit_dump_path(b"/usr/lib/chrome/libv8.so", 42), None);
     }
 }

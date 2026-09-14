@@ -96,6 +96,8 @@ impl JitDump {
 
                     harvested_unwind_data.push((unwind_data, process_unwind_data));
                 }
+                // Line-level debug info, which the symbolication does not use.
+                JitDumpRecord::CodeDebugInfo(_) => {}
                 _ => {
                     warn!("Unhandled JIT dump record: {raw_record:?}");
                 }
@@ -117,12 +119,15 @@ impl JitDump {
 pub async fn save_symbols_and_harvest_unwind_data_for_pids(
     profile_folder: &Path,
     pids: &HashSet<libc::pid_t>,
+    jit_dump_paths_by_pid: &HashMap<libc::pid_t, PathBuf>,
 ) -> Result<HashMap<i32, Vec<(UnwindData, ProcessUnwindData)>>> {
     let mut jit_unwind_data_by_path = HashMap::new();
 
     for pid in pids {
-        let name = format!("jit-{pid}.dump");
-        let path = PathBuf::from("/tmp").join(&name);
+        let path = jit_dump_paths_by_pid
+            .get(pid)
+            .cloned()
+            .unwrap_or_else(|| PathBuf::from("/tmp").join(format!("jit-{pid}.dump")));
 
         if !path.exists() {
             continue;
