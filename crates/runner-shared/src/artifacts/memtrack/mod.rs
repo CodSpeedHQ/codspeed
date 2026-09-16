@@ -82,6 +82,21 @@ pub enum MemtrackEventKind {
         member: i32,
         delta: i64,
     },
+    /// No longer emitted, kept so artifacts written by older memtrack versions still decode.
+    #[deprecated(note = "mapping events are not emitted anymore")]
+    Mmap {
+        size: u64,
+    },
+    /// No longer emitted, kept so artifacts written by older memtrack versions still decode.
+    #[deprecated(note = "mapping events are not emitted anymore")]
+    Munmap {
+        size: u64,
+    },
+    /// No longer emitted, kept so artifacts written by older memtrack versions still decode.
+    #[deprecated(note = "mapping events are not emitted anymore")]
+    Brk {
+        size: u64,
+    },
 }
 
 pub struct MemtrackEventStream<R: Read> {
@@ -256,6 +271,29 @@ mod tests {
                 size: 42
             }
         ));
+
+        Ok(())
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn test_deserialize_mapping_events_compat() -> anyhow::Result<()> {
+        // Artifact written by a memtrack version that still emitted mmap/munmap/brk events,
+        // followed by a malloc: an unknown variant would end the stream and drop the tail.
+        let buf = include_bytes!("../../../testdata/mappings.MemtrackArtifact.msgpack");
+        let kinds: Vec<_> = MemtrackArtifact::decode_streamed(Cursor::new(buf))?
+            .map(|event| event.kind)
+            .collect();
+
+        assert_eq!(
+            kinds,
+            vec![
+                MemtrackEventKind::Mmap { size: 4096 },
+                MemtrackEventKind::Munmap { size: 4096 },
+                MemtrackEventKind::Brk { size: 8192 },
+                MemtrackEventKind::Malloc { size: 64 },
+            ]
+        );
 
         Ok(())
     }
