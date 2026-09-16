@@ -27,6 +27,15 @@ pub struct ExperimentalArgs {
     )]
     pub experimental_memory_track_physical: bool,
 
+    /// Do not set PYTHONMALLOC for simulation runs.
+    #[arg(
+        long,
+        default_value_t = false,
+        help_heading = "Experimental",
+        env = "CODSPEED_EXPERIMENTAL_DISABLE_PYTHONMALLOC_OVERRIDE"
+    )]
+    pub experimental_disable_pythonmalloc_override: bool,
+
     /// Deprecated: cycle estimation is enabled by default and this flag has no effect.
     #[arg(long, hide = true, env = "CODSPEED_EXPERIMENTAL_CYCLE_ESTIMATION")]
     pub experimental_cycle_estimation: bool,
@@ -45,6 +54,9 @@ impl ExperimentalArgs {
         }
         if self.experimental_memory_track_physical {
             flags.push("--experimental-memory-track-physical");
+        }
+        if self.experimental_disable_pythonmalloc_override {
+            flags.push("--experimental-disable-pythonmalloc-override");
         }
         flags
     }

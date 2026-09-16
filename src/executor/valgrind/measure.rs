@@ -140,7 +140,9 @@ pub async fn measure(
 
     // Free-threaded Python (GIL disabled) does not support PYTHONMALLOC=malloc
     // and refuses to start with it set.
-    if !is_free_threaded_python(config.working_directory.as_deref().map(Path::new)) {
+    if !config.disable_pythonmalloc_override
+        && !is_free_threaded_python(config.working_directory.as_deref().map(Path::new))
+    {
         cmd.env("PYTHONMALLOC", "malloc");
     }
 

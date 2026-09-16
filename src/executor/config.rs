@@ -100,6 +100,8 @@ pub struct OrchestratorConfig {
     pub simulation_track_subprocess: bool,
     /// Enable physical (resident) memory tracking in memory mode.
     pub memory_track_physical: bool,
+    /// Do not set PYTHONMALLOC for simulation runs.
+    pub disable_pythonmalloc_override: bool,
 }
 
 /// Per-execution configuration passed to executors.
@@ -145,6 +147,8 @@ pub struct ExecutorConfig {
     /// Only read by the memory executor, which is Linux-only.
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub memory_track_physical: bool,
+    /// Do not set PYTHONMALLOC for simulation runs.
+    pub disable_pythonmalloc_override: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -218,6 +222,7 @@ impl OrchestratorConfig {
             exclude_allocations: self.exclude_allocations,
             simulation_track_subprocess: self.simulation_track_subprocess,
             memory_track_physical: self.memory_track_physical,
+            disable_pythonmalloc_override: self.disable_pythonmalloc_override,
         }
     }
 }
@@ -254,6 +259,7 @@ impl OrchestratorConfig {
             exclude_allocations: false,
             simulation_track_subprocess: false,
             memory_track_physical: false,
+            disable_pythonmalloc_override: false,
         }
     }
 }

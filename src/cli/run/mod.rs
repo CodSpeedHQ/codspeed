@@ -84,6 +84,7 @@ impl RunArgs {
                     experimental_cycle_estimation: false,
                     experimental_exclude_allocations: false,
                     experimental_memory_track_physical: false,
+                    experimental_disable_pythonmalloc_override: false,
                 },
             },
             instruments: vec![],
@@ -137,6 +138,10 @@ fn build_orchestrator_config(
         exclude_allocations: args.shared.exclude_allocations,
         simulation_track_subprocess: args.shared.simulation_track_subprocess,
         memory_track_physical: args.shared.experimental.experimental_memory_track_physical,
+        disable_pythonmalloc_override: args
+            .shared
+            .experimental
+            .experimental_disable_pythonmalloc_override,
     })
 }
 

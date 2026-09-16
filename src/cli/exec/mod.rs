@@ -94,6 +94,10 @@ fn build_orchestrator_config(
         exclude_allocations: args.shared.exclude_allocations,
         simulation_track_subprocess: args.shared.simulation_track_subprocess,
         memory_track_physical: args.shared.experimental.experimental_memory_track_physical,
+        disable_pythonmalloc_override: args
+            .shared
+            .experimental
+            .experimental_disable_pythonmalloc_override,
     })
 }
 
