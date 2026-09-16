@@ -130,7 +130,8 @@ fn track_command(
         .map(|n| n.get().saturating_sub(2).max(1))
         .unwrap_or(4);
 
-    let pipeline_thread = thread::spawn(move || encode_events(event_rx, out_file, n_workers));
+    let pipeline_thread =
+        thread::spawn(move || encode_events(event_rx.into_iter().flatten(), out_file, n_workers));
 
     // Wait for the command to complete
     let status = session.wait().context("Failed to wait for command")?;

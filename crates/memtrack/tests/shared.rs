@@ -361,7 +361,7 @@ fn run_tracked<T>(
     // Dropping the session does a final ring buffer drain and closes the
     // channel, so collecting terminates without a silence timeout.
     drop(session);
-    let events: Vec<Event> = rx.iter().collect();
+    let events: Vec<Event> = rx.into_iter().flatten().collect();
 
     tracker.finish()?;
 

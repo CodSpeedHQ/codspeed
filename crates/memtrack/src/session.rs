@@ -8,14 +8,14 @@ use std::sync::mpsc::Receiver;
 /// stays alive as long as the session does; dropping it stops event delivery.
 pub struct Session {
     child: Child,
-    events: Option<Receiver<MemtrackEvent>>,
+    events: Option<Receiver<Vec<MemtrackEvent>>>,
     _poller: RingBufferPoller,
 }
 
 impl Session {
     pub(crate) fn new(
         child: Child,
-        events: Receiver<MemtrackEvent>,
+        events: Receiver<Vec<MemtrackEvent>>,
         poller: RingBufferPoller,
     ) -> Self {
         Self {
@@ -30,7 +30,7 @@ impl Session {
     }
 
     /// Take ownership of the event receiver. Can only be taken once.
-    pub fn take_events(&mut self) -> Result<Receiver<MemtrackEvent>> {
+    pub fn take_events(&mut self) -> Result<Receiver<Vec<MemtrackEvent>>> {
         self.events.take().context("events already taken")
     }
 

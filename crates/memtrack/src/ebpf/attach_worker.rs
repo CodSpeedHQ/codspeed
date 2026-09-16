@@ -121,7 +121,7 @@ impl Drop for AttachWorker {
 
 struct Worker {
     poller: RingBufferPoller,
-    rx: mpsc::Receiver<AttachRequest>,
+    rx: mpsc::Receiver<Vec<AttachRequest>>,
     bpf: Arc<Mutex<MemtrackBpf>>,
     shutdown: Arc<AtomicBool>,
     fatal: Arc<Mutex<Option<String>>>,
@@ -139,7 +139,7 @@ impl Worker {
                     self.record_fatal(e);
                     return;
                 }
-                let mut batch: Vec<AttachRequest> = self.rx.try_iter().collect();
+                let mut batch: Vec<AttachRequest> = self.rx.try_iter().flatten().collect();
                 if batch.is_empty() {
                     break;
                 }
@@ -151,12 +151,14 @@ impl Worker {
             }
 
             let first = match self.rx.recv_timeout(RECV_TIMEOUT) {
-                Ok(req) => req,
+                Ok(reqs) => reqs,
                 Err(RecvTimeoutError::Timeout) => continue,
                 Err(RecvTimeoutError::Disconnected) => return,
             };
-            let mut batch: Vec<AttachRequest> =
-                std::iter::once(first).chain(self.rx.try_iter()).collect();
+            let mut batch: Vec<AttachRequest> = first
+                .into_iter()
+                .chain(self.rx.try_iter().flatten())
+                .collect();
 
             if let Err(e) = self.process_batch(&mut batch, &mut known) {
                 self.record_fatal(e);
@@ -195,7 +197,7 @@ impl Worker {
 
             // Every producer is stopped, so a synchronous drain is complete.
             self.poller.drain()?;
-            batch.extend(self.rx.try_iter());
+            batch.extend(self.rx.try_iter().flatten());
         }
 
         let mut seen: HashSet<(u64, u64)> = HashSet::new();

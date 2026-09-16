@@ -218,7 +218,7 @@ impl MemtrackBpf {
     pub fn poll_events_with_channel(
         &self,
         poll_interval_ms: u64,
-        tx: std::sync::mpsc::Sender<runner_shared::artifacts::MemtrackEvent>,
+        tx: std::sync::mpsc::Sender<Vec<runner_shared::artifacts::MemtrackEvent>>,
     ) -> Result<RingBufferPoller> {
         with_skel!(self, skel => RingBufferPoller::new(
             &skel.maps.events,
@@ -233,7 +233,7 @@ impl MemtrackBpf {
     pub(crate) fn poll_attach_with_channel(
         &self,
         poll_interval_ms: u64,
-        tx: std::sync::mpsc::Sender<crate::ebpf::events::AttachRequest>,
+        tx: std::sync::mpsc::Sender<Vec<crate::ebpf::events::AttachRequest>>,
     ) -> Result<RingBufferPoller> {
         with_skel!(self, skel => RingBufferPoller::new(
             &skel.maps.attach_requests,

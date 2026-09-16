@@ -1,11 +1,58 @@
 use anyhow::{Context, Result};
 use libbpf_rs::{MapCore, RingBufferBuilder};
+use parking_lot::Mutex;
+use std::sync::Arc;
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
+/// Items buffered before a channel send. `std::sync::mpsc` allocates a block
+/// every 31 messages, so sending one item at a time makes that allocation
+/// dominate the pipeline; batching amortizes it over a whole batch.
+const BATCH_ITEMS: usize = 1024;
+
+/// The lock is released before the send so a slow consumer never blocks the
+/// ring-buffer callback.
+fn flush_batch<T>(batch: &Mutex<Vec<T>>, tx: &Sender<Vec<T>>) {
+    let mut buf = batch.lock();
+    if buf.is_empty() {
+        return;
+    }
+    let items = std::mem::replace(&mut *buf, Vec::with_capacity(BATCH_ITEMS));
+    drop(buf);
+    let _ = tx.send(items);
+}
+
+fn poll_iteration<T>(
+    control: std::result::Result<Sender<()>, RecvTimeoutError>,
+    consume: impl FnOnce(),
+    poll: impl FnOnce(),
+    batch: &Mutex<Vec<T>>,
+    tx: &Sender<Vec<T>>,
+) -> bool {
+    match control {
+        Ok(ack) => {
+            consume();
+            // `drain` promises pending entries are in the channel before returning.
+            flush_batch(batch, tx);
+            let _ = ack.send(());
+            true
+        }
+        Err(RecvTimeoutError::Timeout) => {
+            poll();
+            flush_batch(batch, tx);
+            true
+        }
+        Err(RecvTimeoutError::Disconnected) => {
+            consume();
+            flush_batch(batch, tx);
+            false
+        }
+    }
+}
+
 /// Polls a BPF ring buffer in a background thread, parsing raw entries with a
-/// user-supplied closure and forwarding them to an mpsc channel.
+/// user-supplied closure and forwarding them to an mpsc channel in batches.
 ///
 /// The poll thread runs until the poller is dropped, doing a final full
 /// `consume()` on shutdown so no buffered entries are lost.
@@ -15,17 +62,36 @@ pub struct RingBufferPoller {
 }
 
 impl RingBufferPoller {
-    pub fn new<M, T, F>(rb_map: &M, parse: F, tx: Sender<T>, poll_interval_ms: u64) -> Result<Self>
+    pub fn new<M, T, F>(
+        rb_map: &M,
+        parse: F,
+        tx: Sender<Vec<T>>,
+        poll_interval_ms: u64,
+    ) -> Result<Self>
     where
         M: MapCore,
         T: Send + 'static,
         F: Fn(&[u8]) -> Option<T> + Send + 'static,
     {
+        // `Arc<Mutex<_>>` rather than `Rc<RefCell<_>>`: the built `RingBuffer` moves
+        // into the poll thread, so the callback must be `Send`.
+        let batch = Arc::new(Mutex::new(Vec::with_capacity(BATCH_ITEMS)));
+        let cb_batch = Arc::clone(&batch);
+        let cb_tx = tx.clone();
+
         let mut builder = RingBufferBuilder::new();
         builder.add(rb_map, move |data| {
-            if let Some(item) = parse(data) {
-                let _ = tx.send(item);
+            let Some(item) = parse(data) else {
+                return 0;
+            };
+            let mut buf = cb_batch.lock();
+            buf.push(item);
+            if buf.len() < BATCH_ITEMS {
+                return 0;
             }
+            let items = std::mem::replace(&mut *buf, Vec::with_capacity(BATCH_ITEMS));
+            drop(buf);
+            let _ = cb_tx.send(items);
             0
         })?;
         let ringbuf = builder.build()?;
@@ -35,21 +101,17 @@ impl RingBufferPoller {
         // poll tick, and disconnection is the shutdown signal.
         let (ctl, ctl_rx) = mpsc::channel::<Sender<()>>();
         let poll_thread = std::thread::spawn(move || {
-            loop {
-                match ctl_rx.recv_timeout(Duration::from_millis(poll_interval_ms)) {
-                    Ok(ack) => {
-                        let _ = ringbuf.consume();
-                        let _ = ack.send(());
-                    }
-                    Err(RecvTimeoutError::Timeout) => {
-                        let _ = ringbuf.poll(Duration::ZERO);
-                    }
-                    Err(RecvTimeoutError::Disconnected) => {
-                        let _ = ringbuf.consume();
-                        break;
-                    }
-                }
-            }
+            while poll_iteration(
+                ctl_rx.recv_timeout(Duration::from_millis(poll_interval_ms)),
+                || {
+                    let _ = ringbuf.consume();
+                },
+                || {
+                    let _ = ringbuf.poll(Duration::ZERO);
+                },
+                &batch,
+                &tx,
+            ) {}
         });
 
         Ok(Self {
@@ -75,5 +137,74 @@ impl Drop for RingBufferPoller {
         if let Some(thread) = self.poll_thread.take() {
             let _ = thread.join();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+
+    fn partial_batch() -> Vec<u8> {
+        vec![42; BATCH_ITEMS - 1]
+    }
+
+    #[test]
+    fn timeout_flushes_partial_batch() {
+        let expected = partial_batch();
+        let batch = Mutex::new(expected.clone());
+        let (tx, rx) = mpsc::channel();
+        let polled = Cell::new(false);
+
+        assert!(poll_iteration(
+            Err(RecvTimeoutError::Timeout),
+            || unreachable!(),
+            || polled.set(true),
+            &batch,
+            &tx,
+        ));
+
+        assert!(polled.get());
+        assert_eq!(rx.recv().unwrap(), expected);
+    }
+
+    #[test]
+    fn drain_flushes_partial_batch() {
+        let expected = partial_batch();
+        let batch = Mutex::new(expected.clone());
+        let (tx, rx) = mpsc::channel();
+        let (ack_tx, ack_rx) = mpsc::channel();
+        let consumed = Cell::new(false);
+
+        assert!(poll_iteration(
+            Ok(ack_tx),
+            || consumed.set(true),
+            || unreachable!(),
+            &batch,
+            &tx,
+        ));
+
+        assert!(consumed.get());
+        assert_eq!(rx.recv().unwrap(), expected);
+        ack_rx.recv().unwrap();
+    }
+
+    #[test]
+    fn shutdown_flushes_partial_batch() {
+        let expected = partial_batch();
+        let batch = Mutex::new(expected.clone());
+        let (tx, rx) = mpsc::channel();
+        let consumed = Cell::new(false);
+
+        assert!(!poll_iteration(
+            Err(RecvTimeoutError::Disconnected),
+            || consumed.set(true),
+            || unreachable!(),
+            &batch,
+            &tx,
+        ));
+
+        assert!(consumed.get());
+        assert_eq!(rx.recv().unwrap(), expected);
     }
 }

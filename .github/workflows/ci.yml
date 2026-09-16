@@ -158,8 +158,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # One config file per workload so each job stays short; both physical
-        # variants of a workload live in the same file to be measured back to back.
+        # Both physical variants of a workload live in the same file, so they
+        # are measured back to back.
         workload: [ls, dd, tar]
     env:
       CODSPEED_REV: ${{ github.event.pull_request.head.sha || github.sha }}
