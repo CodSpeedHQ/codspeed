@@ -282,19 +282,62 @@ impl Drop for MemtrackBpf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::{Child, Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    /// A spawned child, killed and reaped when it goes out of scope, including
+    /// on the panic path of a failed assertion.
+    struct Reaped(Child);
+
+    impl Drop for Reaped {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    /// The `libc.so.6` that a freshly spawned child has mapped.
+    ///
+    /// Read from a child rather than from `/proc/self/maps`: a static musl
+    /// build of this binary maps no `libc.so.6` at all, and the production path
+    /// resolves symbols in a traced process anyway, never in memtrack's own.
+    fn libc_mapped_by_a_child() -> String {
+        let child = Reaped(
+            Command::new("sleep")
+                .arg("30")
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("could not spawn `sleep`"),
+        );
+        let pid = child.0.id();
+
+        // The mapping is made by the child's dynamic linker, which has not
+        // necessarily run by the time `spawn` returns.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Ok(maps) = std::fs::read_to_string(format!("/proc/{pid}/maps")) {
+                if let Some(path) = maps.lines().find_map(|line| {
+                    let path = line.split_whitespace().last()?;
+                    path.contains("libc.so.6").then(|| path.to_owned())
+                }) {
+                    return path;
+                }
+            }
+            assert!(
+                Instant::now() < deadline,
+                "pid {pid} mapped no libc.so.6 within 5s — is `sleep` statically \
+                 linked or built against a non-glibc libc on this host?"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
 
     /// Allocator entry points must resolve to file offsets; a symbol that
     /// silently fails to resolve attaches nothing and loses all events.
     #[test]
     fn libc_allocator_symbols_resolve_to_offsets() {
-        let maps = std::fs::read_to_string("/proc/self/maps").unwrap();
-        let libc_path = maps
-            .lines()
-            .find_map(|line| {
-                let path = line.split_whitespace().last()?;
-                path.contains("libc.so.6").then(|| path.to_owned())
-            })
-            .expect("test process has no mapped libc.so.6");
+        let libc_path = libc_mapped_by_a_child();
 
         let symbols = resolve_symbol_offsets(Path::new(&libc_path)).unwrap();
         for symbol in ["malloc", "calloc", "realloc", "free"] {
