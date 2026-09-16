@@ -67,39 +67,49 @@ async fn setup(modes: &[RunnerMode], setup_cache_dir: Option<&Path>) -> Result<(
 }
 
 /// Set up a single executor based on its support level on the current system.
-///
-/// Unsupported executors or executors that require manual installation are
-/// skipped, not treated as fatal.
 async fn setup_executor(
     executor: &dyn Executor,
     system_info: &SystemInfo,
     setup_cache_dir: Option<&Path>,
 ) -> Result<()> {
-    match executor.support_level(system_info) {
-        ExecutorSupport::Unsupported => {
-            info!(
-                "Skipping setup for the {} executor: not supported on {}",
-                executor.name(),
-                system_info.os
-            );
-        }
-        ExecutorSupport::RequiresManualInstallation => {
-            info!(
-                "Skipping automatic setup for the {} executor on {}; install required tooling manually.",
-                executor.name(),
-                system_info.os
-            );
-        }
-        ExecutorSupport::FullySupported => {
-            info!(
-                "Setting up the environment for the executor: {}",
-                executor.name()
-            );
-            executor.setup(system_info, setup_cache_dir).await?;
-            executor.grant_privileges()?;
-        }
+    let support_level = executor.support_level(system_info);
+    if support_level == ExecutorSupport::Unsupported {
+        info!(
+            "Skipping setup for the {} executor: not supported on {}",
+            executor.name(),
+            system_info.os
+        );
+        return Ok(());
     }
-    Ok(())
+
+    info!(
+        "Setting up the environment for the executor: {}",
+        executor.name()
+    );
+    let result = setup_and_grant(executor, system_info, setup_cache_dir).await;
+
+    match result {
+        // We publish no tooling for this host, so the executor could only try. Leave the
+        // installation to the user and carry on with the other executors.
+        Err(error) if support_level == ExecutorSupport::RequiresManualInstallation => {
+            warn!(
+                "Could not set up the {} executor on {}, install its tooling manually: {error}",
+                executor.name(),
+                system_info.os
+            );
+            Ok(())
+        }
+        result => result,
+    }
+}
+
+async fn setup_and_grant(
+    executor: &dyn Executor,
+    system_info: &SystemInfo,
+    setup_cache_dir: Option<&Path>,
+) -> Result<()> {
+    executor.setup(system_info, setup_cache_dir).await?;
+    executor.grant_privileges()
 }
 
 pub fn status(modes: &[RunnerMode]) -> Result<()> {
