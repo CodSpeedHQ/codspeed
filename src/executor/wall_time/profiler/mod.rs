@@ -4,6 +4,7 @@
 //! (perf, samply, instruments, ...) and produces a unified set of artifacts
 //! in the profile folder.
 
+#[cfg(not(target_os = "windows"))]
 pub mod perf;
 pub mod samply;
 

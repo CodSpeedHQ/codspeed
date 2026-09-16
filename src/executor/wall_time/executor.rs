@@ -1,6 +1,7 @@
 use super::helpers::validate_walltime_results;
 use super::isolation::Isolation;
 use super::profiler::Profiler;
+#[cfg(not(target_os = "windows"))]
 use super::profiler::perf::PerfProfiler;
 use super::profiler::samply::SamplyProfiler;
 use crate::executor::Executor;
@@ -44,9 +45,11 @@ pub struct WallTimeExecutor {
 
 fn select_profiler(profiler_override: Option<WalltimeProfiler>) -> Option<Box<dyn Profiler>> {
     match profiler_override {
+        #[cfg(not(target_os = "windows"))]
         Some(WalltimeProfiler::Perf) => Some(Box::new(PerfProfiler::new())),
-        Some(WalltimeProfiler::Samply) => Some(Box::new(SamplyProfiler::new())),
-        None => Some(Box::new(SamplyProfiler::new())),
+        Some(WalltimeProfiler::Samply) | None => Some(Box::new(SamplyProfiler::new())),
+        #[cfg(target_os = "windows")]
+        Some(WalltimeProfiler::Perf) => None,
     }
 }
 
