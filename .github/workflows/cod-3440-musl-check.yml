@@ -1,8 +1,17 @@
 # COD-3440 spike — throwaway workflow, NOT for merging.
 #
-# Purpose: prove the musl recipe on a real x86_64 kernel, which is the one gap
-# the local spike could not close (the local host is aarch64; an x86_64 build
-# cross-compiled there cannot load its BPF skeleton against an aarch64 kernel).
+# Purpose: prove the musl recipe on real kernels of both architectures. The dev
+# host is aarch64, and an x86_64 build cross-compiled there cannot load its BPF
+# skeleton against an aarch64 kernel, so x86_64 can only be closed here.
+#
+# The aarch64 half of the recipe has since been reproduced locally on Ubuntu
+# 24.04 aarch64 — same distro family as the runners, unlike the Arch host the
+# original spike ran on, which is where the `-fno-link-libatomic` and
+# `-mno-outline-atomics` workarounds came from. Neither is needed on Debian:
+# `cargo build -p memtrack --target aarch64-unknown-linux-musl`, with
+# CFLAGS_<target> as the only out-of-band variable, produces a fully static
+# binary and the whole `--lib` suite passes. What this workflow adds on top is
+# the x86_64 kernel, the integration shards, and the BPF load itself.
 #
 # To use it: push the spike branch, then
 #
@@ -15,53 +24,81 @@
 # reach main.
 #
 # Deliberately does NOT touch release.yml, dist-workspace.toml or any
-# Cargo.toml — it only adds one manually-triggered job.
+# Cargo.toml.
 #
-# Two differences from the local spike recipe, both simplifications:
-#   - musl-tools provides x86_64-linux-musl-gcc, which cc-rs finds on its own,
-#     so no compiler wrapper and no -lgcc / -fno-link-libatomic.
-#   - no zig, so none of the zig artifacts (crt duplication, UBSan trap,
-#     unknown warning options) apply.
-# The only thing carried over is what the spike is actually about: the three
-# autoconf cache seeds and the crates/memtrack/musl/argp.h stub.
+# --- what this workflow still carries, and why ---
+#
+# The three autoconf cache seeds and the aarch64 `-lgcc` link flag have moved to
+# `.cargo/config.toml`: they are properties of the repo, portable, and correct
+# for the gnu build too. What is left here is the one part that genuinely
+# belongs to the build machine — the include flags:
+#
+#   -I<repo>/crates/memtrack/musl   the argp.h stub, an absolute path, and a
+#                                   `[env]` table cannot build one (its
+#                                   `relative = true` form yields a bare path,
+#                                   with nowhere to put the -I).
+#   -idirafter /usr/include/<triplet> -idirafter /usr/include
+#                                   Debian's kernel UAPI headers. musl-gcc runs
+#                                   with -nostdinc and only sees
+#                                   /usr/include/<arch>-linux-musl, so libbpf's
+#                                   <asm/unistd.h> and <asm/types.h> have to be
+#                                   added back, last, behind musl's own headers.
+#                                   These paths are Debian's layout; an Arch or
+#                                   Alpine host needs different ones, so no
+#                                   value checked into the repo could be right
+#                                   for everyone.
+#
+# Both go into `CFLAGS_<target>` rather than `CFLAGS`. cc-rs reads
+# CFLAGS_<target>, CFLAGS_<target_with_underscores>, TARGET_CFLAGS and CFLAGS,
+# and accumulates them, so the target-scoped name reaches the musl build and is
+# invisible to the gnu one. That is why the "compare against the gnu build" step
+# below no longer has to `unset CFLAGS` first.
+#
+# It also replaces LIBBPF_SYS_EXTRA_CFLAGS, which this workflow used to set as
+# well. libbpf-sys forwards `compiler.cflags_env()` to elfutils' ./configure,
+# to zlib's, and to libbpf's make, appending LIBBPF_SYS_EXTRA_CFLAGS only to the
+# last of those — so CFLAGS_<target> alone covers all three. If libbpf (not
+# elfutils) is what fails to find <asm/unistd.h>, that assumption is what broke.
 
 name: COD-3440 musl check
 
 on:
   workflow_dispatch:
 
-env:
-  TARGET: x86_64-unknown-linux-musl
-  # Absolute, because the test step runs with working-directory: crates/memtrack,
-  # where a $PWD-relative path would resolve to the wrong place.
-  STUB_INCLUDE: ${{ github.workspace }}/crates/memtrack/musl
-  # libbpf includes <asm/unistd.h> and <asm/types.h>; Debian's musl-gcc runs with
-  # -nostdinc and only /usr/include/x86_64-linux-musl on the include path, so the
-  # kernel UAPI headers from linux-libc-dev have to be added back. -idirafter puts
-  # them last, behind musl's own headers. build.rs forwards this to libbpf's make;
-  # CFLAGS alone would not reach it the same way.
-  LIBBPF_SYS_EXTRA_CFLAGS: -idirafter /usr/include/x86_64-linux-gnu -idirafter /usr/include
-  # Approach A: pre-seed autoconf's cache so the vendored elfutils never runs
-  # the checks musl cannot satisfy. "none required" = available with no -l flag.
-  ac_cv_search_argp_parse: none required
-  ac_cv_search__obstack_free: none required
-  ac_cv_search_fts_close: none required
-
 jobs:
   build:
-    name: build ${{ matrix.profile }}
-    runs-on: ubuntu-latest # x86_64
+    name: build ${{ matrix.arch }} ${{ matrix.profile }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         profile: [dev, dist]
+        # `arch` has to be a real dimension, not something the `include` entries
+        # introduce on their own: an include entry whose keys are all new is
+        # merged into *every* combination, so the second one would overwrite the
+        # first and both jobs would end up aarch64. Listing it here makes each
+        # entry match on `arch` and fill in only its own combinations.
+        arch: [x86_64, aarch64]
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            cflags_var: CFLAGS_x86_64_unknown_linux_musl
+            triplet: x86_64-linux-gnu
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            cflags_var: CFLAGS_aarch64_unknown_linux_musl
+            triplet: aarch64-linux-gnu
+    env:
+      TARGET: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           submodules: true
       - uses: ./.github/actions/install-rust
         with:
-          cache-key: musl-${{ matrix.profile }}
+          cache-key: musl-${{ matrix.arch }}-${{ matrix.profile }}
       - uses: ./.github/actions/install-bpf-deps
 
       - name: Install musl toolchain
@@ -69,13 +106,19 @@ jobs:
           sudo apt-get install -y musl-tools pkg-config linux-libc-dev
           rustup target add "$TARGET"
 
-      - name: Build
-        # elfutils only honours CFLAGS/CPPFLAGS, not LIBBPF_SYS_EXTRA_CFLAGS.
-        # The stub header exists because elfutils #include <argp.h> even though
-        # a libelf-only build never calls into it.
+      # Exported once here so every later step sees the same value, and so the
+      # `cargo build` below is a plain one with nothing prepended to it.
+      - name: Point the musl build at the stub and the UAPI headers
         run: |
-          export CFLAGS="-I$STUB_INCLUDE"
-          cargo build -p memtrack --profile ${{ matrix.profile }} --target "$TARGET"
+          VALUE="-I$GITHUB_WORKSPACE/crates/memtrack/musl -idirafter /usr/include/${{ matrix.triplet }} -idirafter /usr/include"
+          # The target-scoped name is what cc-rs reads; MUSL_CFLAGS is a plain
+          # mirror of it, so later steps can pass the value on without having to
+          # index the env context by a matrix-computed key.
+          echo "${{ matrix.cflags_var }}=$VALUE" >> "$GITHUB_ENV"
+          echo "MUSL_CFLAGS=$VALUE" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: cargo build -p memtrack --profile ${{ matrix.profile }} --target "$TARGET"
 
       - name: Verify the artifact is genuinely static
         run: |
@@ -93,10 +136,12 @@ jobs:
           fi
           echo "OK: static, no NEEDED, no RPATH/RUNPATH"
 
+      # No `unset CFLAGS` any more: the include flags are scoped to the musl
+      # target, so a gnu build in the same shell cannot see them. If this step
+      # fails on a missing or wrong argp.h, that scoping is what leaked.
       - name: Compare against the gnu build
         if: matrix.profile == 'dist'
         run: |
-          unset CFLAGS
           cargo build -p memtrack --profile dist
           echo "musl: $(stat -c %s target/$TARGET/dist/codspeed-memtrack) bytes"
           echo "gnu:  $(stat -c %s target/dist/codspeed-memtrack) bytes"
@@ -111,14 +156,28 @@ jobs:
           test -n "$(ls -A /tmp/memtrack-out)" || { echo "no artifact written"; exit 1; }
 
   tests:
-    name: ${{ matrix.test }} (musl)
-    runs-on: ubuntu-latest # x86_64
+    name: ${{ matrix.test }} (${{ matrix.arch }} musl)
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       # Each memtrack integration test binary runs its cases serially (the eBPF
       # tracker can't overlap with itself in one process), so shard by binary.
       matrix:
         test: [c_tests, cpp_tests, rust_tests, spawn_tests, dlopen_tests, rss_tests]
+        arch: [x86_64, aarch64]
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            cflags_var: CFLAGS_x86_64_unknown_linux_musl
+            triplet: x86_64-linux-gnu
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            cflags_var: CFLAGS_aarch64_unknown_linux_musl
+            triplet: aarch64-linux-gnu
+    env:
+      TARGET: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -126,7 +185,7 @@ jobs:
           submodules: true
       - uses: ./.github/actions/install-rust
         with:
-          cache-key: musl-${{ matrix.test }}
+          cache-key: musl-${{ matrix.arch }}-${{ matrix.test }}
       - uses: ./.github/actions/install-bpf-deps
 
       - name: Install musl toolchain
@@ -137,21 +196,30 @@ jobs:
       - name: Install additional allocators
         run: sudo apt-get install -y libmimalloc-dev libjemalloc-dev
 
+      - name: Point the musl build at the stub and the UAPI headers
+        run: |
+          VALUE="-I$GITHUB_WORKSPACE/crates/memtrack/musl -idirafter /usr/include/${{ matrix.triplet }} -idirafter /usr/include"
+          # The target-scoped name is what cc-rs reads; MUSL_CFLAGS is a plain
+          # mirror of it, so later steps can pass the value on without having to
+          # index the env context by a matrix-computed key.
+          echo "${{ matrix.cflags_var }}=$VALUE" >> "$GITHUB_ENV"
+          echo "MUSL_CFLAGS=$VALUE" >> "$GITHUB_ENV"
+
       # Built separately from the run because test-with's env(GITHUB_ACTIONS)
       # gate is evaluated at COMPILE time. GITHUB_ACTIONS is set by the runner,
       # so this is automatic here -- but if the tests are ever built outside
       # Actions, the sudo-gated cases silently become #[ignore]d and the run
       # reports a green "0 passed; N ignored".
       - name: Build tests
-        run: |
-          export CFLAGS="-I$STUB_INCLUDE"
-          cargo test -p memtrack --target "$TARGET" --no-run
+        run: cargo test -p memtrack --target "$TARGET" --no-run
 
       - name: Run tests
         env:
           RUST_LOG: debug
         # Ubuntu 26.04 ships sudo-rs, which ignores `-E`; pass the env the
-        # rustup shims and the test gate need through `env` instead.
+        # rustup shims and the test gate need through `env` instead. The
+        # autoconf seeds no longer appear here -- they come from
+        # .cargo/config.toml, which cargo reads regardless of who invokes it.
         run: |
           sudo env \
             "HOME=$HOME" \
@@ -161,12 +229,8 @@ jobs:
             "CARGO_INCREMENTAL=$CARGO_INCREMENTAL" \
             "RUST_LOG=$RUST_LOG" \
             "GITHUB_ACTIONS=$GITHUB_ACTIONS" \
-            "CFLAGS=-I$STUB_INCLUDE" \
-            "LIBBPF_SYS_EXTRA_CFLAGS=$LIBBPF_SYS_EXTRA_CFLAGS" \
+            "${{ matrix.cflags_var }}=$MUSL_CFLAGS" \
             "TARGET=$TARGET" \
-            "ac_cv_search_argp_parse=$ac_cv_search_argp_parse" \
-            "ac_cv_search__obstack_free=$ac_cv_search__obstack_free" \
-            "ac_cv_search_fts_close=$ac_cv_search_fts_close" \
             $(which cargo) test --target "$TARGET" --test ${{ matrix.test }} \
               -- --test-threads 1 --nocapture
         working-directory: crates/memtrack
@@ -176,15 +240,32 @@ jobs:
         run: sudo chown -R $USER:$USER . ~/.cargo
 
   unit:
-    name: unit tests (musl)
-    runs-on: ubuntu-latest # x86_64
+    name: unit tests (${{ matrix.arch }} musl)
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            cflags_var: CFLAGS_x86_64_unknown_linux_musl
+            triplet: x86_64-linux-gnu
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            cflags_var: CFLAGS_aarch64_unknown_linux_musl
+            triplet: aarch64-linux-gnu
+    env:
+      TARGET: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           submodules: true
       - uses: ./.github/actions/install-rust
         with:
-          cache-key: musl-unit
+          cache-key: musl-${{ matrix.arch }}-unit
       - uses: ./.github/actions/install-bpf-deps
 
       - name: Install musl toolchain
@@ -192,15 +273,19 @@ jobs:
           sudo apt-get install -y musl-tools pkg-config linux-libc-dev
           rustup target add "$TARGET"
 
-      # Split out from the sharded job because of one known failure:
-      # ebpf::memtrack::tests::libc_allocator_symbols_resolve_to_offsets reads
-      # /proc/self/maps of the TEST BINARY and requires a mapped libc.so.6,
-      # which a statically linked musl binary does not have by construction.
-      # The production path resolves symbols in the *traced* process, so this is
-      # a test assumption, not a defect (report §4). Drop the --skip to check
-      # whether it has since been fixed; everything else must stay green.
-      - name: Run unit tests
+      - name: Point the musl build at the stub and the UAPI headers
         run: |
-          export CFLAGS="-I$STUB_INCLUDE"
-          cargo test -p memtrack --target "$TARGET" --lib \
-            -- --skip libc_allocator_symbols_resolve_to_offsets
+          VALUE="-I$GITHUB_WORKSPACE/crates/memtrack/musl -idirafter /usr/include/${{ matrix.triplet }} -idirafter /usr/include"
+          # The target-scoped name is what cc-rs reads; MUSL_CFLAGS is a plain
+          # mirror of it, so later steps can pass the value on without having to
+          # index the env context by a matrix-computed key.
+          echo "${{ matrix.cflags_var }}=$VALUE" >> "$GITHUB_ENV"
+          echo "MUSL_CFLAGS=$VALUE" >> "$GITHUB_ENV"
+
+      # `libc_allocator_symbols_resolve_to_offsets` used to be skipped here: it
+      # read /proc/self/maps of the TEST BINARY and required a mapped libc.so.6,
+      # which a statically linked musl binary does not have by construction. The
+      # test now resolves symbols in a spawned child instead, matching what the
+      # production path does, so the whole --lib suite must pass on musl.
+      - name: Run unit tests
+        run: cargo test -p memtrack --target "$TARGET" --lib
