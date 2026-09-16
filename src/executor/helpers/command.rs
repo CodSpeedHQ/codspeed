@@ -128,7 +128,12 @@ impl CommandBuilder {
         self
     }
 
-    /// Returns the command line as a string for debugging/testing purposes
+    /// The command line as a single shell-quoted string.
+    ///
+    /// Used for logging and assertions, and by
+    /// [`InternalCommands::get_shell_command`](crate::cli::InternalCommands::get_shell_command)
+    /// to splice a re-exec into a command that `bash -c` runs — so the quoting
+    /// has to stay correct, not merely readable.
     pub fn as_command_line(&self) -> String {
         let mut parts: Vec<String> = vec![self.program.to_string_lossy().into_owned()];
         parts.extend(

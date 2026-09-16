@@ -1,5 +1,6 @@
 mod auth;
 pub(crate) mod exec;
+pub(crate) mod exec_harness;
 pub(crate) mod experimental;
 mod profile;
 pub(crate) mod run;
@@ -110,6 +111,9 @@ pub(crate) enum InternalCommands {
     /// Run the bundled samply profiler. Args are forwarded to samply.
     #[command(disable_help_flag = true, disable_help_subcommand = true)]
     Samply(samply::SamplyArgs),
+    /// Run the bundled exec-harness. Args are forwarded to exec-harness.
+    #[command(disable_help_flag = true, disable_help_subcommand = true)]
+    ExecHarness(exec_harness::ExecHarnessArgs),
 }
 
 /// Overrides the executable used to re-invoke internal subcommands.
@@ -134,8 +138,22 @@ impl InternalCommands {
                 builder.arg("samply");
                 builder.args(args.args.iter().cloned());
             }
+            InternalCommands::ExecHarness(args) => {
+                builder.arg("exec-harness");
+                builder.args(args.args.iter().cloned());
+            }
         }
         Ok(builder)
+    }
+
+    /// The same re-exec, rendered as a single POSIX-shell command string.
+    ///
+    /// Not every call site can use a [`CommandBuilder`]: exec-harness is handed
+    /// its targets through a heredoc, so its invocation has to be spliced into
+    /// a string that `bash -c` will run. Quoting goes through
+    /// `shell_words::join`, so a self-exe path containing spaces survives.
+    pub fn get_shell_command(&self) -> Result<String> {
+        Ok(self.get_command_builder()?.as_command_line())
     }
 }
 
@@ -158,7 +176,13 @@ pub async fn run() -> Result<()> {
     let setup_cache_dir = setup_cache_dir.as_deref();
 
     match cli.command {
-        Commands::Run(_) | Commands::Exec(_) | Commands::Internal(InternalCommands::Samply(_)) => {} // these are responsible for their own logger initialization
+        // These are responsible for their own logger initialization. The
+        // bundled components must not install one: only one global logger can
+        // exist per process, and theirs would lose to (or clash with) ours.
+        Commands::Run(_)
+        | Commands::Exec(_)
+        | Commands::Internal(InternalCommands::Samply(_))
+        | Commands::Internal(InternalCommands::ExecHarness(_)) => {}
         _ => {
             init_local_logger()?;
         }
@@ -211,6 +235,7 @@ pub async fn run() -> Result<()> {
         Commands::Show => show::run()?,
         Commands::Update => update::run().await?,
         Commands::Internal(InternalCommands::Samply(args)) => samply::run(args)?,
+        Commands::Internal(InternalCommands::ExecHarness(args)) => exec_harness::run(args)?,
     }
     Ok(())
 }
