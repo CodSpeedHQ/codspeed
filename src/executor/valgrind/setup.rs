@@ -234,23 +234,16 @@ fn is_valgrind_installed() -> bool {
     )
 }
 
-/// Whether the system libc has a resolvable separate debug file, as the `libc6-dbg`
-/// package provides.
+/// Whether the system libc has the separate debug file `libc6-dbg` provides.
 ///
 /// Probed by file rather than through dpkg, because the setup cache restores package
-/// files onto the root filesystem without touching dpkg's database. Only meaningful
-/// where [`system_libc_path`] resolves, so callers must already know they are on the
-/// Debian multiarch layout.
+/// files without touching dpkg's database.
 fn has_libc_debug_symbols(system_info: &SystemInfo) -> bool {
     system_libc_path(system_info).is_some_and(|libc| has_debug_symbols(&libc))
 }
 
-/// Warn, without failing, when valgrind will run against a libc it has no debug
-/// symbols for.
-///
-/// The symbols sharpen valgrind's output but are not needed to run it, so a missing
-/// `libc6-dbg` must not reject an installation we did not package ourselves. Scoped to
-/// apt-based systems, the only layout [`system_libc_path`] knows.
+/// Warn when valgrind will run against a libc it has no debug symbols for: they sharpen
+/// its output but are not needed to run it.
 fn warn_on_missing_libc_debug_symbols(system_info: &SystemInfo) {
     if !apt::is_system_compatible(system_info) {
         debug!("Skipping the libc debug symbol check on a non-apt-based system");
@@ -265,52 +258,51 @@ fn warn_on_missing_libc_debug_symbols(system_info: &SystemInfo) {
     }
 }
 
-pub async fn install_valgrind(
+/// Provide valgrind on the systems we publish no package for: take the installation the
+/// user brings, or build one from source, and otherwise ask for a manual installation.
+pub(super) async fn try_install_from_source(system_info: &SystemInfo) -> Result<()> {
+    if is_valgrind_installed() {
+        debug!(
+            "Using the valgrind installation already present on {}",
+            system_info.os
+        );
+        warn_on_missing_libc_debug_symbols(system_info);
+        return Ok(());
+    }
+
+    // The build compiles for a few minutes and installs system-wide, so the user decides
+    // whether we do it or they install by hand.
+    warn!(
+        "CodSpeed does not publish a valgrind package for {}",
+        system_info.os
+    );
+
+    if build_from_source::is_wanted() {
+        // A best effort: the toolchain may be missing or the build may fail, in which case
+        // the user is pointed to a manual installation like a declined build would be.
+        match build_from_source::build_and_install().await {
+            Ok(()) if is_valgrind_installed() => {
+                info!("valgrind-codspeed has been built and installed from source");
+                warn_on_missing_libc_debug_symbols(system_info);
+                return Ok(());
+            }
+            Ok(()) => warn!("The freshly built valgrind is not usable, see the logs above"),
+            Err(error) => warn!("Building valgrind from source failed: {error}"),
+        }
+    }
+
+    bail!(
+        "valgrind-codspeed {} or higher is required and could not be installed automatically. \
+        Install it manually, see https://github.com/CodSpeedHQ/valgrind-codspeed",
+        VALGRIND_CODSPEED_VERSION_STRING.as_str()
+    );
+}
+
+/// Install the valgrind-codspeed package we publish for this system, from apt.
+pub(super) async fn install_valgrind(
     system_info: &SystemInfo,
     setup_cache_dir: Option<&Path>,
 ) -> Result<()> {
-    // On distributions we do not publish a valgrind-codspeed package for (rolling releases,
-    // non-apt systems, ...), there is nothing to install automatically: the user brings their own
-    // build. Accept that installation instead of failing on the package we cannot provide.
-    if !is_codspeed_valgrind_installation_supported(system_info) {
-        if is_valgrind_installed() {
-            debug!(
-                "Using the valgrind installation already present on {}",
-                system_info.os
-            );
-            warn_on_missing_libc_debug_symbols(system_info);
-            return Ok(());
-        }
-
-        // No package to publish means nothing to install automatically. Offer to build
-        // valgrind-codspeed from source instead: the build compiles for a few minutes and
-        // installs system-wide, so the user decides whether we do it or they install by hand.
-        warn!(
-            "CodSpeed does not publish a valgrind package for {}",
-            system_info.os
-        );
-
-        if build_from_source::is_wanted() {
-            // A best effort: the toolchain may be missing or the build may fail, in which case
-            // the user is pointed to a manual installation like a declined build would be.
-            match build_from_source::build_and_install(system_info).await {
-                Ok(()) if is_valgrind_installed() => {
-                    info!("valgrind-codspeed has been built and installed from source");
-                    warn_on_missing_libc_debug_symbols(system_info);
-                    return Ok(());
-                }
-                Ok(()) => warn!("The freshly built valgrind is not usable, see the logs above"),
-                Err(error) => warn!("Building valgrind from source failed: {error}"),
-            }
-        }
-
-        bail!(
-            "valgrind-codspeed {} or higher is required and could not be installed automatically. \
-            Install it manually, see https://github.com/CodSpeedHQ/valgrind-codspeed",
-            VALGRIND_CODSPEED_VERSION_STRING.as_str()
-        );
-    }
-
     apt::install_cached(
         system_info,
         setup_cache_dir,

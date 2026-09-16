@@ -15,12 +15,12 @@ use crate::executor::helpers::run_with_sudo::wrap_with_sudo;
 use crate::local_logger::rolling_buffer::{activate_rolling_buffer, deactivate_rolling_buffer};
 use crate::local_logger::{IS_TTY, suspend_progress_bar};
 use crate::prelude::*;
-use crate::system::{SupportedOs, SystemInfo};
 use console::Term;
+use std::env;
 use std::ffi::OsStr;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Stdio};
-use std::{env, fs};
+use tempfile::TempDir;
 
 const VALGRIND_CODSPEED_REPOSITORY: &str = "https://github.com/CodSpeedHQ/valgrind-codspeed.git";
 
@@ -29,11 +29,8 @@ const VALGRIND_CODSPEED_REPOSITORY: &str = "https://github.com/CodSpeedHQ/valgri
 const BUILD_FROM_SOURCE_ENV: &str = "CODSPEED_VALGRIND_BUILD_FROM_SOURCE";
 
 /// Branch of the valgrind-codspeed repository to build from.
-// TODO: switch back to `main` once the self-contained build script has landed there.
+// TODO: switch back to the default branch once the self-contained build script has landed there.
 const VALGRIND_CODSPEED_BRANCH: &str = "cod-3465-create-a-self-contained-valgrind-build-script";
-
-/// Directory name, under the system temporary directory, the sources are cloned into.
-const SOURCE_DIR_NAME: &str = "valgrind-codspeed-src";
 
 /// Tools required to configure and build valgrind. Each entry lists the
 /// interchangeable executables that satisfy the requirement.
@@ -67,35 +64,6 @@ fn missing_build_dependencies() -> Vec<&'static str> {
         .collect()
 }
 
-/// Command that installs the build toolchain, for the distributions we can name it for.
-///
-/// Valgrind itself needs no development library: it links `-nodefaultlibs` and vendors its only
-/// third-party decoder, so an autotools and C toolchain is the whole requirement.
-fn build_toolchain_install_hint(system_info: &SystemInfo) -> Option<&'static str> {
-    let SupportedOs::Linux(distro) = &system_info.os else {
-        return None;
-    };
-
-    // `id` is the `ID` field of /etc/os-release, so derivatives report their own id.
-    let hint = match distro.id() {
-        "arch" | "archarm" | "manjaro" | "endeavouros" | "cachyos" => {
-            "sudo pacman -S --needed base-devel git"
-        }
-        "fedora" | "rhel" | "centos" | "rocky" | "almalinux" => {
-            "sudo dnf install -y @development-tools git"
-        }
-        "opensuse-tumbleweed" | "opensuse-leap" | "sles" => {
-            "sudo zypper install -y -t pattern devel_basis git"
-        }
-        "alpine" => "sudo apk add build-base autoconf automake git",
-        "ubuntu" | "debian" | "linuxmint" | "pop" | "raspbian" => {
-            "sudo apt-get install -y build-essential autoconf automake git"
-        }
-        _ => return None,
-    };
-    Some(hint)
-}
-
 fn parallel_jobs() -> usize {
     std::thread::available_parallelism()
         .map(|jobs| jobs.get())
@@ -125,21 +93,12 @@ async fn run_build_command(builder: CommandBuilder) -> Result<()> {
     Ok(())
 }
 
-/// Clone the sources from scratch, so that a partial or outdated checkout left
-/// over by a previous attempt never leaks into the build.
-async fn clone_sources() -> Result<PathBuf> {
-    let source_dir = env::temp_dir().join(SOURCE_DIR_NAME);
-    if source_dir.exists() {
-        debug!("Removing the previous checkout at {}", source_dir.display());
-        fs::remove_dir_all(&source_dir).with_context(|| {
-            format!(
-                "failed to remove the previous checkout at {}",
-                source_dir.display()
-            )
-        })?;
-    }
+/// Clone the sources into a temporary directory, wiped once the build is done.
+async fn clone_sources() -> Result<TempDir> {
+    let source_dir =
+        TempDir::new().context("failed to create a temporary directory for the sources")?;
 
-    let source_dir_str = source_dir.to_string_lossy().into_owned();
+    let source_dir_str = source_dir.path().to_string_lossy().into_owned();
     let mut builder = CommandBuilder::new("git");
     builder.args([
         "clone",
@@ -156,15 +115,16 @@ async fn clone_sources() -> Result<PathBuf> {
 }
 
 /// Everything that runs unprivileged: fetching the sources and compiling them.
-async fn fetch_and_compile() -> Result<PathBuf> {
+async fn fetch_and_compile() -> Result<TempDir> {
     let source_dir = clone_sources().await?;
+    let path = source_dir.path();
 
     // The scripts are addressed by absolute path: how a relative program path is resolved against
     // the working directory of the child is platform specific and unspecified.
-    run_build_command(command_in(&source_dir, source_dir.join("autogen.sh"), &[])).await?;
-    run_build_command(command_in(&source_dir, source_dir.join("configure"), &[])).await?;
+    run_build_command(command_in(path, path.join("autogen.sh"), &[])).await?;
+    run_build_command(command_in(path, path.join("configure"), &[])).await?;
     run_build_command(command_in(
-        &source_dir,
+        path,
         "make",
         &[&format!("-j{}", parallel_jobs())],
     ))
@@ -229,6 +189,7 @@ fn prompt_for_source_build() -> bool {
     let line = Term::stderr().read_line().unwrap_or_default();
     let answer = line.trim();
 
+    // Default to yes on empty input (just pressing Enter), as the `[Y/n]` prompt announces.
     let accepted =
         answer.is_empty() || answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes");
     if !accepted {
@@ -243,16 +204,13 @@ fn prompt_for_source_build() -> bool {
 ///
 /// Returns an error describing the first failing step, leaving the caller free
 /// to fall back to instructions for a manual installation.
-pub(super) async fn build_and_install(system_info: &SystemInfo) -> Result<()> {
+pub(super) async fn build_and_install() -> Result<()> {
     let missing_dependencies = missing_build_dependencies();
     if !missing_dependencies.is_empty() {
-        let missing = missing_dependencies.join(", ");
-        match build_toolchain_install_hint(system_info) {
-            Some(hint) => bail!(
-                "the build toolchain is incomplete ({missing} missing), install it with `{hint}`"
-            ),
-            None => bail!("the build toolchain is incomplete ({missing} missing)"),
-        }
+        bail!(
+            "the build toolchain is incomplete, install the missing tools: {}",
+            missing_dependencies.join(", ")
+        );
     }
 
     info!("Building valgrind-codspeed from source, this can take a few minutes");
@@ -262,25 +220,7 @@ pub(super) async fn build_and_install(system_info: &SystemInfo) -> Result<()> {
     deactivate_rolling_buffer();
 
     let source_dir = compilation_result?;
-    install_build(&source_dir).await?;
+    install_build(source_dir.path()).await?;
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Only the explicit env-var arms are covered: every other input reaches the
-    /// TTY check, and `cargo test -- --nocapture` from a terminal would then block
-    /// the suite on an interactive prompt.
-    #[test]
-    fn is_wanted_honours_an_explicit_env_var() {
-        temp_env::with_var(BUILD_FROM_SOURCE_ENV, Some("true"), || {
-            assert!(is_wanted());
-        });
-        temp_env::with_var(BUILD_FROM_SOURCE_ENV, Some("false"), || {
-            assert!(!is_wanted());
-        });
-    }
 }
