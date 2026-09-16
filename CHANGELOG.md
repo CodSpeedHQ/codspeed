@@ -5,6 +5,23 @@
 
 
 
+## [5.3.1] - 2026-09-16
+
+### <!-- 1 -->🐛 Bug Fixes
+- Keep mmap/munmap/brk as deprecated artifact variants (#538) by @GuillaumeLagrange in [#538](https://github.com/CodSpeedHQ/runner/pull/538)
+- Attach lifecycle and syscall hooks without perf_event_open by @GuillaumeLagrange
+
+### <!-- 2 -->🏗️ Refactor
+- Drop the unused mmap/munmap/brk events by @GuillaumeLagrange
+
+### <!-- 6 -->🧪 Testing
+- Allow a 1ms shortfall on the sleep round timing by @GuillaumeLagrange in [#536](https://github.com/CodSpeedHQ/runner/pull/536)
+
+### <!-- 7 -->⚙️ Internals
+- Pin memtrack 1.5.1 (#541) by @adriencaccia in [#541](https://github.com/CodSpeedHQ/runner/pull/541)
+- Fix the clang-format hook failing to install (#540) by @adriencaccia in [#540](https://github.com/CodSpeedHQ/runner/pull/540)
+
+
 ## [5.3.0] - 2026-09-07
 
 ### <!-- 0 -->🚀 Features
@@ -1514,6 +1531,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[5.3.1]: https://github.com/CodSpeedHQ/runner/compare/v5.3.0..v5.3.1
 [5.3.0]: https://github.com/CodSpeedHQ/runner/compare/v5.2.1..v5.3.0
 [5.2.1]: https://github.com/CodSpeedHQ/runner/compare/v5.2.0..v5.2.1
 [5.2.0]: https://github.com/CodSpeedHQ/runner/compare/v5.1.0..v5.2.0
