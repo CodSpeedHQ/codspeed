@@ -96,7 +96,7 @@ mod tests {
                     os: crate::system::SupportedOs::Linux(
                         crate::system::LinuxDistribution::Other {
                             name: "nixos".into(),
-                            version: "25.11".into(),
+                            version: Some("25.11".into()),
                         },
                     ),
                     arch: "x86_64".to_string(),
