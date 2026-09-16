@@ -138,10 +138,9 @@ pub async fn measure(
         config,
     ));
 
-    // Only set PYTHONMALLOC=malloc for non-free-threaded Python builds.
-    // Free-threaded Python (with GIL disabled) manages memory differently and
-    // should not have PYTHONMALLOC overridden.
-    if !is_free_threaded_python() {
+    // Free-threaded Python (GIL disabled) does not support PYTHONMALLOC=malloc
+    // and refuses to start with it set.
+    if !is_free_threaded_python(config.working_directory.as_deref().map(Path::new)) {
         cmd.env("PYTHONMALLOC", "malloc");
     }
 
