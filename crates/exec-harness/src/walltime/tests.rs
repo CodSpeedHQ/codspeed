@@ -180,11 +180,13 @@ fn test_with_sleep_command() -> Result<()> {
     // Should run exactly 3 times
     assert_eq!(times.len(), 3, "Expected exactly 3 iterations");
 
-    // Each iteration should take at least 10ms (10_000_000 ns)
+    // The round clock starts after the child is spawned, so a preempted parent
+    // can miss the beginning of the sleep. Allow a small shortfall.
+    const MIN_ROUND_NS: u128 = 9_800_000;
     for (i, &time_ns) in times.iter().enumerate() {
         assert!(
-            time_ns >= 10_000_000,
-            "Iteration {i} took only {time_ns}ns, expected at least 10ms"
+            time_ns >= MIN_ROUND_NS,
+            "Iteration {i} took only {time_ns}ns, expected at least {MIN_ROUND_NS}ns"
         );
     }
 
