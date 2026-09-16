@@ -5,16 +5,6 @@
 #include "utils/map_helpers.h"
 #include "utils/process_tracking.h"
 
-/* Syscall entry points are arch-prefixed wrappers around the SYSCALL_DEFINE
- * body (`__x64_sys_mmap`, `__arm64_sys_mmap`), and fentry targets a symbol. */
-#if defined(__TARGET_ARCH_x86)
-#define SYSCALL_SYM(name) "__x64_sys_" #name
-#elif defined(__TARGET_ARCH_arm64)
-#define SYSCALL_SYM(name) "__arm64_sys_" #name
-#else
-#error "unsupported target arch for syscall fentry hooks"
-#endif
-
 #define UPROBE_ARG_RET(name, arg_expr, submit_block) \
     BPF_HASH_MAP(name##_arg, __u64, __u64, 10000);   \
     SEC(UPROBE_SEC)                                  \
@@ -151,80 +141,6 @@ int uretprobe_posix_memalign(struct pt_regs* ctx) {
     }
 
     return submit_aligned_alloc_event(a.size, addr);
-}
-
-struct mmap_args {
-    __u64 addr;
-    __u64 len;
-};
-
-BPF_HASH_MAP(mmap_temp, __u64, struct mmap_args, 10000);
-
-static __always_inline void store_mmap_args(__u64 addr, __u64 len) {
-    struct task_ids ids = current_task_ids();
-    __u64 tid = ids.tid;
-    if (is_tracked(ids.tgid)) {
-        struct mmap_args args = {.addr = addr, .len = len};
-        bpf_map_update_elem(&mmap_temp, &tid, &args, BPF_ANY);
-    }
-}
-
-SEC("fentry/" SYSCALL_SYM(mmap))
-int BPF_PROG(tracepoint_sys_enter_mmap, struct pt_regs* regs) {
-    store_mmap_args(PT_REGS_PARM1_CORE_SYSCALL(regs), PT_REGS_PARM2_CORE_SYSCALL(regs));
-    return 0;
-}
-
-SEC("fexit/" SYSCALL_SYM(mmap))
-int BPF_PROG(tracepoint_sys_exit_mmap, struct pt_regs* regs, long retval) {
-    struct mmap_args* args = (struct mmap_args*)take_param(&mmap_temp);
-    if (!args) {
-        return 0;
-    }
-
-    __s64 ret = retval;
-    if (ret <= 0) {
-        return 0;
-    }
-
-    return submit_mmap_event((__u64)ret, args->len, EVENT_TYPE_MMAP);
-}
-
-SEC("fentry/" SYSCALL_SYM(munmap))
-int BPF_PROG(tracepoint_sys_enter_munmap, struct pt_regs* regs) {
-    __u64 addr = PT_REGS_PARM1_CORE_SYSCALL(regs);
-    __u64 len = PT_REGS_PARM2_CORE_SYSCALL(regs);
-
-    if (addr == 0 || len == 0) {
-        return 0;
-    }
-
-    return submit_mmap_event(addr, len, EVENT_TYPE_MUNMAP);
-}
-
-BPF_HASH_MAP(brk_temp, __u64, __u64, 10000);
-
-SEC("fentry/" SYSCALL_SYM(brk))
-int BPF_PROG(tracepoint_sys_enter_brk, struct pt_regs* regs) {
-    store_param(&brk_temp, PT_REGS_PARM1_CORE_SYSCALL(regs));
-    return 0;
-}
-
-SEC("fexit/" SYSCALL_SYM(brk))
-int BPF_PROG(tracepoint_sys_exit_brk, struct pt_regs* regs, long retval) {
-    __u64* requested_brk = take_param(&brk_temp);
-    if (!requested_brk) {
-        return 0;
-    }
-
-    __u64 new_brk = retval;
-    __u64 req_brk = *requested_brk;
-
-    if (req_brk == 0 || new_brk <= 0) {
-        return 0;
-    }
-
-    return submit_mmap_event(new_brk, 0, EVENT_TYPE_BRK);
 }
 
 #endif /* __ALLOCATOR_H__ */

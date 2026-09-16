@@ -22,9 +22,7 @@ macro_rules! assert_events_snapshot {
         use runner_shared::artifacts::MemtrackEventKind;
         use std::mem::discriminant;
 
-        // Keep only allocator events. mmap/munmap/brk sizes reflect allocator
-        // arena reservations that vary per run, so including them here would
-        // make these snapshots nondeterministic.
+        // Keep only allocator events.
         let formatted_events: Vec<String> = $events
             .iter()
             .filter(|e| {

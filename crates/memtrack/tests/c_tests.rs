@@ -96,12 +96,12 @@ fn test_track_allocators_disabled_skips_allocations() -> Result<(), Box<dyn std:
             .build(),
     )?;
 
-    let has_mmap = events
+    let has_lifecycle = events
         .iter()
-        .any(|e| matches!(e.kind, MemtrackEventKind::Mmap { .. }));
+        .any(|e| matches!(e.kind, MemtrackEventKind::Exec | MemtrackEventKind::Exit));
     assert!(
-        has_mmap,
-        "expected at least one Mmap event with allocators disabled"
+        has_lifecycle,
+        "expected at least one lifecycle event with allocators disabled"
     );
 
     let alloc_events: Vec<_> = events

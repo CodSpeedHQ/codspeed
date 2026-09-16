@@ -13,7 +13,7 @@ fn generate_events(n: usize) -> Vec<MemtrackEvent> {
     let mut events = Vec::with_capacity(n);
     for _ in 0..n {
         let size = rng.gen_range(8..8192);
-        let kind = match rng.gen_range(0..10) {
+        let kind = match rng.gen_range(0..7) {
             0 => MemtrackEventKind::Malloc { size },
             1 => MemtrackEventKind::Free,
             2 => MemtrackEventKind::Realloc {
@@ -22,14 +22,11 @@ fn generate_events(n: usize) -> Vec<MemtrackEvent> {
             },
             3 => MemtrackEventKind::Calloc { size },
             4 => MemtrackEventKind::AlignedAlloc { size },
-            5 => MemtrackEventKind::Mmap { size },
-            6 => MemtrackEventKind::Munmap { size },
-            7 => MemtrackEventKind::Brk { size },
-            8 => MemtrackEventKind::Rss {
+            5 => MemtrackEventKind::Rss {
                 member: rng.gen_range(0..4),
                 size,
             },
-            9 => MemtrackEventKind::Rmap {
+            6 => MemtrackEventKind::Rmap {
                 member: rng.gen_range(0..4),
                 delta: rng.gen_range(-1024..1024),
             },
@@ -67,7 +64,6 @@ fn generate_realistic_events(n: usize) -> Vec<MemtrackEvent> {
     let mut rng = StdRng::seed_from_u64(42);
     let mut events = Vec::with_capacity(n);
     let mut live_heap: Vec<u64> = Vec::new();
-    let mut live_mmap: Vec<(u64, u64)> = Vec::new();
     let mut free_list: Vec<u64> = Vec::new();
     let mut next_addr: u64 = 0x5555_5555_0000;
     let mut ts: u64 = 1_700_000_000_000_000_000;
@@ -91,26 +87,15 @@ fn generate_realistic_events(n: usize) -> Vec<MemtrackEvent> {
             });
             let kind = match rng.gen_range(0..20) {
                 0 => MemtrackEventKind::Calloc { size },
-                1 => MemtrackEventKind::Mmap { size },
                 _ => MemtrackEventKind::Malloc { size },
             };
-            if let MemtrackEventKind::Mmap { size } = kind {
-                live_mmap.push((addr, size));
-            } else {
-                live_heap.push(addr);
-            }
+            live_heap.push(addr);
             (addr, kind)
         } else if roll < 90 {
-            let idx = rng.gen_range(0..live_heap.len() + live_mmap.len());
-            if idx < live_heap.len() {
-                let addr = live_heap.swap_remove(idx);
-                free_list.push(addr);
-                (addr, MemtrackEventKind::Free)
-            } else {
-                let (addr, size) = live_mmap.swap_remove(idx - live_heap.len());
-                free_list.push(addr);
-                (addr, MemtrackEventKind::Munmap { size })
-            }
+            let idx = rng.gen_range(0..live_heap.len());
+            let addr = live_heap.swap_remove(idx);
+            free_list.push(addr);
+            (addr, MemtrackEventKind::Free)
         } else {
             let idx = rng.gen_range(0..live_heap.len());
             let old_addr = live_heap[idx];

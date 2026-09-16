@@ -4,7 +4,7 @@
 
 ## Project Overview
 
-Attaches uprobes/uretprobes to allocator functions (`malloc`/`free`/`calloc`/`realloc`/`aligned_alloc`/`memalign`) and tracepoints to `mmap`/`munmap`/`brk` + `sched_process_fork` in a target process tree, streams allocation events through a BPF ring buffer to userspace, and writes them to a `MemtrackArtifact` file. Ships a CLI binary `codspeed-memtrack track`.
+Attaches uprobes/uretprobes to allocator functions (`malloc`/`free`/`calloc`/`realloc`/`aligned_alloc`/`memalign`) and BTF tracepoints to `sched_process_fork`/`exec`/`exit` in a target process tree, streams allocation events through a BPF ring buffer to userspace, and writes them to a `MemtrackArtifact` file. Ships a CLI binary `codspeed-memtrack track`.
 
 ## Architecture & Data Flow
 

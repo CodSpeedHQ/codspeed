@@ -56,24 +56,6 @@ pub fn parse_event(data: &[u8]) -> Option<MemtrackEvent> {
                     size: event.data.alloc.size,
                 },
             ),
-            EVENT_TYPE_MMAP => (
-                event.data.mmap.addr,
-                MemtrackEventKind::Mmap {
-                    size: event.data.mmap.size,
-                },
-            ),
-            EVENT_TYPE_MUNMAP => (
-                event.data.mmap.addr,
-                MemtrackEventKind::Munmap {
-                    size: event.data.mmap.size,
-                },
-            ),
-            EVENT_TYPE_BRK => (
-                event.data.mmap.addr,
-                MemtrackEventKind::Brk {
-                    size: event.data.mmap.size,
-                },
-            ),
             EVENT_TYPE_FORK => (
                 0,
                 MemtrackEventKind::Fork {

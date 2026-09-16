@@ -121,11 +121,4 @@ static __always_inline int submit_realloc_event(__u64 old_addr, __u64 new_addr, 
     });
 }
 
-static __always_inline int submit_mmap_event(__u64 addr, __u64 size, __u8 event_type) {
-    SUBMIT_GATED_EVENT(event_type, {
-        e->data.mmap.addr = addr;
-        e->data.mmap.size = size;
-    });
-}
-
 #endif /* __EVENT_HELPERS_H__ */

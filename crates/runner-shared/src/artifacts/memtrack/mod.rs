@@ -69,15 +69,6 @@ pub enum MemtrackEventKind {
     AlignedAlloc {
         size: u64,
     },
-    Mmap {
-        size: u64,
-    },
-    Munmap {
-        size: u64,
-    },
-    Brk {
-        size: u64,
-    },
     Fork {
         parent_pid: pid_t,
     },
@@ -179,9 +170,6 @@ mod tests {
             },
             MemtrackEventKind::Calloc { size: 9 },
             MemtrackEventKind::AlignedAlloc { size: 9 },
-            MemtrackEventKind::Mmap { size: 9 },
-            MemtrackEventKind::Munmap { size: 9 },
-            MemtrackEventKind::Brk { size: 9 },
         ];
 
         for kind in kinds {
