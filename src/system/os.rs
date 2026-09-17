@@ -4,6 +4,10 @@ use serde::{Deserialize, Serialize};
 use sysinfo::System;
 
 use crate::prelude::*;
+
+/// Version reported on the wire for distributions that expose none.
+const UNKNOWN_OS_VERSION: &str = "unknown";
+
 /// Typed representation of the host operating system.
 ///
 /// Only operating systems that CodSpeed can run on are represented here.
@@ -22,14 +26,15 @@ impl SupportedOs {
     /// For Linux, the distribution is identified via `sysinfo::System::distribution_id()`.
     /// The OS version is read from `sysinfo::System::os_version()`.
     pub fn from_os(os: &str) -> Result<Self> {
-        let os_version = System::os_version().ok_or(anyhow!("Failed to get OS version"))?;
         match os {
             "linux" => {
                 let os_id = System::distribution_id();
-                Ok(Self::Linux(LinuxDistribution::from_id(&os_id, &os_version)))
+                // Rolling releases do not expose a `VERSION_ID` in `/etc/os-release`.
+                let os_version = System::os_version();
+                Ok(Self::Linux(LinuxDistribution::from_id(&os_id, os_version)))
             }
             "macos" => Ok(Self::Macos {
-                version: os_version,
+                version: System::os_version().ok_or(anyhow!("Failed to get OS version"))?,
             }),
             unsupported => bail!("Unsupported operating system: {unsupported}"),
         }
@@ -43,17 +48,21 @@ impl SupportedOs {
         }
     }
 
-    pub fn version(&self) -> &str {
+    /// The OS version, absent on the distributions that report none.
+    pub fn version(&self) -> Option<&str> {
         match self {
             Self::Linux(distro) => distro.version(),
-            Self::Macos { version } => version,
+            Self::Macos { version } => Some(version),
         }
     }
 }
 
 impl Display for SupportedOs {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} {}", self.id(), self.version())
+        match self.version() {
+            Some(version) => write!(f, "{} {version}", self.id()),
+            None => write!(f, "{}", self.id()),
+        }
     }
 }
 
@@ -69,7 +78,7 @@ impl From<SupportedOs> for SupportedOsSerde {
     fn from(os: SupportedOs) -> Self {
         SupportedOsSerde {
             os: os.id().to_string(),
-            os_version: os.version().to_string(),
+            os_version: os.version().unwrap_or(UNKNOWN_OS_VERSION).to_string(),
         }
     }
 }
@@ -77,24 +86,31 @@ impl From<SupportedOs> for SupportedOsSerde {
 /// Linux distribution, identified by the `sysinfo` distribution id.
 #[derive(Eq, PartialEq, Hash, Debug, Clone)]
 pub enum LinuxDistribution {
-    Ubuntu { version: String },
-    Debian { version: String },
-    Other { name: String, version: String },
+    Ubuntu {
+        version: String,
+    },
+    Debian {
+        version: String,
+    },
+    Other {
+        name: String,
+        /// Absent on rolling releases, which expose no `VERSION_ID`.
+        version: Option<String>,
+    },
 }
 
 impl LinuxDistribution {
-    /// Build a [`LinuxDistribution`] from the raw `(os_id, version)` strings reported by `sysinfo`.
-    fn from_id(os_id: &str, version: &str) -> Self {
-        match os_id {
-            "ubuntu" => Self::Ubuntu {
-                version: version.to_string(),
-            },
-            "debian" => Self::Debian {
-                version: version.to_string(),
-            },
-            _ => Self::Other {
-                name: os_id.to_string(),
-                version: version.to_string(),
+    /// Build a [`LinuxDistribution`] from the raw `(os_id, version)` reported by `sysinfo`.
+    ///
+    /// The distributions we ship packages for all report a version, so one reporting none
+    /// is by construction not one of them.
+    fn from_id(os_id: &str, version: Option<String>) -> Self {
+        match (os_id, version) {
+            ("ubuntu", Some(version)) => Self::Ubuntu { version },
+            ("debian", Some(version)) => Self::Debian { version },
+            (name, version) => Self::Other {
+                name: name.to_string(),
+                version,
             },
         }
     }
@@ -108,11 +124,11 @@ impl LinuxDistribution {
         }
     }
 
-    pub fn version(&self) -> &str {
+    /// The distribution version, absent on the ones that report none.
+    pub fn version(&self) -> Option<&str> {
         match self {
-            Self::Ubuntu { version } | Self::Debian { version } | Self::Other { version, .. } => {
-                version
-            }
+            Self::Ubuntu { version } | Self::Debian { version } => Some(version),
+            Self::Other { version, .. } => version.as_deref(),
         }
     }
 
@@ -124,7 +140,10 @@ impl LinuxDistribution {
 
 impl Display for LinuxDistribution {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} {}", self.id(), self.version())
+        match self.version() {
+            Some(version) => write!(f, "{} {version}", self.id()),
+            None => write!(f, "{}", self.id()),
+        }
     }
 }
 
@@ -136,5 +155,13 @@ mod tests {
     fn from_os_bails_on_unsupported() {
         let err = SupportedOs::from_os("windows").unwrap_err();
         assert_eq!(err.to_string(), "Unsupported operating system: windows");
+    }
+
+    #[test]
+    fn distribution_without_version_id_is_not_supported() {
+        let distro = LinuxDistribution::from_id("arch", None);
+        assert_eq!(distro.version(), None);
+        assert_eq!(distro.to_string(), "arch");
+        assert!(!distro.is_supported());
     }
 }
