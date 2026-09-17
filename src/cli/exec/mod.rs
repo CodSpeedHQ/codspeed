@@ -75,7 +75,10 @@ fn build_orchestrator_config(
         working_directory: args.shared.working_directory,
         targets: vec![target],
         modes,
-        instruments: Instruments { mongodb: None }, // exec doesn't support MongoDB
+        instruments: Instruments {
+            mongodb: None,
+            postgres: None,
+        }, // exec doesn't support instruments
         perf_unwinding_mode: args.shared.profiler_run_args.perf.perf_unwinding_mode,
         enable_profiler: args.shared.profiler_run_args.resolve_enable_profiler(),
         walltime_profiler: args.shared.walltime_profiler,
