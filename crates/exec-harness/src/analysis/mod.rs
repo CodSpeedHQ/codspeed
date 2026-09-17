@@ -19,10 +19,8 @@ use std::process::Command;
 /// URI. The backend walks that edge to attribute the child's trace to the
 /// benchmark, so the measurement covers the whole spawned process tree.
 ///
-/// This replaces the previous `LD_PRELOAD` shared library, which started
-/// instrumentation from inside the benchmark process because the state did not
-/// use to propagate across `fork`. Dropping it means statically linked
-/// executables are now supported, since nothing has to be injected into them.
+/// Nothing is injected into the benchmarked executable, so statically linked
+/// ones work.
 pub fn perform(commands: Vec<BenchmarkCommand>, mode: MeasurementMode) -> Result<()> {
     let hooks = InstrumentHooks::instance(INTEGRATION_NAME, INTEGRATION_VERSION);
 

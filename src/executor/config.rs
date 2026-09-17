@@ -193,22 +193,19 @@ impl OrchestratorConfig {
 
     /// Produce a per-execution [`ExecutorConfig`] for the given command and mode.
     ///
-    /// `uses_exec_harness` says whether this run is driven by exec-harness rather
-    /// than being a plain entrypoint command. Two things are derived from it:
+    /// `uses_exec_harness` says whether this run is driven by exec-harness
+    /// rather than being a plain entrypoint command. Two things follow from it:
     ///
     /// - Language-level wrappers (Node.js, Go) are injected into `PATH` only for
     ///   entrypoint runs.
-    /// - Subprocess tracking is forced on for exec-harness runs. exec-harness
-    ///   toggles instrumentation in its own process and then forks the benchmark,
-    ///   so the benchmarked child is measured only if valgrind propagates that
-    ///   state across `fork`/`exec` — which is what `--instr-atstart=inherit`
-    ///   enables. Measured: with `--instr-atstart=no` the child dumps a single
-    ///   zero-cost part and the benchmark reports nothing at all.
+    /// - Subprocess tracking is forced on for exec-harness runs, because
+    ///   exec-harness toggles instrumentation in its own process and then forks
+    ///   the benchmark. The child is measured only if valgrind propagates that
+    ///   state across `fork`/`exec`, which `--instr-atstart=inherit` enables;
+    ///   with `no` it dumps a single zero-cost part and reports nothing.
     ///
-    /// Deriving it here rather than making `--instr-atstart=inherit`
-    /// unconditional keeps entrypoint runs on their current behaviour. That
-    /// matters: an entrypoint benchmark that forks would otherwise start having
-    /// its children instrumented and counted, silently changing its numbers.
+    /// Entrypoint runs must keep the opposite default, or a benchmark that forks
+    /// would silently start counting its children.
     pub fn executor_config_for_command(
         &self,
         command: String,
