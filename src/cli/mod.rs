@@ -181,8 +181,28 @@ impl InternalCommands {
     }
 }
 
+/// Dispatch a bundled subcommand.
+///
+/// These are a re-exec of this binary and share nothing with the runner: no
+/// profile, no project config, no API client, no logger. They also run in the
+/// benchmark's working directory, so anything the runner discovers from the
+/// filesystem could abort a measurement for a reason unrelated to it.
+fn run_internal(command: InternalCommands) -> Result<()> {
+    match command {
+        InternalCommands::Samply(args) => samply::run(args),
+        InternalCommands::ExecHarness(args) => exec_harness::run(args),
+        #[cfg(target_os = "linux")]
+        InternalCommands::Memtrack(args) => memtrack::run(args),
+    }
+}
+
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
+
+    if let Commands::Internal(command) = cli.command {
+        return run_internal(command);
+    }
+
     let codspeed_config = load_config(&cli)?;
     let mut api_client = build_api_client(&cli, &codspeed_config);
 
@@ -200,14 +220,8 @@ pub async fn run() -> Result<()> {
     let setup_cache_dir = setup_cache_dir.as_deref();
 
     match cli.command {
-        // These initialize their own logging. Bundled subcommands must not:
-        // a process has one global logger, and theirs would clash with ours.
-        Commands::Run(_)
-        | Commands::Exec(_)
-        | Commands::Internal(InternalCommands::Samply(_))
-        | Commands::Internal(InternalCommands::ExecHarness(_)) => {}
-        #[cfg(target_os = "linux")]
-        Commands::Internal(InternalCommands::Memtrack(_)) => {}
+        // These initialize their own logging.
+        Commands::Run(_) | Commands::Exec(_) => {}
         _ => {
             init_local_logger()?;
         }
@@ -259,10 +273,9 @@ pub async fn run() -> Result<()> {
         Commands::Use(args) => use_mode::run(args)?,
         Commands::Show => show::run()?,
         Commands::Update => update::run().await?,
-        Commands::Internal(InternalCommands::Samply(args)) => samply::run(args)?,
-        Commands::Internal(InternalCommands::ExecHarness(args)) => exec_harness::run(args)?,
-        #[cfg(target_os = "linux")]
-        Commands::Internal(InternalCommands::Memtrack(args)) => memtrack::run(args)?,
+        Commands::Internal(_) => {
+            unreachable!("internal subcommands are dispatched before runner setup")
+        }
     }
     Ok(())
 }
