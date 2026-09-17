@@ -9,7 +9,7 @@ use crate::prelude::*;
 use crate::system::{SupportedOs, SystemInfo};
 
 use super::setup::get_valgrind_status;
-use super::setup::install_valgrind;
+use super::setup::install_valgrind_from_package;
 use super::setup::is_codspeed_valgrind_installation_supported;
 use super::setup::try_install_from_source;
 use super::{helpers::perf_maps::harvest_perf_maps, helpers::venv_compat, measure};
@@ -42,7 +42,7 @@ impl Executor for ValgrindExecutor {
     async fn setup(&self, system_info: &SystemInfo, setup_cache_dir: Option<&Path>) -> Result<()> {
         match self.support_level(system_info) {
             ExecutorSupport::FullySupported => {
-                install_valgrind(system_info, setup_cache_dir).await?
+                install_valgrind_from_package(system_info, setup_cache_dir).await?
             }
             // No package exists for this system, so there is nothing to install automatically.
             ExecutorSupport::RequiresManualInstallation => {

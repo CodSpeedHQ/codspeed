@@ -28,10 +28,6 @@ const VALGRIND_CODSPEED_REPOSITORY: &str = "https://github.com/CodSpeedHQ/valgri
 /// other unattended run that wants the opposite of the default.
 const BUILD_FROM_SOURCE_ENV: &str = "CODSPEED_VALGRIND_BUILD_FROM_SOURCE";
 
-/// Branch of the valgrind-codspeed repository to build from.
-// TODO: switch back to the default branch once the self-contained build script has landed there.
-const VALGRIND_CODSPEED_BRANCH: &str = "cod-3465-create-a-self-contained-valgrind-build-script";
-
 /// Tools required to configure and build valgrind. Each entry lists the
 /// interchangeable executables that satisfy the requirement.
 const BUILD_DEPENDENCIES: &[&[&str]] = &[
@@ -104,8 +100,6 @@ async fn clone_sources() -> Result<TempDir> {
         "clone",
         "--depth",
         "1",
-        "--branch",
-        VALGRIND_CODSPEED_BRANCH,
         VALGRIND_CODSPEED_REPOSITORY,
         &source_dir_str,
     ]);

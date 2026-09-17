@@ -299,7 +299,7 @@ pub(super) async fn try_install_from_source(system_info: &SystemInfo) -> Result<
 }
 
 /// Install the valgrind-codspeed package we publish for this system, from apt.
-pub(super) async fn install_valgrind(
+pub(super) async fn install_valgrind_from_package(
     system_info: &SystemInfo,
     setup_cache_dir: Option<&Path>,
 ) -> Result<()> {
