@@ -6,8 +6,7 @@ use crate::prelude::*;
 use caps::Capability;
 use std::path::PathBuf;
 
-/// How memtrack is named in user-facing messages. It is no longer a binary to
-/// look up: memtrack is bundled into this executable as a hidden subcommand.
+/// How memtrack is named in user-facing messages.
 pub const MEMTRACK_COMMAND: &str = "memtrack";
 
 const MEMTRACK_REQUIRED_CAPS: &[Capability] = &[
@@ -27,7 +26,7 @@ fn memtrack_required_caps_mask() -> u64 {
 /// `setcap` grammar form of [`MEMTRACK_REQUIRED_CAPS`]: the lowercase cap names
 /// (libcap renders them lowercase) joined with commas and the `+ep`
 /// effective+permitted flag. Derived from the enum so the two never drift.
-fn memtrack_setcap_spec() -> String {
+pub(crate) fn memtrack_setcap_spec() -> String {
     let caps = MEMTRACK_REQUIRED_CAPS
         .iter()
         .map(|c| c.to_string().to_lowercase())
@@ -36,14 +35,12 @@ fn memtrack_setcap_spec() -> String {
     format!("{caps}+ep")
 }
 
-/// The binary that must carry the eBPF capabilities.
+/// The binary that must carry the eBPF capabilities: memtrack runs as a
+/// subcommand of this executable, so it is this one.
 ///
-/// Since memtrack is bundled, that binary is *this* one. Note what that means:
-/// the five capabilities below, `CAP_SYS_ADMIN` among them, end up on the
-/// `codspeed` executable itself rather than on a dedicated tracker, so every
-/// invocation of the CLI carries them in its permitted and effective sets.
-/// They are granted `+ep` and not inheritable, so a spawned benchmark does not
-/// receive them — the elevation stops at the CLI process.
+/// Every invocation of the CLI therefore carries [`MEMTRACK_REQUIRED_CAPS`],
+/// `CAP_SYS_ADMIN` included. They are granted `+ep` and not inheritable, so a
+/// spawned benchmark does not receive them: the elevation stops here.
 fn memtrack_path() -> Option<PathBuf> {
     self_exe().ok()
 }
@@ -101,10 +98,8 @@ pub fn ensure_memtrack_capabilities() -> Result<()> {
 }
 
 pub fn get_memtrack_status() -> ToolStatus {
-    // Bundled: there is nothing to look up on PATH and no version to compare,
-    // because memtrack ships inside this binary and cannot be out of step with
-    // it. What is still worth reporting is whether it can actually run, which
-    // is a question about privileges, not about installation.
+    // memtrack ships inside this binary, so it is installed by construction
+    // and carries this crate's version.
     ToolStatus {
         tool_name: MEMTRACK_COMMAND.to_string(),
         status: ToolInstallStatus::Installed {
@@ -113,8 +108,8 @@ pub fn get_memtrack_status() -> ToolStatus {
     }
 }
 
-/// Nothing to install any more: memtrack is part of this binary. Kept as a
-/// no-op so the setup flow keeps its shape while the other tools still install.
+/// No-op: memtrack is part of this binary. Kept so the setup flow can treat it
+/// like the tools that do need installing.
 pub async fn install_memtrack() -> Result<()> {
     debug!("{MEMTRACK_COMMAND} is bundled into this binary, nothing to install");
     Ok(())

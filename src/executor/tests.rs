@@ -175,6 +175,29 @@ fi
         (execution_context, temp_dir)
     }
 
+    /// Serializes every executor test that drives a benchmark through the runner
+    /// FIFOs: the walltime and memory tests.
+    ///
+    /// `RUNNER_CTL_FIFO` and `RUNNER_ACK_FIFO` are fixed absolute paths shared
+    /// with the integrations, and `RunnerFifo::new` unlinks and recreates both.
+    /// Two overlapping executions therefore pull the FIFO out from under each
+    /// other: the first keeps its fds on a now-unlinked inode, the second's
+    /// child opens the replacement by path, and they never meet again. Nothing
+    /// there times out, so the test hangs forever instead of failing.
+    ///
+    /// The race exists outside the tests too, where this lock cannot reach it:
+    /// COD-3560.
+    pub static RUNNER_FIFO_LOCK: OnceCell<Semaphore> = OnceCell::const_new();
+
+    pub async fn acquire_runner_fifo_lock() -> SemaphorePermit<'static> {
+        RUNNER_FIFO_LOCK
+            .get_or_init(|| async { Semaphore::new(1) })
+            .await
+            .acquire()
+            .await
+            .unwrap()
+    }
+
     // Uprobes set by memtrack, lead to crashes in valgrind because they work by setting breakpoints on the first
     // instruction. Valgrind doesn't rethrow those breakpoint exceptions, which makes the test crash.
     //
@@ -256,14 +279,10 @@ mod walltime {
     use crate::executor::wall_time::executor::WallTimeExecutor;
 
     async fn get_walltime_executor() -> (SemaphorePermit<'static>, WallTimeExecutor) {
-        static WALLTIME_SEMAPHORE: OnceCell<Semaphore> = OnceCell::const_new();
-
         // We can't execute multiple walltime executors in parallel because perf isn't thread-safe (yet). We have to
-        // use a semaphore to limit concurrent access.
-        let semaphore = WALLTIME_SEMAPHORE
-            .get_or_init(|| async { Semaphore::new(1) })
-            .await;
-        let permit = semaphore.acquire().await.unwrap();
+        // use a semaphore to limit concurrent access. The same permit also
+        // excludes the memory tests, which share the global runner FIFOs.
+        let permit = acquire_runner_fifo_lock().await;
 
         let executor = WallTimeExecutor::new(None);
         let system_info = SystemInfo::new().unwrap();
@@ -445,7 +464,9 @@ fi
 #[cfg(target_os = "linux")]
 mod memory {
     use super::helpers::*;
+    use crate::executor::helpers::run_with_sudo::{can_elevate_without_prompt, is_root_user};
     use crate::executor::memory::executor::MemoryExecutor;
+    use crate::executor::memory::setup::{has_memtrack_capabilities, memtrack_setcap_spec};
 
     async fn get_memory_executor() -> (
         SemaphorePermit<'static>,
@@ -453,16 +474,32 @@ mod memory {
         MemoryExecutor,
     ) {
         static MEMORY_INIT: OnceCell<()> = OnceCell::const_new();
-        static MEMORY_SEMAPHORE: OnceCell<Semaphore> = OnceCell::const_new();
 
         MEMORY_INIT
             .get_or_init(|| async {
-                // `grant_privileges` setcaps the binary memtrack will be run
-                // from, which since the bundling is `current_exe`. Without the
-                // override that is the test harness, so the capabilities would
-                // land on a throwaway binary and the run would still lack them.
+                // `grant_privileges` setcaps the binary memtrack is run from,
+                // i.e. `current_exe`. Without the override that is the test
+                // harness, so the capabilities would land on a throwaway binary
+                // and the run would still lack them.
                 let self_exe = codspeed_binary_path().await;
                 temp_env::async_with_vars(&[(SELF_EXE_ENV_VAR, Some(self_exe))], async {
+                    // `setcap` goes through sudo, and a sudo password prompt
+                    // under `cargo test` is buried in captured output while the
+                    // read blocks forever: the suite hangs with nothing to say
+                    // what it is waiting for. Check first, fail with the command
+                    // to run. This bites on every rebuild, not once, because
+                    // file capabilities are an xattr and cargo writes a new
+                    // binary on each relink.
+                    let needs_grant = !is_root_user() && !has_memtrack_capabilities();
+                    assert!(
+                        !needs_grant || can_elevate_without_prompt(),
+                        "The memory tests have to `setcap` {self_exe}, and sudo would prompt for a \
+                         password here -- a prompt `cargo test` hides and then blocks on forever.\n\
+                         Cache the credentials first (`sudo -v && cargo test ...`), or grant them \
+                         by hand:\n  sudo setcap {} {self_exe}",
+                        memtrack_setcap_spec(),
+                    );
+
                     let executor = MemoryExecutor;
                     let system_info = SystemInfo::new().unwrap();
                     executor.setup(&system_info, None).await.unwrap();
@@ -472,12 +509,12 @@ mod memory {
             })
             .await;
 
-        let semaphore = MEMORY_SEMAPHORE
-            .get_or_init(|| async { Semaphore::new(1) })
-            .await;
-        let permit = semaphore.acquire().await.unwrap();
+        let permit = acquire_runner_fifo_lock().await;
 
         // Memory executor uses heaptrack which uses BPF-based instrumentation, which conflicts with valgrind.
+        //
+        // Lock order: always after the FIFO permit. No other test takes both,
+        // so the two can never be wanted in opposite orders.
         let _lock = acquire_bpf_instrumentation_lock().await;
 
         (permit, _lock, MemoryExecutor)
@@ -495,9 +532,9 @@ mod memory {
     async fn test_memory_executor(#[case] cmd: &str) {
         let (_permit, _lock, mut executor) = get_memory_executor().await;
 
-        // memtrack is a subcommand of this binary now, so the executor re-execs
-        // `current_exe` — which under `cargo test` is the test harness, not a
-        // CLI. Point it at the real binary, as the other executors' tests do.
+        // The executor re-execs `current_exe` to reach the memtrack subcommand,
+        // and under `cargo test` that is the test harness. Point it at the
+        // real binary.
         let self_exe = codspeed_binary_path().await;
         // Unset GITHUB_ACTIONS to force LocalProvider which supports repository_override
         temp_env::async_with_vars(
