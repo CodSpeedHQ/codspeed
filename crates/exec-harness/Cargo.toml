@@ -21,5 +21,6 @@ humantime = "2.3"
 runner-shared = { path = "../runner-shared" }
 tempfile = { workspace = true }
 
-[package.metadata.dist]
-targets = ["aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"]
+# Deliberately no `[package.metadata.dist]`: exec-harness ships inside the
+# `codspeed` binary and is not released on its own. The `[[bin]]` stays for
+# development and for the tests, which exercise the standalone path.
