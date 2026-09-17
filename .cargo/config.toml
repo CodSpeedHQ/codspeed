@@ -1,27 +1,41 @@
-# COD-3440 — what a musl build of `memtrack` needs, for the parts that are a
-# property of the repo rather than of the machine doing the build.
+# What a musl build of the bundled `memtrack` needs. Refs COD-3440.
 #
 # `libbpf-sys` vendors elfutils, whose `configure` unconditionally looks for
 # `argp`, `obstack` and `fts`. musl ships none of them, so the checks fail and
-# the build stops before it ever gets to libelf. A libelf-only build never calls
-# into any of them, though — the checks are there for the elfutils CLI tools,
-# which we do not build.
+# the build stops before it reaches libelf — even though a libelf-only build
+# never calls into any of them. Pre-seeding autoconf's cache skips the three
+# checks. "none required" is the answer a glibc host reaches on its own, so
+# these are unconditional rather than per-target; on gnu they only save three
+# `configure` probes.
 #
-# Pre-seeding autoconf's cache makes `configure` skip those three checks
-# entirely. "none required" means "the symbol is available with no extra -l
-# flag", which is the answer a glibc host would have reached on its own, so
-# these are set unconditionally rather than per-target: they are correct for the
-# gnu build too, where they only save three `configure` probes.
-#
-# This is deliberately the whole of what lives here. The remaining piece of the
-# recipe — the include flags that point at the `argp.h` stub in
-# `crates/memtrack/musl/` and at the kernel UAPI headers — cannot live in a
-# `[env]` table, and should not: see `.github/workflows/cod-3440-musl-check.yml`
-# for where it goes and why.
+# Applies to everything below: cargo does *not* override a variable already set
+# in the environment unless the entry carries `force = true`. A shell exporting
+# `CFLAGS` or `CPATH` therefore loses these values, and the musl build fails on
+# a missing <argp.h> or <asm/types.h>. They are left unforced so a caller who
+# sets them deliberately keeps them; no CI job does.
 [env]
 ac_cv_search_argp_parse = "none required"
 ac_cv_search__obstack_free = "none required"
 ac_cv_search_fts_close = "none required"
+
+# Where the `argp.h` stub lives. `CPATH` rather than `CFLAGS -I<path>`, because
+# `relative = true` can only make a *bare* path absolute and a `CFLAGS` value
+# has nowhere to put the `-I`. It resolves against the project root — the
+# directory holding `.cargo/`, not `.cargo/` itself.
+#
+# Not target-scoped, so the stub is on the gnu build's include path too; the
+# header defers to the real <argp.h> whenever it detects glibc.
+CPATH = { value = "crates/memtrack/musl", relative = true }
+
+# libbpf includes <asm/unistd.h> and <asm/types.h>. Debian's musl-gcc runs with
+# -nostdinc and only sees /usr/include/<arch>-linux-musl, so the kernel UAPI
+# headers from linux-libc-dev have to be added back. `-idirafter` puts them last,
+# behind musl's own, which is what keeps a glibc build unaffected.
+#
+# Both Debian multiarch triplets are listed because `[env]` cannot branch on the
+# host architecture. A `-idirafter` naming a directory that does not exist is
+# ignored silently, so the wrong one does nothing — as do both off Debian.
+CFLAGS = "-idirafter /usr/include/x86_64-linux-gnu -idirafter /usr/include/aarch64-linux-gnu -idirafter /usr/include"
 
 # rustc links with `-nodefaultlibs`, so gcc does not pull in libgcc. On aarch64,
 # libbpf's C code needs the outline-atomic helpers (`__aarch64_ldadd4_sync` and

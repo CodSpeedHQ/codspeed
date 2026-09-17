@@ -1,17 +1,8 @@
 # COD-3440 spike — throwaway workflow, NOT for merging.
 #
-# Purpose: prove the musl recipe on real kernels of both architectures. The dev
+# Purpose: prove the musl build on real kernels of both architectures. The dev
 # host is aarch64, and an x86_64 build cross-compiled there cannot load its BPF
 # skeleton against an aarch64 kernel, so x86_64 can only be closed here.
-#
-# The aarch64 half of the recipe has since been reproduced locally on Ubuntu
-# 24.04 aarch64 — same distro family as the runners, unlike the Arch host the
-# original spike ran on, which is where the `-fno-link-libatomic` and
-# `-mno-outline-atomics` workarounds came from. Neither is needed on Debian:
-# `cargo build -p memtrack --target aarch64-unknown-linux-musl`, with
-# CFLAGS_<target> as the only out-of-band variable, produces a fully static
-# binary and the whole `--lib` suite passes. What this workflow adds on top is
-# the x86_64 kernel, the integration shards, and the BPF load itself.
 #
 # To use it: push the spike branch, then
 #
@@ -23,42 +14,33 @@
 # dispatch works. Delete the file once the question is answered -- it must not
 # reach main.
 #
-# Deliberately does NOT touch release.yml, dist-workspace.toml or any
-# Cargo.toml.
+# Deliberately does NOT touch release.yml or dist-workspace.toml.
 #
-# --- what this workflow still carries, and why ---
+# --- what this workflow no longer carries ---
 #
-# The three autoconf cache seeds and the aarch64 `-lgcc` link flag have moved to
-# `.cargo/config.toml`: they are properties of the repo, portable, and correct
-# for the gnu build too. What is left here is the one part that genuinely
-# belongs to the build machine — the include flags:
+# It used to export `CFLAGS_<target>` with the path to the `argp.h` stub and the
+# `-idirafter` flags for Debian's kernel UAPI headers. The whole recipe now
+# lives in `.cargo/config.toml`, so every `cargo` line below is a plain one:
+# that is the point of running it, and a failure here means the checked-in
+# config does not stand on its own.
 #
-#   -I<repo>/crates/memtrack/musl   the argp.h stub, an absolute path, and a
-#                                   `[env]` table cannot build one (its
-#                                   `relative = true` form yields a bare path,
-#                                   with nowhere to put the -I).
-#   -idirafter /usr/include/<triplet> -idirafter /usr/include
-#                                   Debian's kernel UAPI headers. musl-gcc runs
-#                                   with -nostdinc and only sees
-#                                   /usr/include/<arch>-linux-musl, so libbpf's
-#                                   <asm/unistd.h> and <asm/types.h> have to be
-#                                   added back, last, behind musl's own headers.
-#                                   These paths are Debian's layout; an Arch or
-#                                   Alpine host needs different ones, so no
-#                                   value checked into the repo could be right
-#                                   for everyone.
+# Two things make that possible, both of which cost a build to discover:
 #
-# Both go into `CFLAGS_<target>` rather than `CFLAGS`. cc-rs reads
-# CFLAGS_<target>, CFLAGS_<target_with_underscores>, TARGET_CFLAGS and CFLAGS,
-# and accumulates them, so the target-scoped name reaches the musl build and is
-# invisible to the gnu one. That is why the "compare against the gnu build" step
-# below no longer has to `unset CFLAGS` first.
+#   * `CPATH` rather than `CFLAGS -I<path>`. `[env]`'s `relative = true` can
+#     only make a *bare* path absolute, and there is nowhere in such a value to
+#     put an `-I`. `CPATH` takes bare directories, so it fits. It resolves
+#     against the project root — the directory holding `.cargo/`, not `.cargo/`
+#     itself, which the cargo reference words ambiguously.
+#   * The stub is therefore on the include path for the gnu build too, and
+#     defers to the real <argp.h> by testing `__GLIBC__`. Testing the include
+#     path with `__has_include_next` looks equivalent and is not: the same
+#     config puts `-idirafter /usr/include` on the *musl* build, which makes
+#     glibc's argp.h reachable from a musl compilation, and the build then dies
+#     on `__THROW`.
 #
-# It also replaces LIBBPF_SYS_EXTRA_CFLAGS, which this workflow used to set as
-# well. libbpf-sys forwards `compiler.cflags_env()` to elfutils' ./configure,
-# to zlib's, and to libbpf's make, appending LIBBPF_SYS_EXTRA_CFLAGS only to the
-# last of those — so CFLAGS_<target> alone covers all three. If libbpf (not
-# elfutils) is what fails to find <asm/unistd.h>, that assumption is what broke.
+# The "compare against the gnu build" step below is what guards the second
+# point: it builds gnu with the stub on CPATH, and only passes if the guard
+# defers correctly.
 
 name: COD-3440 musl check
 
@@ -83,13 +65,9 @@ jobs:
           - arch: x86_64
             runner: ubuntu-latest
             target: x86_64-unknown-linux-musl
-            cflags_var: CFLAGS_x86_64_unknown_linux_musl
-            triplet: x86_64-linux-gnu
           - arch: aarch64
             runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
-            cflags_var: CFLAGS_aarch64_unknown_linux_musl
-            triplet: aarch64-linux-gnu
     env:
       TARGET: ${{ matrix.target }}
     steps:
@@ -106,23 +84,15 @@ jobs:
           sudo apt-get install -y musl-tools pkg-config linux-libc-dev
           rustup target add "$TARGET"
 
-      # Exported once here so every later step sees the same value, and so the
-      # `cargo build` below is a plain one with nothing prepended to it.
-      - name: Point the musl build at the stub and the UAPI headers
-        run: |
-          VALUE="-I$GITHUB_WORKSPACE/crates/memtrack/musl -idirafter /usr/include/${{ matrix.triplet }} -idirafter /usr/include"
-          # The target-scoped name is what cc-rs reads; MUSL_CFLAGS is a plain
-          # mirror of it, so later steps can pass the value on without having to
-          # index the env context by a matrix-computed key.
-          echo "${{ matrix.cflags_var }}=$VALUE" >> "$GITHUB_ENV"
-          echo "MUSL_CFLAGS=$VALUE" >> "$GITHUB_ENV"
-
+      # The root package is what ships now: it bundles memtrack and
+      # exec-harness as hidden subcommands, so building `-p memtrack` alone
+      # would no longer prove anything about the released artifact.
       - name: Build
-        run: cargo build -p memtrack --profile ${{ matrix.profile }} --target "$TARGET"
+        run: cargo build --bin codspeed --profile ${{ matrix.profile }} --target "$TARGET"
 
       - name: Verify the artifact is genuinely static
         run: |
-          BIN=target/$TARGET/${{ matrix.profile == 'dev' && 'debug' || matrix.profile }}/codspeed-memtrack
+          BIN=target/$TARGET/${{ matrix.profile == 'dev' && 'debug' || matrix.profile }}/codspeed
           file "$BIN"
           ldd "$BIN" || true            # expected: "not a dynamic executable"
           readelf -d "$BIN" || true     # expected: no dynamic section at all
@@ -136,21 +106,23 @@ jobs:
           fi
           echo "OK: static, no NEEDED, no RPATH/RUNPATH"
 
-      # No `unset CFLAGS` any more: the include flags are scoped to the musl
-      # target, so a gnu build in the same shell cannot see them. If this step
-      # fails on a missing or wrong argp.h, that scoping is what leaked.
+      # The stub directory is on CPATH for this build too, so a gnu build that
+      # still succeeds is the proof that the header's `__GLIBC__` guard defers
+      # to the real <argp.h>. If this fails on `__THROW`, that guard is what
+      # broke.
       - name: Compare against the gnu build
         if: matrix.profile == 'dist'
         run: |
-          cargo build -p memtrack --profile dist
-          echo "musl: $(stat -c %s target/$TARGET/dist/codspeed-memtrack) bytes"
-          echo "gnu:  $(stat -c %s target/dist/codspeed-memtrack) bytes"
+          cargo build --bin codspeed --profile dist
+          echo "musl: $(stat -c %s target/$TARGET/dist/codspeed) bytes"
+          echo "gnu:  $(stat -c %s target/dist/codspeed) bytes"
 
       - name: Smoke test the BPF path
         run: |
-          BIN=$PWD/target/$TARGET/${{ matrix.profile == 'dev' && 'debug' || matrix.profile }}/codspeed-memtrack
+          BIN=$PWD/target/$TARGET/${{ matrix.profile == 'dev' && 'debug' || matrix.profile }}/codspeed
           mkdir -p /tmp/memtrack-out
-          sudo env "RUST_LOG=info" "$BIN" track -o /tmp/memtrack-out "/bin/ls /tmp"
+          # Through the bundled subcommand, which is how the runner reaches it.
+          sudo env "RUST_LOG=info" "$BIN" memtrack track -o /tmp/memtrack-out "/bin/ls /tmp"
           ls -la /tmp/memtrack-out
           # A run that loads no probes still exits 0 but writes nothing.
           test -n "$(ls -A /tmp/memtrack-out)" || { echo "no artifact written"; exit 1; }
@@ -169,13 +141,9 @@ jobs:
           - arch: x86_64
             runner: ubuntu-latest
             target: x86_64-unknown-linux-musl
-            cflags_var: CFLAGS_x86_64_unknown_linux_musl
-            triplet: x86_64-linux-gnu
           - arch: aarch64
             runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
-            cflags_var: CFLAGS_aarch64_unknown_linux_musl
-            triplet: aarch64-linux-gnu
     env:
       TARGET: ${{ matrix.target }}
     steps:
@@ -195,15 +163,6 @@ jobs:
 
       - name: Install additional allocators
         run: sudo apt-get install -y libmimalloc-dev libjemalloc-dev
-
-      - name: Point the musl build at the stub and the UAPI headers
-        run: |
-          VALUE="-I$GITHUB_WORKSPACE/crates/memtrack/musl -idirafter /usr/include/${{ matrix.triplet }} -idirafter /usr/include"
-          # The target-scoped name is what cc-rs reads; MUSL_CFLAGS is a plain
-          # mirror of it, so later steps can pass the value on without having to
-          # index the env context by a matrix-computed key.
-          echo "${{ matrix.cflags_var }}=$VALUE" >> "$GITHUB_ENV"
-          echo "MUSL_CFLAGS=$VALUE" >> "$GITHUB_ENV"
 
       # Built separately from the run because test-with's env(GITHUB_ACTIONS)
       # gate is evaluated at COMPILE time. GITHUB_ACTIONS is set by the runner,
@@ -229,7 +188,6 @@ jobs:
             "CARGO_INCREMENTAL=$CARGO_INCREMENTAL" \
             "RUST_LOG=$RUST_LOG" \
             "GITHUB_ACTIONS=$GITHUB_ACTIONS" \
-            "${{ matrix.cflags_var }}=$MUSL_CFLAGS" \
             "TARGET=$TARGET" \
             $(which cargo) test --target "$TARGET" --test ${{ matrix.test }} \
               -- --test-threads 1 --nocapture
@@ -250,13 +208,9 @@ jobs:
           - arch: x86_64
             runner: ubuntu-latest
             target: x86_64-unknown-linux-musl
-            cflags_var: CFLAGS_x86_64_unknown_linux_musl
-            triplet: x86_64-linux-gnu
           - arch: aarch64
             runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
-            cflags_var: CFLAGS_aarch64_unknown_linux_musl
-            triplet: aarch64-linux-gnu
     env:
       TARGET: ${{ matrix.target }}
     steps:
@@ -272,15 +226,6 @@ jobs:
         run: |
           sudo apt-get install -y musl-tools pkg-config linux-libc-dev
           rustup target add "$TARGET"
-
-      - name: Point the musl build at the stub and the UAPI headers
-        run: |
-          VALUE="-I$GITHUB_WORKSPACE/crates/memtrack/musl -idirafter /usr/include/${{ matrix.triplet }} -idirafter /usr/include"
-          # The target-scoped name is what cc-rs reads; MUSL_CFLAGS is a plain
-          # mirror of it, so later steps can pass the value on without having to
-          # index the env context by a matrix-computed key.
-          echo "${{ matrix.cflags_var }}=$VALUE" >> "$GITHUB_ENV"
-          echo "MUSL_CFLAGS=$VALUE" >> "$GITHUB_ENV"
 
       # `libc_allocator_symbols_resolve_to_offsets` used to be skipped here: it
       # read /proc/self/maps of the TEST BINARY and required a mapped libc.so.6,
