@@ -19,6 +19,9 @@ jobs:
       - uses: ./.github/actions/install-rust
         with:
           components: rustfmt, clippy
+      # Building the runner builds memtrack's vendored libbpf-sys with it.
+      - uses: ./.github/actions/install-bpf-deps
+        if: matrix.os == 'ubuntu-latest'
       - uses: j178/prek-action@bdca6f102f98e2b4c7029491a53dfd366469e33d # v2.0.4
         with:
           extra-args: --all-files
@@ -36,15 +39,10 @@ jobs:
 
       - uses: ./.github/actions/install-rust
 
-      # Install memtrack for the memory integration tests
       - uses: ./.github/actions/install-bpf-deps
-      - name: Install memtrack
-        run: |
-          cargo install --path crates/memtrack --locked
 
-      - name: Grant memtrack file capabilities
-        run: cargo r -- setup --mode memory
-
+      # No `setup --mode memory` here: the memory tests grant the capabilities
+      # themselves, pointed at the binary they actually re-exec.
       - run: cargo test --all --exclude memtrack --exclude exec-harness
 
   exec-harness-tests:
@@ -64,6 +62,7 @@ jobs:
         with:
           submodules: true
       - uses: ./.github/actions/install-rust
+      - uses: ./.github/actions/install-bpf-deps
       - name: Run tests
         run: cargo run -- exec -m simulation,walltime,memory --warmup-time 0s --max-rounds 5 -- sleep 1
 
@@ -74,10 +73,6 @@ jobs:
         with:
           submodules: true
       - uses: ./.github/actions/install-rust
-      - name: Install exec-harness
-        run: |
-          cargo install --path crates/exec-harness --locked
-
       - name: Run tests
         env:
           # Profiling system commands (e.g. `ls`) with samply is not yet supported on MacOS

@@ -28,6 +28,17 @@
 #
 # Deliberately does NOT touch ci.yml, release.yml, dist-workspace.toml or any
 # Cargo.toml: it only adds jobs that run on this branch.
+#
+# --- updated for the single binary (COD-3440) ---
+#
+# exec-harness is no longer resolved off PATH: it is a subcommand of `codspeed`,
+# reached by re-execing the running executable. So `cargo install --path
+# crates/exec-harness` no longer influences what runs, and the sha256 tamper
+# guard built on it guards nothing. Worse, it was the musl leg's only claim to
+# testing musl -- the runner itself was always a gnu `cargo run`. The
+# instrumentation job now builds the `codspeed` binary for the leg's libc and
+# invokes it directly, which is both the real artifact and the only way the musl
+# leg still means anything.
 
 name: COD-3218 exec-harness check
 
@@ -79,15 +90,19 @@ jobs:
         # bindings build script now fails the build outright rather than
         # silently compiling the noop implementation.
         run: |
-          sudo apt-get install -y musl-tools
+          sudo apt-get install -y musl-tools linux-libc-dev
           rustup target add "$MUSL_TARGET"
 
+      # The released artifact is `codspeed`, with exec-harness inside it, so
+      # that is what has to be static. Building `-p exec-harness` alone would
+      # still pass while saying nothing about what ships.
+      - uses: ./.github/actions/install-bpf-deps
       - name: Build
-        run: cargo build -p exec-harness --target "$MUSL_TARGET"
+        run: cargo build --bin codspeed --target "$MUSL_TARGET"
 
       - name: Verify the artifact is genuinely static
         run: |
-          BIN=target/$MUSL_TARGET/debug/exec-harness
+          BIN=target/$MUSL_TARGET/debug/codspeed
           file "$BIN"
           ldd "$BIN" || true            # expected: "not a dynamic executable"
           readelf -d "$BIN" || true     # expected: no dynamic section at all
@@ -127,39 +142,46 @@ jobs:
       - name: Install musl toolchain
         if: matrix.libc == 'musl'
         run: |
-          sudo apt-get install -y musl-tools
+          sudo apt-get install -y musl-tools linux-libc-dev
           rustup target add "$MUSL_TARGET"
 
-      # The runner resolves exec-harness off PATH and only downloads the
-      # released build when `which exec-harness` is missing or reports a
-      # version other than the pin (src/binary_installer/mod.rs). Installing
-      # our build first is therefore what makes this job test anything -- see
-      # the tamper guard in the next step.
-      - name: Install the exec-harness under test
+      # The root package links memtrack now, so building `codspeed` at all
+      # means building its vendored libbpf-sys.
+      - uses: ./.github/actions/install-bpf-deps
+
+      # The binary under test is `codspeed` itself, because exec-harness is a
+      # subcommand of it. Building it for the leg's libc is what makes the musl
+      # leg a musl test: with `cargo run` it would be a gnu runner every time,
+      # whatever was installed on PATH.
+      - name: Build the codspeed binary under test
+        id: build
         run: |
           if [ "${{ matrix.libc }}" = "musl" ]; then
-            cargo install --path crates/exec-harness --locked --target "$MUSL_TARGET"
+            cargo build --bin codspeed --target "$MUSL_TARGET"
+            BIN=$PWD/target/$MUSL_TARGET/debug/codspeed
           else
-            cargo install --path crates/exec-harness --locked
+            cargo build --bin codspeed
+            BIN=$PWD/target/debug/codspeed
           fi
-          BIN=$(which exec-harness)
-          echo "$BIN"
-          exec-harness --version
+          echo "bin=$BIN" >> "$GITHUB_OUTPUT"
           file "$BIN"
-          # Prove the musl matrix leg is really exercising the musl artifact,
-          # rather than a leftover gnu build earlier on PATH. Asserted through
-          # readelf and not a `file` string: rustc emits a static-PIE for
-          # x86_64 musl, which `file` calls "static-pie linked" rather than
-          # "statically linked" (aarch64 gets the non-PIE spelling), so matching
-          # that wording tests the wrong axis and fails on a perfectly static
-          # binary. What matters is that nothing is loaded at runtime.
+          # Proves the bundling as well as the build: this reports a version
+          # only if the exec-harness CLI really is linked into this executable.
+          "$BIN" exec-harness --version
+
+          # Asserted through readelf and not a `file` string: rustc emits a
+          # static-PIE for x86_64 musl, which `file` calls "static-pie linked"
+          # rather than "statically linked" (aarch64 gets the non-PIE
+          # spelling), so matching that wording tests the wrong axis and fails
+          # on a perfectly static binary. What matters is that nothing is
+          # loaded at runtime.
           if [ "${{ matrix.libc }}" = "musl" ]; then
             if readelf -d "$BIN" 2>/dev/null | grep -qE 'NEEDED|RPATH|RUNPATH'; then
-              echo "the installed exec-harness has a dynamic dependency"
+              echo "the codspeed binary has a dynamic dependency"
               exit 1
             fi
             if readelf -lW "$BIN" 2>/dev/null | grep -q 'INTERP'; then
-              echo "the installed exec-harness requests a dynamic loader"
+              echo "the codspeed binary requests a dynamic loader"
               exit 1
             fi
             echo "OK: no NEEDED and no interpreter -- nothing is loaded at runtime"
@@ -172,25 +194,16 @@ jobs:
           mkdir -p "$PROFILE_DIR"
           echo "profile_dir=$PROFILE_DIR" >> "$GITHUB_OUTPUT"
 
-          # If the runner swapped in the *released* exec-harness, that would be
-          # the preload build and this whole job would pass while proving
-          # nothing. Pin the binary's hash across the run.
-          BEFORE=$(sha256sum "$(which exec-harness)" | cut -d' ' -f1)
-
-          CODSPEED_LOG=debug cargo run -- exec \
+          # Invoked directly rather than through `cargo run`, so the process
+          # that re-execs itself into exec-harness is the binary just built and
+          # asserted on above. No tamper guard is needed any more: there is no
+          # PATH lookup left for a released build to win.
+          CODSPEED_LOG=debug "${{ steps.build.outputs.bin }}" exec \
             -m simulation \
             --skip-upload \
             --profile-folder "$PROFILE_DIR" \
             --name "$BENCH_NAME" \
             -- sh -c "$BENCH_SCRIPT"
-
-          AFTER=$(sha256sum "$(which exec-harness)" | cut -d' ' -f1)
-          if [ "$BEFORE" != "$AFTER" ]; then
-            echo "the runner replaced exec-harness with the released (preload) build"
-            echo "=> this run measured the old code path, not the change under test"
-            exit 1
-          fi
-          echo "OK: the exec-harness under test was the one used"
 
       - name: Show what was produced
         if: always() && steps.run.outputs.profile_dir != ''
@@ -384,17 +397,25 @@ jobs:
         with:
           cache-key: cod3218-sweep-${{ matrix.variant }}
 
+      # Only the `main` variant still resolves exec-harness off PATH; on the
+      # branch it is bundled, so installing it there would do nothing.
       - name: Install the exec-harness under test
+        if: matrix.variant == 'main'
         run: |
           cargo install --path crates/exec-harness --locked
           exec-harness --version
 
+      - uses: ./.github/actions/install-bpf-deps
+        if: matrix.variant != 'main'
+
       - name: Sweep
         run: |
-          # Same tamper guard as the instrumentation job: if the runner swapped
-          # in the released exec-harness, the sweep would silently measure the
-          # wrong binary on the branch variant.
-          BEFORE=$(sha256sum "$(which exec-harness)" | cut -d' ' -f1)
+          # Tamper guard, `main` variant only: there the runner can still swap
+          # in the released exec-harness and the sweep would measure the wrong
+          # binary. On the branch there is no PATH lookup left to tamper with.
+          if [ "${{ matrix.variant }}" = "main" ]; then
+            BEFORE=$(sha256sum "$(which exec-harness)" | cut -d' ' -f1)
+          fi
 
           for N in 1000 10000 100000 1000000; do
             D=$RUNNER_TEMP/sweep-$N
@@ -411,8 +432,10 @@ jobs:
             echo "SWEEP variant=${{ matrix.variant }} N=$N files=${#OUTS[@]} TOTAL_IR=$TOTAL"
           done
 
-          AFTER=$(sha256sum "$(which exec-harness)" | cut -d' ' -f1)
-          if [ "$BEFORE" != "$AFTER" ]; then
-            echo "the runner replaced exec-harness mid-sweep; results are not trustworthy"
-            exit 1
+          if [ "${{ matrix.variant }}" = "main" ]; then
+            AFTER=$(sha256sum "$(which exec-harness)" | cut -d' ' -f1)
+            if [ "$BEFORE" != "$AFTER" ]; then
+              echo "the runner replaced exec-harness mid-sweep; results are not trustworthy"
+              exit 1
+            fi
           fi
