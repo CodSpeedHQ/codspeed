@@ -125,11 +125,14 @@ pub(crate) enum InternalCommands {
     Memtrack(memtrack::MemtrackArgs),
 }
 
-/// Overrides the executable used to re-invoke internal subcommands.
+/// Test-only override for the executable that internal subcommands are
+/// re-invoked through. Under `cargo test` [`std::env::current_exe`] is the test
+/// harness, which rejects their arguments.
 ///
-/// [`std::env::current_exe`] is not always a binary that can dispatch them: it
-/// resolves to the host executable when this crate is linked into one, and to
-/// a wrapper when the CLI is invoked through a launcher script.
+/// Deliberately `cfg(test)`: this path is handed to `sudo setcap <caps>+ep`, so
+/// honouring it in a release build would let anyone who can set one environment
+/// variable pick which file receives `CAP_SYS_ADMIN`.
+#[cfg(test)]
 pub(crate) const SELF_EXE_ENV_VAR: &str = "CODSPEED_SELF_EXE";
 
 /// The executable that internal subcommands are re-invoked through.
@@ -139,11 +142,12 @@ pub(crate) const SELF_EXE_ENV_VAR: &str = "CODSPEED_SELF_EXE";
 /// it, and `setcap` on a path that is not the one later exec'd succeeds while
 /// changing nothing.
 pub(crate) fn self_exe() -> Result<PathBuf> {
-    match std::env::var_os(SELF_EXE_ENV_VAR) {
-        Some(path) => Ok(PathBuf::from(path)),
-        None => std::env::current_exe()
-            .context("failed to resolve current executable for internal subcommand"),
+    #[cfg(test)]
+    if let Some(path) = std::env::var_os(SELF_EXE_ENV_VAR) {
+        return Ok(PathBuf::from(path));
     }
+
+    std::env::current_exe().context("failed to resolve current executable for internal subcommand")
 }
 
 impl InternalCommands {
