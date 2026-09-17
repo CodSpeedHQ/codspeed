@@ -2,6 +2,8 @@ mod auth;
 pub(crate) mod exec;
 pub(crate) mod exec_harness;
 pub(crate) mod experimental;
+#[cfg(target_os = "linux")]
+pub(crate) mod memtrack;
 mod profile;
 pub(crate) mod run;
 pub(crate) mod samply;
@@ -114,6 +116,13 @@ pub(crate) enum InternalCommands {
     /// Run the bundled exec-harness. Args are forwarded to exec-harness.
     #[command(disable_help_flag = true, disable_help_subcommand = true)]
     ExecHarness(exec_harness::ExecHarnessArgs),
+    /// Run the bundled memtrack. Args are forwarded to memtrack.
+    ///
+    /// Linux-only, like the memory executor that drives it: memtrack is an eBPF
+    /// tracker and is not built at all on other platforms.
+    #[cfg(target_os = "linux")]
+    #[command(disable_help_flag = true, disable_help_subcommand = true)]
+    Memtrack(memtrack::MemtrackArgs),
 }
 
 /// Overrides the executable used to re-invoke internal subcommands.
@@ -123,16 +132,25 @@ pub(crate) enum InternalCommands {
 /// a wrapper when the CLI is invoked through a launcher script.
 pub(crate) const SELF_EXE_ENV_VAR: &str = "CODSPEED_SELF_EXE";
 
+/// The executable that internal subcommands are re-invoked through.
+///
+/// Exposed separately from [`InternalCommands::get_command_builder`] because the
+/// memory executor grants file capabilities to this exact path before running
+/// it, and `setcap` on a path that is not the one later exec'd succeeds while
+/// changing nothing.
+pub(crate) fn self_exe() -> Result<PathBuf> {
+    match std::env::var_os(SELF_EXE_ENV_VAR) {
+        Some(path) => Ok(PathBuf::from(path)),
+        None => std::env::current_exe()
+            .context("failed to resolve current executable for internal subcommand"),
+    }
+}
+
 impl InternalCommands {
     /// Build a [`CommandBuilder`] that re-execs the current binary into this
     /// internal subcommand. Each variant owns its own arg layout.
     pub fn get_command_builder(&self) -> Result<CommandBuilder> {
-        let self_exe = match std::env::var_os(SELF_EXE_ENV_VAR) {
-            Some(path) => PathBuf::from(path),
-            None => std::env::current_exe()
-                .context("failed to resolve current executable for internal subcommand")?,
-        };
-        let mut builder = CommandBuilder::new(self_exe);
+        let mut builder = CommandBuilder::new(self_exe()?);
         match self {
             InternalCommands::Samply(args) => {
                 builder.arg("samply");
@@ -142,16 +160,18 @@ impl InternalCommands {
                 builder.arg("exec-harness");
                 builder.args(args.args.iter().cloned());
             }
+            #[cfg(target_os = "linux")]
+            InternalCommands::Memtrack(args) => {
+                builder.arg("memtrack");
+                builder.args(args.args.iter().cloned());
+            }
         }
         Ok(builder)
     }
 
-    /// The same re-exec, rendered as a single POSIX-shell command string.
-    ///
-    /// Not every call site can use a [`CommandBuilder`]: exec-harness is handed
-    /// its targets through a heredoc, so its invocation has to be spliced into
-    /// a string that `bash -c` will run. Quoting goes through
-    /// `shell_words::join`, so a self-exe path containing spaces survives.
+    /// The same re-exec as a single POSIX-shell command string, for the call
+    /// sites that splice it into a script rather than spawning it: exec-harness
+    /// is handed its targets through a heredoc.
     pub fn get_shell_command(&self) -> Result<String> {
         Ok(self.get_command_builder()?.as_command_line())
     }
@@ -176,13 +196,14 @@ pub async fn run() -> Result<()> {
     let setup_cache_dir = setup_cache_dir.as_deref();
 
     match cli.command {
-        // These are responsible for their own logger initialization. The
-        // bundled components must not install one: only one global logger can
-        // exist per process, and theirs would lose to (or clash with) ours.
+        // These initialize their own logging. Bundled subcommands must not:
+        // a process has one global logger, and theirs would clash with ours.
         Commands::Run(_)
         | Commands::Exec(_)
         | Commands::Internal(InternalCommands::Samply(_))
         | Commands::Internal(InternalCommands::ExecHarness(_)) => {}
+        #[cfg(target_os = "linux")]
+        Commands::Internal(InternalCommands::Memtrack(_)) => {}
         _ => {
             init_local_logger()?;
         }
@@ -236,6 +257,8 @@ pub async fn run() -> Result<()> {
         Commands::Update => update::run().await?,
         Commands::Internal(InternalCommands::Samply(args)) => samply::run(args)?,
         Commands::Internal(InternalCommands::ExecHarness(args)) => exec_harness::run(args)?,
+        #[cfg(target_os = "linux")]
+        Commands::Internal(InternalCommands::Memtrack(args)) => memtrack::run(args)?,
     }
     Ok(())
 }

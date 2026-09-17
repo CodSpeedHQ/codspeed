@@ -108,14 +108,6 @@ impl ValgrindTarget {
     }
 }
 
-const MEMTRACK_INSTALLER: BinaryPin = BinaryPin {
-    version: "1.5.1",
-    url_template: "https://github.com/CodSpeedHQ/codspeed/releases/download/memtrack-v{version}/memtrack-installer.sh",
-    sha256: "47d529728d9e2a02fc0773c8ca0ece214f67cbc965d7ae327fe8c213ae2735a7",
-};
-#[cfg(target_os = "linux")]
-pub const MEMTRACK_VERSION: &str = MEMTRACK_INSTALLER.version;
-
 const MONGO_TRACER_INSTALLER: BinaryPin = BinaryPin {
     version: "cs-mongo-tracer-v0.2.0",
     url_template: "https://codspeed-public-assets.s3.eu-west-1.amazonaws.com/mongo-tracer/{version}/cs-mongo-tracer-installer.sh",
@@ -128,9 +120,6 @@ const MONGO_TRACER_INSTALLER: BinaryPin = BinaryPin {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PinnedBinary {
     ValgrindDeb(ValgrindTarget),
-    // Only installed by the Linux-only memory executor.
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-    MemtrackInstaller,
     MongoTracerInstaller,
 }
 
@@ -138,7 +127,6 @@ impl PinnedBinary {
     pub fn url(&self) -> String {
         match self {
             PinnedBinary::ValgrindDeb(target) => target.url(),
-            PinnedBinary::MemtrackInstaller => MEMTRACK_INSTALLER.url(),
             PinnedBinary::MongoTracerInstaller => MONGO_TRACER_INSTALLER.url(),
         }
     }
@@ -146,7 +134,6 @@ impl PinnedBinary {
     pub fn sha256(&self) -> &'static str {
         match self {
             PinnedBinary::ValgrindDeb(target) => target.sha256(),
-            PinnedBinary::MemtrackInstaller => MEMTRACK_INSTALLER.sha256,
             PinnedBinary::MongoTracerInstaller => MONGO_TRACER_INSTALLER.sha256,
         }
     }
@@ -158,10 +145,7 @@ mod tests {
     use crate::cli::run::helpers::download_pinned_file;
     use tempfile::NamedTempFile;
 
-    const INSTALLER_BINARIES: &[PinnedBinary] = &[
-        PinnedBinary::MemtrackInstaller,
-        PinnedBinary::MongoTracerInstaller,
-    ];
+    const INSTALLER_BINARIES: &[PinnedBinary] = &[PinnedBinary::MongoTracerInstaller];
 
     const ALL_VALGRIND_TARGETS: &[ValgrindTarget] = &[
         ValgrindTarget {
@@ -185,7 +169,7 @@ mod tests {
     fn assert_installer_variant_is_listed(binary: PinnedBinary) {
         match binary {
             PinnedBinary::ValgrindDeb(_) => {}
-            PinnedBinary::MemtrackInstaller | PinnedBinary::MongoTracerInstaller => {
+            PinnedBinary::MongoTracerInstaller => {
                 assert!(INSTALLER_BINARIES.contains(&binary));
             }
         }
@@ -201,7 +185,6 @@ mod tests {
 
     #[test]
     fn installer_variant_list_is_exhaustive() {
-        assert_installer_variant_is_listed(PinnedBinary::MemtrackInstaller);
         assert_installer_variant_is_listed(PinnedBinary::MongoTracerInstaller);
     }
 

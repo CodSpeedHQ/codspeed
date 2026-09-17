@@ -1,15 +1,14 @@
-use crate::binary_installer::ensure_binary_installed;
-use crate::binary_pins::{self, PinnedBinary};
+use crate::cli::self_exe;
 use crate::executor::helpers::capabilities::binary_has_capabilities;
 use crate::executor::helpers::run_with_sudo::{is_root_user, run_with_sudo};
 use crate::executor::{ToolInstallStatus, ToolStatus};
 use crate::prelude::*;
 use caps::Capability;
 use std::path::PathBuf;
-use std::process::Command;
 
-pub const MEMTRACK_COMMAND: &str = "codspeed-memtrack";
-pub const MEMTRACK_CODSPEED_VERSION: &str = binary_pins::MEMTRACK_VERSION;
+/// How memtrack is named in user-facing messages. It is no longer a binary to
+/// look up: memtrack is bundled into this executable as a hidden subcommand.
+pub const MEMTRACK_COMMAND: &str = "memtrack";
 
 const MEMTRACK_REQUIRED_CAPS: &[Capability] = &[
     Capability::CAP_DAC_READ_SEARCH,
@@ -37,8 +36,16 @@ fn memtrack_setcap_spec() -> String {
     format!("{caps}+ep")
 }
 
+/// The binary that must carry the eBPF capabilities.
+///
+/// Since memtrack is bundled, that binary is *this* one. Note what that means:
+/// the five capabilities below, `CAP_SYS_ADMIN` among them, end up on the
+/// `codspeed` executable itself rather than on a dedicated tracker, so every
+/// invocation of the CLI carries them in its permitted and effective sets.
+/// They are granted `+ep` and not inheritable, so a spawned benchmark does not
+/// receive them — the elevation stops at the CLI process.
 fn memtrack_path() -> Option<PathBuf> {
-    which::which(MEMTRACK_COMMAND).ok()
+    self_exe().ok()
 }
 
 /// Whether the installed memtrack binary already carries the required capabilities.
@@ -94,73 +101,21 @@ pub fn ensure_memtrack_capabilities() -> Result<()> {
 }
 
 pub fn get_memtrack_status() -> ToolStatus {
-    let tool_name = MEMTRACK_COMMAND.to_string();
-
-    let is_available = Command::new("which")
-        .arg(MEMTRACK_COMMAND)
-        .output()
-        .is_ok_and(|output| output.status.success());
-    if !is_available {
-        return ToolStatus {
-            tool_name,
-            status: ToolInstallStatus::NotInstalled,
-        };
-    }
-
-    let Ok(version_output) = Command::new(MEMTRACK_COMMAND).arg("--version").output() else {
-        return ToolStatus {
-            tool_name,
-            status: ToolInstallStatus::NotInstalled,
-        };
-    };
-
-    if !version_output.status.success() {
-        return ToolStatus {
-            tool_name,
-            status: ToolInstallStatus::NotInstalled,
-        };
-    }
-
-    let version = String::from_utf8_lossy(&version_output.stdout)
-        .trim()
-        .to_string();
-
-    // Parse the version number from output like "memtrack 1.2.2"
-    let expected = semver::Version::parse(MEMTRACK_CODSPEED_VERSION).unwrap();
-    if let Some(version_str) = version.split_once(' ').map(|(_, v)| v.trim()) {
-        if let Ok(installed) = semver::Version::parse(version_str) {
-            if installed < expected {
-                return ToolStatus {
-                    tool_name,
-                    status: ToolInstallStatus::IncorrectVersion {
-                        version,
-                        message: format!(
-                            "version too old, expecting {MEMTRACK_CODSPEED_VERSION} or higher",
-                        ),
-                    },
-                };
-            }
-            return ToolStatus {
-                tool_name,
-                status: ToolInstallStatus::Installed { version },
-            };
-        }
-    }
-
+    // Bundled: there is nothing to look up on PATH and no version to compare,
+    // because memtrack ships inside this binary and cannot be out of step with
+    // it. What is still worth reporting is whether it can actually run, which
+    // is a question about privileges, not about installation.
     ToolStatus {
-        tool_name,
-        status: ToolInstallStatus::IncorrectVersion {
-            version,
-            message: "could not parse version".to_string(),
+        tool_name: MEMTRACK_COMMAND.to_string(),
+        status: ToolInstallStatus::Installed {
+            version: env!("CARGO_PKG_VERSION").to_string(),
         },
     }
 }
 
+/// Nothing to install any more: memtrack is part of this binary. Kept as a
+/// no-op so the setup flow keeps its shape while the other tools still install.
 pub async fn install_memtrack() -> Result<()> {
-    ensure_binary_installed(
-        MEMTRACK_COMMAND,
-        MEMTRACK_CODSPEED_VERSION,
-        PinnedBinary::MemtrackInstaller,
-    )
-    .await
+    debug!("{MEMTRACK_COMMAND} is bundled into this binary, nothing to install");
+    Ok(())
 }

@@ -1,3 +1,5 @@
+use crate::cli::InternalCommands;
+use crate::cli::memtrack::MemtrackArgs;
 use crate::executor::ExecutorName;
 use crate::executor::ExecutorSupport;
 use crate::executor::PrivilegeStatus;
@@ -61,8 +63,9 @@ impl MemoryExecutor {
         let bench_command = get_bench_command(&execution_context.config)?;
         let (bench_command, env_file) = prefix_command_with_env(&bench_command, &extra_env)?;
 
-        // Build the memtrack command
-        let mut cmd_builder = CommandBuilder::new(MEMTRACK_COMMAND);
+        // memtrack is a hidden subcommand of this binary: re-exec ourselves.
+        let mut cmd_builder =
+            InternalCommands::Memtrack(MemtrackArgs { args: vec![] }).get_command_builder()?;
         if execution_context.config.memory_track_physical {
             cmd_builder.env("CODSPEED_MEMTRACK_TRACK_PHYSICAL", "1");
         }

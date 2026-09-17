@@ -457,10 +457,18 @@ mod memory {
 
         MEMORY_INIT
             .get_or_init(|| async {
-                let executor = MemoryExecutor;
-                let system_info = SystemInfo::new().unwrap();
-                executor.setup(&system_info, None).await.unwrap();
-                executor.grant_privileges().unwrap();
+                // `grant_privileges` setcaps the binary memtrack will be run
+                // from, which since the bundling is `current_exe`. Without the
+                // override that is the test harness, so the capabilities would
+                // land on a throwaway binary and the run would still lack them.
+                let self_exe = codspeed_binary_path().await;
+                temp_env::async_with_vars(&[(SELF_EXE_ENV_VAR, Some(self_exe))], async {
+                    let executor = MemoryExecutor;
+                    let system_info = SystemInfo::new().unwrap();
+                    executor.setup(&system_info, None).await.unwrap();
+                    executor.grant_privileges().unwrap();
+                })
+                .await;
             })
             .await;
 
@@ -487,12 +495,19 @@ mod memory {
     async fn test_memory_executor(#[case] cmd: &str) {
         let (_permit, _lock, mut executor) = get_memory_executor().await;
 
+        // memtrack is a subcommand of this binary now, so the executor re-execs
+        // `current_exe` — which under `cargo test` is the test harness, not a
+        // CLI. Point it at the real binary, as the other executors' tests do.
+        let self_exe = codspeed_binary_path().await;
         // Unset GITHUB_ACTIONS to force LocalProvider which supports repository_override
-        temp_env::async_with_vars(&[("GITHUB_ACTIONS", None::<&str>)], async {
-            let config = memory_config(cmd);
-            let (execution_context, _temp_dir) = create_test_setup(config).await;
-            executor.run(&execution_context, &None).await.unwrap();
-        })
+        temp_env::async_with_vars(
+            &[("GITHUB_ACTIONS", None), (SELF_EXE_ENV_VAR, Some(self_exe))],
+            async {
+                let config = memory_config(cmd);
+                let (execution_context, _temp_dir) = create_test_setup(config).await;
+                executor.run(&execution_context, &None).await.unwrap();
+            },
+        )
         .await;
     }
 
@@ -502,8 +517,13 @@ mod memory {
         let (_permit, _lock, mut executor) = get_memory_executor().await;
 
         let (env_var, env_value) = env_case;
+        let self_exe = codspeed_binary_path().await;
         temp_env::async_with_vars(
-            &[(env_var, Some(env_value)), ("GITHUB_ACTIONS", None)],
+            &[
+                (env_var, Some(env_value)),
+                ("GITHUB_ACTIONS", None),
+                (SELF_EXE_ENV_VAR, Some(self_exe)),
+            ],
             async {
                 let cmd = env_var_validation_script(env_var, env_value);
                 let config = memory_config(&cmd);
@@ -533,9 +553,16 @@ fi
         let (execution_context, _temp_dir) = create_test_setup(config).await;
         let (_permit, _lock, mut executor) = get_memory_executor().await;
 
-        temp_env::async_with_vars(&[("PATH", Some(&modified_path))], async {
-            executor.run(&execution_context, &None).await.unwrap();
-        })
+        let self_exe = codspeed_binary_path().await;
+        temp_env::async_with_vars(
+            &[
+                ("PATH", Some(modified_path.as_str())),
+                (SELF_EXE_ENV_VAR, Some(self_exe)),
+            ],
+            async {
+                executor.run(&execution_context, &None).await.unwrap();
+            },
+        )
         .await;
     }
 
@@ -564,9 +591,16 @@ fi
         let (execution_context, _temp_dir) = create_test_setup(config).await;
         let (_permit, _lock, mut executor) = get_memory_executor().await;
 
-        temp_env::async_with_vars(&[("LD_LIBRARY_PATH", Some(&modified))], async {
-            executor.run(&execution_context, &None).await.unwrap();
-        })
+        let self_exe = codspeed_binary_path().await;
+        temp_env::async_with_vars(
+            &[
+                ("LD_LIBRARY_PATH", Some(modified.as_str())),
+                (SELF_EXE_ENV_VAR, Some(self_exe)),
+            ],
+            async {
+                executor.run(&execution_context, &None).await.unwrap();
+            },
+        )
         .await;
     }
 }
