@@ -10,50 +10,28 @@ prek install
 
 ## Release Process
 
-This repository is a Cargo workspace containing multiple crates. The release process differs depending on which crate you're releasing.
+This repository is a Cargo workspace containing multiple crates, but only one of them is released: the main runner. Everything else is linked into its binary.
 
 ### Workspace Structure
 
 - **`codspeed-runner`**: The main CLI binary (`codspeed`)
-- **`memtrack`**: Memory tracking binary (`codspeed-memtrack`)
-- **`exec-harness`**: Execution harness binary
+- **`memtrack`**: Memory tracker, built into `codspeed` and reached as `codspeed memtrack`
+- **`exec-harness`**: Execution harness, built into `codspeed` and reached as `codspeed exec-harness`
 - **`runner-shared`**: Shared library used by other crates
 
-### Releasing Support Crates (memtrack, exec-harness, runner-shared)
+`memtrack` and `exec-harness` are **not released on their own**. They are linked into the
+`codspeed` binary and invoked as hidden subcommands, so one tag produces one artifact set and
+there is no version for the runner to be out of step with. Their `[[bin]]` targets remain for
+development and for the tests, which build them to exercise the standalone path.
 
-For any crate other than the main runner:
-
-```bash
-cargo release -p <PACKAGE_NAME> --execute <VERSION_BUMP>
-```
-
-Where `<VERSION_BUMP>` is one of: `alpha`, `beta`, `patch`, `minor`, or `major`.
-
-**Examples:**
-
-```bash
-# Release a new patch version of memtrack
-cargo release -p memtrack --execute patch
-
-# Release a beta version of exec-harness
-cargo release -p exec-harness --execute beta
-```
-
-#### Post-Release: Update Version References
-
-After releasing `memtrack` or `exec-harness`, you **must** update the version references in the runner code:
-
-1. **For memtrack**: Update the `MEMTRACK_INSTALLER` pin record in `src/binary_pins.rs` (see [Pinned binary hashes](#pinned-binary-hashes) below).
-
-2. **For exec-harness**: Update the `EXEC_HARNESS_INSTALLER` pin record in `src/binary_pins.rs`.
-
-These constants are used by the runner to download and install the correct versions of the binaries from GitHub releases.
+Both still keep their own `version` in `Cargo.toml` — that is what
+`codspeed exec-harness --version` reports — but bumping it is a plain edit, not a release.
 
 ### Pinned binary hashes
 
 Every binary the runner downloads at install time is SHA-256-pinned. The pins live in two places:
 
-- **`src/binary_pins.rs`** — the patched valgrind `.deb`, the memtrack installer, the exec-harness installer, and the mongo-tracer installer. Each artifact keeps its version, URL template, and hash together in a pin record.
+- **`src/binary_pins.rs`** — the patched valgrind `.deb` and the mongo-tracer installer. Each artifact keeps its version, URL template, and hash together in a pin record.
 - **`src/executor/helpers/introspected_golang/go.sh`** — the go-runner installer published by [CodSpeedHQ/codspeed-go](https://github.com/CodSpeedHQ/codspeed-go), one `<version> <sha256>` row per release in the `GO_RUNNER_INSTALLER_SHA256S` table. `DEFAULT_GO_RUNNER_VERSION` (just below the table) selects the row used by default.
 
 When you bump a pinned version (or add a new go-runner row), update the matching pin record / table row with the new version and its SHA-256.
@@ -84,16 +62,12 @@ These tests also run in CI, but running them locally before opening the PR avoid
 
 ### Releasing the Main Runner
 
-The main runner (`codspeed-runner`) should be released after ensuring all dependency versions are correct.
+The main runner (`codspeed-runner`) is the only crate that is released.
 
 #### Pre-Release Check
 
-**Verify binary version references**: Check that version constants in the runner code match the released versions:
-
-- `MEMTRACK_VERSION` in `src/binary_pins.rs`
-- `EXEC_HARNESS_VERSION` in `src/binary_pins.rs`
-
-Also confirm the SHA-256 entries in the pin records in `src/binary_pins.rs` match the released artifacts.
+Confirm the SHA-256 entries in the pin records in `src/binary_pins.rs` match the released
+artifacts they point at.
 
 #### Release Command
 
