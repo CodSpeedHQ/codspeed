@@ -131,6 +131,9 @@ pub struct ExecutorConfig {
     /// Whether to enable language-level introspection (Node.js, Go wrappers in PATH).
     /// Disabled for exec-harness targets since they don't need it.
     pub enable_introspection: bool,
+    /// Whether this execution is driven by exec-harness rather than by a plain
+    /// entrypoint command.
+    pub uses_exec_harness: bool,
     /// Enable valgrind's --fair-sched option.
     pub fair_sched: bool,
     /// Enable valgrind's --cycle-estimation option.
@@ -193,12 +196,13 @@ impl OrchestratorConfig {
 
     /// Produce a per-execution [`ExecutorConfig`] for the given command and mode.
     ///
-    /// `enable_introspection` controls whether language-level wrappers (Node.js, Go)
-    /// are injected into `PATH`. This should be `false` for exec-harness targets.
+    /// `uses_exec_harness` says whether this run is driven by exec-harness rather
+    /// than by a plain entrypoint command. It gates the language-level wrappers
+    /// (Node.js, Go) in `PATH`, and valgrind's `--instr-atstart`.
     pub fn executor_config_for_command(
         &self,
         command: String,
-        enable_introspection: bool,
+        uses_exec_harness: bool,
     ) -> ExecutorConfig {
         ExecutorConfig {
             working_directory: self.working_directory.clone(),
@@ -212,7 +216,8 @@ impl OrchestratorConfig {
             allow_empty: self.allow_empty,
             go_runner_version: self.go_runner_version.clone(),
             extra_env: self.extra_env.clone(),
-            enable_introspection,
+            enable_introspection: !uses_exec_harness,
+            uses_exec_harness,
             fair_sched: self.fair_sched,
             cycle_estimation: self.cycle_estimation,
             exclude_allocations: self.exclude_allocations,
@@ -262,7 +267,7 @@ impl OrchestratorConfig {
 impl ExecutorConfig {
     /// Constructs a new `ExecutorConfig` with default values for testing purposes
     pub fn test() -> Self {
-        OrchestratorConfig::test().executor_config_for_command("".into(), true)
+        OrchestratorConfig::test().executor_config_for_command("".into(), false)
     }
 }
 

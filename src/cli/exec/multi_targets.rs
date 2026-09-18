@@ -1,5 +1,4 @@
 use crate::executor::config::BenchmarkTarget;
-use crate::executor::orchestrator::EXEC_HARNESS_COMMAND;
 use crate::prelude::*;
 use crate::project_config::{Target, TargetCommand, WalltimeOptions};
 use exec_harness::BenchmarkCommand;
@@ -69,8 +68,11 @@ pub fn build_benchmark_targets(
         .collect()
 }
 
-/// Build a shell command string that pipes BenchmarkTarget::Exec variants to exec-harness via stdin
+/// Build a shell command string that pipes BenchmarkTarget::Exec variants to exec-harness via stdin.
+///
+/// `exec_harness` is the already shell-quoted invocation of exec-harness.
 pub fn build_exec_targets_pipe_command(
+    exec_harness: &str,
     targets: &[&crate::executor::config::BenchmarkTarget],
 ) -> Result<String> {
     let inputs: Vec<BenchmarkCommand> = targets
@@ -92,9 +94,43 @@ pub fn build_exec_targets_pipe_command(
         .collect::<Result<Vec<_>>>()?;
 
     let json = serde_json::to_string(&inputs).context("Failed to serialize targets to JSON")?;
-    Ok(build_pipe_command_from_json(&json))
+    Ok(build_pipe_command_from_json(exec_harness, &json))
 }
 
-fn build_pipe_command_from_json(json: &str) -> String {
-    format!("{EXEC_HARNESS_COMMAND} - <<'CODSPEED_EOF'\n{json}\nCODSPEED_EOF")
+fn build_pipe_command_from_json(exec_harness: &str, json: &str) -> String {
+    format!("{exec_harness} - <<'CODSPEED_EOF'\n{json}\nCODSPEED_EOF")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cli::exec_harness::ExecHarnessArgs;
+    use crate::cli::{InternalCommands, SELF_EXE_ENV_VAR};
+
+    /// The invocation is spliced into a string that `bash -c` runs, so a
+    /// self-exe path containing a space has to come back out as one word.
+    #[test]
+    fn exec_harness_invocation_survives_a_self_exe_path_with_spaces() {
+        temp_env::with_var(SELF_EXE_ENV_VAR, Some("/opt/my tools/codspeed"), || {
+            let invocation = InternalCommands::ExecHarness(ExecHarnessArgs { args: vec![] })
+                .get_shell_command()
+                .unwrap();
+
+            assert_eq!(
+                shell_words::split(&invocation).unwrap(),
+                vec!["/opt/my tools/codspeed", "exec-harness"]
+            );
+        });
+    }
+
+    /// The delimiter is quoted, so the shell expands nothing inside the body.
+    #[test]
+    fn pipe_command_wraps_the_payload_in_an_unexpanded_heredoc() {
+        let cmd = build_pipe_command_from_json("/bin/codspeed exec-harness", r#"{"a":"$HOME"}"#);
+
+        assert_eq!(
+            cmd,
+            "/bin/codspeed exec-harness - <<'CODSPEED_EOF'\n{\"a\":\"$HOME\"}\nCODSPEED_EOF"
+        );
+    }
 }
