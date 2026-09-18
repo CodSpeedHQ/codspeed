@@ -1,8 +1,5 @@
 mod allocators;
 mod bpf_token;
-/// The command line, shared by the standalone binary and the bundled subcommand.
-/// Gated on `ebpf` for the same reason the `[[bin]]` is: without it there is no
-/// `Tracker` to drive.
 #[cfg(feature = "ebpf")]
 pub mod cli;
 #[cfg(feature = "ebpf")]

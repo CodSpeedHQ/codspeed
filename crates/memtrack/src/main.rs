@@ -1,10 +1,3 @@
-//! The standalone `codspeed-memtrack` binary.
-//!
-//! Everything it does lives in [`memtrack::cli::run_cli`], which the `codspeed`
-//! CLI also calls when memtrack runs as a bundled subcommand. All that is left
-//! here is what only makes sense when memtrack owns the whole process: the
-//! global logger, and turning the tracked command's exit code into our own.
-
 use memtrack::cli::run_cli;
 use memtrack::prelude::*;
 

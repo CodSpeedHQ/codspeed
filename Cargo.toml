@@ -74,8 +74,8 @@ samply = { path = "crates/samply-codspeed/samply" }
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = "0.18"
 caps = "0.5"
-# Default features on purpose: `ebpf` carries the tracker itself, which the
-# bundled `memtrack` subcommand needs, not just the IPC types.
+# Default features on: `ebpf` carries the tracker the bundled `memtrack`
+# subcommand needs, not just the IPC types.
 memtrack = { path = "crates/memtrack" }
 ipc-channel = { workspace = true }
 
@@ -142,8 +142,7 @@ binaries.aarch64-apple-darwin = ["codspeed"]
 binaries.aarch64-unknown-linux-musl = ["codspeed"]
 binaries.x86_64-unknown-linux-musl = ["codspeed"]
 
-# Linking memtrack in pulls its vendored libbpf/elfutils build into this
-# package, so releasing the CLI needs memtrack's build toolchain.
+# memtrack's vendored libbpf/elfutils build runs as part of this package.
 [package.metadata.dist.dependencies.apt]
 build-essential = "*"
 pkgconf = "*"

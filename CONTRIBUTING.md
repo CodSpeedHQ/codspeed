@@ -10,21 +10,17 @@ prek install
 
 ## Release Process
 
-This repository is a Cargo workspace containing multiple crates, but only one of them is released: the main runner. Everything else is linked into its binary.
+This repository is a Cargo workspace, but only the main runner is released. The other crates
+are linked into its binary.
 
 ### Workspace Structure
 
 - **`codspeed-runner`**: The main CLI binary (`codspeed`)
-- **`memtrack`**: Memory tracker, built into `codspeed` and reached as `codspeed memtrack`
-- **`exec-harness`**: Execution harness, built into `codspeed` and reached as `codspeed exec-harness`
+- **`memtrack`**: Memory tracker, reached as `codspeed memtrack`
+- **`exec-harness`**: Execution harness, reached as `codspeed exec-harness`
 - **`runner-shared`**: Shared library used by other crates
 
-`memtrack` and `exec-harness` are **not released on their own**. They are linked into the
-`codspeed` binary and invoked as hidden subcommands, so one tag produces one artifact set and
-there is no version for the runner to be out of step with. Their `[[bin]]` targets remain for
-development and for the tests, which build them to exercise the standalone path.
-
-Both still keep their own `version` in `Cargo.toml` — that is what
+`memtrack` and `exec-harness` keep a `version` in their `Cargo.toml` — what
 `codspeed exec-harness --version` reports — but bumping it is a plain edit, not a release.
 
 ### Pinned binary hashes

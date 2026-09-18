@@ -41,8 +41,6 @@ jobs:
 
       - uses: ./.github/actions/install-bpf-deps
 
-      # No `setup --mode memory` here: the memory tests grant the capabilities
-      # themselves, pointed at the binary they actually re-exec.
       - run: cargo test --all --exclude memtrack --exclude exec-harness
 
   exec-harness-tests:
@@ -148,9 +146,7 @@ jobs:
           mode: ${{ matrix.mode }}
           run: cargo codspeed run -p runner-shared
 
-  # The released Linux artifacts are musl, and nothing else here builds them, so
-  # a break in the argp stub, the kernel-header paths or the aarch64 `-lgcc`
-  # link flag would otherwise surface for the first time in a release.
+  # The released Linux artifacts are musl, and nothing else here builds them.
   musl-build:
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -174,8 +170,6 @@ jobs:
           sudo apt-get install -y musl-tools linux-libc-dev
           rustup target add "${{ matrix.target }}"
 
-      # No environment variables: the whole recipe lives in `.cargo/config.toml`,
-      # and a plain build is what proves it still stands on its own.
       - name: Build
         run: cargo build --bin codspeed --target "${{ matrix.target }}"
 
@@ -183,9 +177,8 @@ jobs:
         run: |
           BIN=target/${{ matrix.target }}/debug/codspeed
           file "$BIN"
-          # Asserted through readelf rather than a `file` string: rustc emits a
-          # static-PIE for x86_64 musl, which `file` spells differently from the
-          # aarch64 one. What matters is that nothing is loaded at runtime.
+          # Not a `file` string: x86_64 musl is a static-PIE and `file` spells
+          # it differently from aarch64.
           if readelf -d "$BIN" 2>/dev/null | grep -qE 'NEEDED|RPATH|RUNPATH'; then
             echo "the musl binary has a dynamic dependency"
             exit 1
@@ -194,7 +187,6 @@ jobs:
             echo "the musl binary requests a dynamic loader"
             exit 1
           fi
-          # These answer only if the two CLIs really are linked in.
           "$BIN" exec-harness --version
           "$BIN" memtrack --version
 

@@ -1,12 +1,3 @@
-//! exec-harness's command line, shared by the standalone `exec-harness` binary
-//! and by the `codspeed` CLI that bundles it as a hidden subcommand.
-//!
-//! Keeping the parser and the dispatch here rather than in `main.rs` is what
-//! stops the two paths from drifting: the standalone binary is a wrapper over
-//! [`run_cli`] and nothing else. It deliberately does **not** install a logger —
-//! only one global logger can exist per process, and when exec-harness runs
-//! bundled the host CLI has already installed its own.
-
 use crate::prelude::*;
 use crate::walltime::WalltimeExecutionArgs;
 use crate::{BenchmarkCommand, MeasurementMode, execute_benchmarks, read_commands_from_stdin};
@@ -48,7 +39,6 @@ where
     let args = Args::parse_from(argv);
     let measurement_mode = args.measurement_mode;
 
-    // Determine if we're in stdin mode or CLI mode
     let commands = match args.command.as_slice() {
         [single] if single == "-" => read_commands_from_stdin()?,
         [] => bail!("No command provided"),

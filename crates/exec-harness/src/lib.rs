@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 use std::io::{self, BufRead};
 
 pub mod analysis;
-/// The command line, shared by the standalone binary and the bundled subcommand.
 pub mod cli;
 pub mod constants;
 pub mod node;

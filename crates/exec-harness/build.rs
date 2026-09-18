@@ -1,10 +1,3 @@
-//! Build script for exec-harness
-//!
-//! Exports the constants shared between the crate's modules as environment
-//! variables, so `src/constants.rs` can read them through `env!()` and there is
-//! a single source of truth for the integration identity reported to CodSpeed.
-
-/// Integration name reported to CodSpeed.
 const INTEGRATION_NAME: &str = "exec-harness";
 
 fn main() {

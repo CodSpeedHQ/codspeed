@@ -1,13 +1,3 @@
-//! memtrack's command line, shared by the standalone `codspeed-memtrack`
-//! binary and by the `codspeed` CLI that bundles it as a hidden subcommand.
-//!
-//! Keeping the parser and the work here rather than in `main.rs` is what stops
-//! the two paths from drifting: the standalone binary is a wrapper over
-//! [`run_cli`] and nothing else. It deliberately does **not** install a logger —
-//! only one global logger can exist per process, and when memtrack runs bundled
-//! the host CLI has already installed its own. `main.rs` installs one because
-//! there it is the only thing in the process.
-
 use crate::prelude::*;
 use crate::{MemtrackIpcMessage, Tracker, handle_ipc_message};
 use clap::Parser;
@@ -44,12 +34,10 @@ enum Commands {
     },
 }
 
-/// Parse `argv` and run the requested subcommand, returning the exit code the
-/// process should end with.
+/// Parse `argv` and run the requested subcommand.
 ///
-/// The code is returned rather than passed to [`std::process::exit`] so that the
-/// caller stays in charge of teardown. Both callers do exit on it: the tracked
-/// command's status is the only meaningful result of a `track` run.
+/// Returns the tracked command's exit code instead of calling
+/// [`std::process::exit`], so the caller stays in charge of teardown.
 pub fn run_cli<I, T>(argv: I) -> Result<i32>
 where
     I: IntoIterator<Item = T>,

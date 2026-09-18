@@ -20,7 +20,3 @@ serde = { workspace = true }
 humantime = "2.3"
 runner-shared = { path = "../runner-shared" }
 tempfile = { workspace = true }
-
-# Deliberately no `[package.metadata.dist]`: exec-harness ships inside the
-# `codspeed` binary and is not released on its own. The `[[bin]]` stays for
-# development and for the tests, which exercise the standalone path.
