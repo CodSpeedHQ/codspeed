@@ -111,36 +111,28 @@ enum Commands {
 #[derive(Subcommand, Debug)]
 pub(crate) enum InternalCommands {
     /// Run the bundled samply profiler. Args are forwarded to samply.
-    #[command(disable_help_flag = true, disable_help_subcommand = true)]
+    #[command(hide = true, disable_help_flag = true, disable_help_subcommand = true)]
     Samply(samply::SamplyArgs),
     /// Run the bundled exec-harness. Args are forwarded to exec-harness.
-    #[command(disable_help_flag = true, disable_help_subcommand = true)]
+    #[command(hide = true, disable_help_flag = true, disable_help_subcommand = true)]
     ExecHarness(exec_harness::ExecHarnessArgs),
     /// Run the bundled memtrack. Args are forwarded to memtrack.
-    ///
-    /// Linux-only, like the memory executor that drives it: memtrack is an eBPF
-    /// tracker and is not built at all on other platforms.
     #[cfg(target_os = "linux")]
-    #[command(disable_help_flag = true, disable_help_subcommand = true)]
+    #[command(hide = true, disable_help_flag = true, disable_help_subcommand = true)]
     Memtrack(memtrack::MemtrackArgs),
 }
 
-/// Test-only override for the executable that internal subcommands are
-/// re-invoked through. Under `cargo test` [`std::env::current_exe`] is the test
-/// harness, which rejects their arguments.
+/// Test-only override for the executable internal subcommands re-exec: under
+/// `cargo test` [`std::env::current_exe`] is the test harness.
 ///
-/// Deliberately `cfg(test)`: this path is handed to `sudo setcap <caps>+ep`, so
-/// honouring it in a release build would let anyone who can set one environment
-/// variable pick which file receives `CAP_SYS_ADMIN`.
+/// `cfg(test)` because this path goes to `sudo setcap <caps>+ep`.
 #[cfg(test)]
 pub(crate) const SELF_EXE_ENV_VAR: &str = "CODSPEED_SELF_EXE";
 
 /// The executable that internal subcommands are re-invoked through.
 ///
-/// Exposed separately from [`InternalCommands::get_command_builder`] because the
-/// memory executor grants file capabilities to this exact path before running
-/// it, and `setcap` on a path that is not the one later exec'd succeeds while
-/// changing nothing.
+/// The memory executor `setcap`s this exact path before running it, and `setcap`
+/// on a path that is not the one later exec'd succeeds while changing nothing.
 pub(crate) fn self_exe() -> Result<PathBuf> {
     #[cfg(test)]
     if let Some(path) = std::env::var_os(SELF_EXE_ENV_VAR) {
@@ -174,19 +166,15 @@ impl InternalCommands {
     }
 
     /// The same re-exec as a single POSIX-shell command string, for the call
-    /// sites that splice it into a script rather than spawning it: exec-harness
-    /// is handed its targets through a heredoc.
+    /// sites that splice it into a script rather than spawning it.
     pub fn get_shell_command(&self) -> Result<String> {
         Ok(self.get_command_builder()?.as_command_line())
     }
 }
 
-/// Dispatch a bundled subcommand.
-///
-/// These are a re-exec of this binary and share nothing with the runner: no
-/// profile, no project config, no API client, no logger. They also run in the
-/// benchmark's working directory, so anything the runner discovers from the
-/// filesystem could abort a measurement for a reason unrelated to it.
+/// Dispatch a bundled subcommand, before any runner setup: these run in the
+/// benchmark's working directory, where a stray `codspeed.yaml` would otherwise
+/// abort the measurement.
 fn run_internal(command: InternalCommands) -> Result<()> {
     match command {
         InternalCommands::Samply(args) => samply::run(args),
