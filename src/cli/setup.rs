@@ -89,8 +89,8 @@ async fn setup_executor(
     let result = setup_and_grant(executor, system_info, setup_cache_dir).await;
 
     match result {
-        // We publish no tooling for this host, so a failure is expected: carry on
-        // with the other executors.
+        // We publish no tooling for this host, so the executor could only try. Leave the
+        // installation to the user and carry on with the other executors.
         Err(error) if support_level == ExecutorSupport::RequiresManualInstallation => {
             warn!(
                 "Could not set up the {} executor on {}, install its tooling manually: {error}",

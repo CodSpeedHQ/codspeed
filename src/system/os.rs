@@ -100,8 +100,10 @@ pub enum LinuxDistribution {
 }
 
 impl LinuxDistribution {
-    /// A distribution reporting no version is by construction not one we ship
-    /// packages for.
+    /// Build a [`LinuxDistribution`] from the raw `(os_id, version)` reported by `sysinfo`.
+    ///
+    /// The distributions we ship packages for all report a version, so one reporting none
+    /// is by construction not one of them.
     fn from_id(os_id: &str, version: Option<String>) -> Self {
         match (os_id, version) {
             ("ubuntu", Some(version)) => Self::Ubuntu { version },

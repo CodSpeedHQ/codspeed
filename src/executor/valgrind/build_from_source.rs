@@ -1,8 +1,13 @@
-//! Builds valgrind-codspeed from source, for the systems we publish no package
-//! for (rolling releases, non-apt distributions, ...).
+//! Best-effort fallback that builds valgrind-codspeed from source, for the
+//! systems we do not publish a package for (rolling releases, non-apt
+//! distributions, ...).
 //!
-//! Best effort: the build toolchain may be missing, so every failure goes back
-//! to the caller, which then asks for a manual installation.
+//! This is deliberately a "best effort": the toolchain needed to build valgrind
+//! is not guaranteed to be present, so every failure is reported back to the
+//! caller, which falls back to asking for a manual installation.
+//!
+//! The build is also opt-in rather than automatic, see [`is_wanted`]: it takes
+//! minutes and installs system-wide, so an interactive user is asked first.
 
 use crate::executor::helpers::command::CommandBuilder;
 use crate::executor::helpers::run_command_with_log_pipe::run_command_with_log_pipe;
@@ -19,10 +24,12 @@ use tempfile::TempDir;
 
 const VALGRIND_CODSPEED_REPOSITORY: &str = "https://github.com/CodSpeedHQ/valgrind-codspeed.git";
 
-/// Answers [`is_wanted`] without asking.
+/// Environment variable that answers [`is_wanted`] without asking, for CI and any
+/// other unattended run that wants the opposite of the default.
 const BUILD_FROM_SOURCE_ENV: &str = "CODSPEED_VALGRIND_BUILD_FROM_SOURCE";
 
-/// One entry per requirement, listing the executables that satisfy it.
+/// Tools required to configure and build valgrind. Each entry lists the
+/// interchangeable executables that satisfy the requirement.
 const BUILD_DEPENDENCIES: &[&[&str]] = &[
     &["git"],
     &["make"],
@@ -40,6 +47,7 @@ fn is_executable_available(executable: &str) -> bool {
         .is_ok_and(|status| status.success())
 }
 
+/// Names of the missing build dependencies, one per unsatisfied requirement.
 fn missing_build_dependencies() -> Vec<&'static str> {
     BUILD_DEPENDENCIES
         .iter()
@@ -65,6 +73,7 @@ fn command_in<S: AsRef<OsStr>>(directory: &Path, program: S, args: &[&str]) -> C
     builder
 }
 
+/// Run a build command, piping its output to the logs, and fail on a non-zero exit status.
 async fn run_build_command(builder: CommandBuilder) -> Result<()> {
     let command_line = builder.as_command_line();
     debug!("Running: {command_line}");
@@ -80,6 +89,7 @@ async fn run_build_command(builder: CommandBuilder) -> Result<()> {
     Ok(())
 }
 
+/// Clone the sources into a temporary directory, wiped once the build is done.
 async fn clone_sources() -> Result<TempDir> {
     let source_dir =
         TempDir::new().context("failed to create a temporary directory for the sources")?;
@@ -98,12 +108,13 @@ async fn clone_sources() -> Result<TempDir> {
     Ok(source_dir)
 }
 
+/// Everything that runs unprivileged: fetching the sources and compiling them.
 async fn fetch_and_compile() -> Result<TempDir> {
     let source_dir = clone_sources().await?;
     let path = source_dir.path();
 
-    // Absolute paths: resolving a relative program against the child's working
-    // directory is platform specific and unspecified.
+    // The scripts are addressed by absolute path: how a relative program path is resolved against
+    // the working directory of the child is platform specific and unspecified.
     run_build_command(command_in(path, path.join("autogen.sh"), &[])).await?;
     run_build_command(command_in(path, path.join("configure"), &[])).await?;
     run_build_command(command_in(
@@ -116,14 +127,24 @@ async fn fetch_and_compile() -> Result<TempDir> {
     Ok(source_dir)
 }
 
-/// Kept out of the rolling buffer so the sudo prompt stays visible.
+/// Install the freshly built valgrind system-wide. Kept out of the rolling
+/// buffer so that a sudo password prompt stays visible to the user.
 async fn install_build(source_dir: &Path) -> Result<()> {
     let builder = wrap_with_sudo(command_in(source_dir, "make", &["install"]))?;
     run_build_command(builder).await
 }
 
-/// Whether to build from source: [`BUILD_FROM_SOURCE_ENV`] if set, otherwise
-/// yes off a TTY (nobody is there to answer), otherwise ask.
+/// Whether to build valgrind-codspeed from source, asking the user when we can.
+///
+/// Decision, in order:
+///
+/// - [`BUILD_FROM_SOURCE_ENV`] set to `true` or `false`: that answer, unconditionally;
+/// - not a TTY (CI, unattended runs): build, since nobody is there to answer and
+///   failing the run outright is the worse outcome;
+/// - otherwise: ask, defaulting to building when the answer is empty.
+///
+/// Declining is a legitimate choice, not a failure: the caller then points at a
+/// manual installation, which is what happens on a failed build too.
 pub(super) fn is_wanted() -> bool {
     match env::var(BUILD_FROM_SOURCE_ENV).as_deref() {
         Ok("true") => {
@@ -146,8 +167,10 @@ pub(super) fn is_wanted() -> bool {
     suspend_progress_bar(prompt_for_source_build)
 }
 
-/// The question goes to stderr so it stays visible whatever the caller does
-/// with stdout.
+/// Ask whether to build valgrind from source, defaulting to yes on an empty answer.
+///
+/// Mirrors the confirmation the walltime executor uses before installing bash: the
+/// question goes to stderr so it stays visible whatever the caller does with stdout.
 fn prompt_for_source_build() -> bool {
     eprintln!(
         "CodSpeed can build valgrind-codspeed from source for this system. It clones the sources \
@@ -160,6 +183,7 @@ fn prompt_for_source_build() -> bool {
     let line = Term::stderr().read_line().unwrap_or_default();
     let answer = line.trim();
 
+    // Default to yes on empty input (just pressing Enter), as the `[Y/n]` prompt announces.
     let accepted =
         answer.is_empty() || answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes");
     if !accepted {
@@ -170,8 +194,10 @@ fn prompt_for_source_build() -> bool {
     accepted
 }
 
-/// Returns an error describing the first failing step, so the caller can fall
-/// back to a manual installation.
+/// Build and install valgrind-codspeed from source.
+///
+/// Returns an error describing the first failing step, leaving the caller free
+/// to fall back to instructions for a manual installation.
 pub(super) async fn build_and_install() -> Result<()> {
     let missing_dependencies = missing_build_dependencies();
     if !missing_dependencies.is_empty() {
