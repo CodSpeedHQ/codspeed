@@ -425,35 +425,32 @@ mod tests {
         assert_eq!(FAKE_COMMIT_REF.len(), 40);
     }
 
-    /// Run one `git` command in `dir`, failing loudly if it does not succeed.
-    ///
-    /// `.output().unwrap()` would only unwrap the *spawn*, letting a git that
-    /// runs and exits non-zero pass silently — a failed setup then surfaces
-    /// several frames later as an `UnbornBranch` error on `refs/heads/main`,
-    /// which says nothing about the cause.
-    fn git(dir: &std::path::Path, args: &[&str]) {
-        let output = std::process::Command::new("git")
-            .args(args)
+    fn create_git_repo_with_remote(dir: &std::path::Path, remote_url: &str) -> String {
+        std::process::Command::new("git")
+            .args(["init", "-b", "main"])
             .current_dir(dir)
             .output()
-            .unwrap_or_else(|e| panic!("failed to spawn `git {}`: {e}", args.join(" ")));
-
-        assert!(
-            output.status.success(),
-            "`git {}` failed with {}\nstdout: {}\nstderr: {}",
-            args.join(" "),
-            output.status,
-            String::from_utf8_lossy(&output.stdout).trim(),
-            String::from_utf8_lossy(&output.stderr).trim(),
-        );
-    }
-
-    fn create_git_repo_with_remote(dir: &std::path::Path, remote_url: &str) -> String {
-        git(dir, &["init", "-b", "main"]);
-        git(dir, &["config", "user.email", "test@test.com"]);
-        git(dir, &["config", "user.name", "Test"]);
-        git(dir, &["remote", "add", "origin", remote_url]);
-        git(dir, &["commit", "--allow-empty", "-m", "init"]);
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["remote", "add", "origin", remote_url])
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["commit", "--allow-empty", "-m", "init"])
+            .current_dir(dir)
+            .output()
+            .unwrap();
 
         format!("{}/", dir.to_string_lossy())
     }
