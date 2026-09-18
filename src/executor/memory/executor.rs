@@ -34,7 +34,6 @@ use tokio::time::{Duration, timeout};
 
 use super::setup::{
     MEMTRACK_COMMAND, ensure_memtrack_capabilities, get_memtrack_status, has_memtrack_capabilities,
-    install_memtrack,
 };
 
 pub struct MemoryExecutor;
@@ -149,7 +148,8 @@ impl Executor for MemoryExecutor {
         _system_info: &SystemInfo,
         _setup_cache_dir: Option<&Path>,
     ) -> Result<()> {
-        install_memtrack().await
+        // memtrack ships inside this binary, nothing to install.
+        Ok(())
     }
 
     fn grant_privileges(&self) -> Result<()> {

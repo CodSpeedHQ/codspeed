@@ -35,12 +35,9 @@ pub(crate) fn memtrack_setcap_spec() -> String {
     format!("{caps}+ep")
 }
 
-/// The binary that must carry the eBPF capabilities: memtrack runs as a
-/// subcommand of this executable, so it is this one.
-///
-/// Every invocation of the CLI therefore carries [`MEMTRACK_REQUIRED_CAPS`],
-/// `CAP_SYS_ADMIN` included. They are granted `+ep` and not inheritable, so a
-/// spawned benchmark does not receive them: the elevation stops here.
+/// The binary that carries the eBPF capabilities: memtrack is a subcommand of
+/// this executable. Granted `+ep`, not inheritable, so a benchmark spawned from
+/// here does not receive them.
 fn memtrack_path() -> Option<PathBuf> {
     self_exe().ok()
 }
@@ -98,19 +95,11 @@ pub fn ensure_memtrack_capabilities() -> Result<()> {
 }
 
 pub fn get_memtrack_status() -> ToolStatus {
-    // memtrack ships inside this binary, so it is installed by construction
-    // and carries this crate's version.
+    // memtrack ships inside this binary, so it is installed by construction.
     ToolStatus {
         tool_name: MEMTRACK_COMMAND.to_string(),
         status: ToolInstallStatus::Installed {
             version: env!("CARGO_PKG_VERSION").to_string(),
         },
     }
-}
-
-/// No-op: memtrack is part of this binary. Kept so the setup flow can treat it
-/// like the tools that do need installing.
-pub async fn install_memtrack() -> Result<()> {
-    debug!("{MEMTRACK_COMMAND} is bundled into this binary, nothing to install");
-    Ok(())
 }
