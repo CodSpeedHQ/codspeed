@@ -18,6 +18,7 @@ pub mod multi_targets;
 pub const DEFAULT_REPOSITORY_NAME: &str = "local-runs";
 
 #[derive(Args, Debug)]
+#[command(after_long_help = crate::exit_code::help_text())]
 pub struct ExecArgs {
     #[command(flatten)]
     pub shared: ExecAndRunSharedArgs,

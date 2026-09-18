@@ -18,6 +18,7 @@ use crate::executor::helpers::run_with_sudo::wrap_with_sudo;
 use crate::executor::shared::fifo::FifoBenchmarkData;
 use crate::executor::shared::fifo::RunnerFifo;
 use crate::executor::{ExecutionContext, ExecutorName, ExecutorSupport};
+use crate::exit_code::benchmark_failed;
 use crate::instruments::mongo_tracer::MongoTracer;
 use crate::prelude::*;
 use crate::runner_mode::RunnerMode;
@@ -177,7 +178,9 @@ impl Executor for WallTimeExecutor {
         debug!("cmd exit status: {status:?}");
 
         if !status.success() {
-            bail!("failed to execute the benchmark process: {status}");
+            return Err(benchmark_failed(anyhow!(
+                "failed to execute the benchmark process: {status}"
+            )));
         }
 
         Ok(())
