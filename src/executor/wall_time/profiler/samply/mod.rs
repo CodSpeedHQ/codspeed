@@ -92,6 +92,8 @@ impl Profiler for SamplyProfiler {
         let samply_builder = InternalCommands::Samply(SamplyArgs {
             args: vec![
                 "record".into(),
+                // Enable Samply's CoreCLR support so managed JIT frames are symbolized.
+                "--coreclr=enabled".into(),
                 "--presymbolicate".into(),
                 "--no-open".into(),
                 "--save-only".into(),
