@@ -154,10 +154,7 @@ fi
             .await
     }
 
-    /// Path to the `exec-harness` binary, built on first use.
-    ///
-    /// Production runs install a pinned release and invoke it by name, which
-    /// would make the tests depend on what is installed on the machine.
+    /// Path to the standalone `exec-harness` binary, built on first use.
     pub async fn exec_harness_binary_path() -> &'static str {
         static BINARY: OnceCell<String> = OnceCell::const_new();
 
@@ -173,29 +170,6 @@ fi
         let execution_context = ExecutionContext::new(config, profile_folder);
 
         (execution_context, temp_dir)
-    }
-
-    /// Serializes every executor test that drives a benchmark through the runner
-    /// FIFOs: the walltime and memory tests.
-    ///
-    /// `RUNNER_CTL_FIFO` and `RUNNER_ACK_FIFO` are fixed absolute paths shared
-    /// with the integrations, and `RunnerFifo::new` unlinks and recreates both.
-    /// Two overlapping executions therefore pull the FIFO out from under each
-    /// other: the first keeps its fds on a now-unlinked inode, the second's
-    /// child opens the replacement by path, and they never meet again. Nothing
-    /// there times out, so the test hangs forever instead of failing.
-    ///
-    /// The race exists outside the tests too, where this lock cannot reach it:
-    /// COD-3560.
-    pub static RUNNER_FIFO_LOCK: OnceCell<Semaphore> = OnceCell::const_new();
-
-    pub async fn acquire_runner_fifo_lock() -> SemaphorePermit<'static> {
-        RUNNER_FIFO_LOCK
-            .get_or_init(|| async { Semaphore::new(1) })
-            .await
-            .acquire()
-            .await
-            .unwrap()
     }
 
     // Uprobes set by memtrack, lead to crashes in valgrind because they work by setting breakpoints on the first
@@ -279,10 +253,14 @@ mod walltime {
     use crate::executor::wall_time::executor::WallTimeExecutor;
 
     async fn get_walltime_executor() -> (SemaphorePermit<'static>, WallTimeExecutor) {
+        static WALLTIME_SEMAPHORE: OnceCell<Semaphore> = OnceCell::const_new();
+
         // We can't execute multiple walltime executors in parallel because perf isn't thread-safe (yet). We have to
-        // use a semaphore to limit concurrent access. The same permit also
-        // excludes the memory tests, which share the global runner FIFOs.
-        let permit = acquire_runner_fifo_lock().await;
+        // use a semaphore to limit concurrent access.
+        let semaphore = WALLTIME_SEMAPHORE
+            .get_or_init(|| async { Semaphore::new(1) })
+            .await;
+        let permit = semaphore.acquire().await.unwrap();
 
         let executor = WallTimeExecutor::new(None);
         let system_info = SystemInfo::new().unwrap();
@@ -474,22 +452,16 @@ mod memory {
         MemoryExecutor,
     ) {
         static MEMORY_INIT: OnceCell<()> = OnceCell::const_new();
+        static MEMORY_SEMAPHORE: OnceCell<Semaphore> = OnceCell::const_new();
 
         MEMORY_INIT
             .get_or_init(|| async {
-                // `grant_privileges` setcaps the binary memtrack is run from,
-                // i.e. `current_exe`. Without the override that is the test
-                // harness, so the capabilities would land on a throwaway binary
-                // and the run would still lack them.
+                // `grant_privileges` setcaps `current_exe`, the test harness here.
                 let self_exe = codspeed_binary_path().await;
                 temp_env::async_with_vars(&[(SELF_EXE_ENV_VAR, Some(self_exe))], async {
-                    // `setcap` goes through sudo, and a sudo password prompt
-                    // under `cargo test` is buried in captured output while the
-                    // read blocks forever: the suite hangs with nothing to say
-                    // what it is waiting for. Check first, fail with the command
-                    // to run. This bites on every rebuild, not once, because
-                    // file capabilities are an xattr and cargo writes a new
-                    // binary on each relink.
+                    // `cargo test` hides the sudo prompt and then blocks on it
+                    // forever. Capabilities are an xattr, so this is needed on
+                    // every relink, not once.
                     let needs_grant = !is_root_user() && !has_memtrack_capabilities();
                     assert!(
                         !needs_grant || can_elevate_without_prompt(),
@@ -509,12 +481,12 @@ mod memory {
             })
             .await;
 
-        let permit = acquire_runner_fifo_lock().await;
+        let semaphore = MEMORY_SEMAPHORE
+            .get_or_init(|| async { Semaphore::new(1) })
+            .await;
+        let permit = semaphore.acquire().await.unwrap();
 
         // Memory executor uses heaptrack which uses BPF-based instrumentation, which conflicts with valgrind.
-        //
-        // Lock order: always after the FIFO permit. No other test takes both,
-        // so the two can never be wanted in opposite orders.
         let _lock = acquire_bpf_instrumentation_lock().await;
 
         (permit, _lock, MemoryExecutor)
@@ -532,9 +504,7 @@ mod memory {
     async fn test_memory_executor(#[case] cmd: &str) {
         let (_permit, _lock, mut executor) = get_memory_executor().await;
 
-        // The executor re-execs `current_exe` to reach the memtrack subcommand,
-        // and under `cargo test` that is the test harness. Point it at the
-        // real binary.
+        // The executor re-execs `current_exe`, the test harness here.
         let self_exe = codspeed_binary_path().await;
         // Unset GITHUB_ACTIONS to force LocalProvider which supports repository_override
         temp_env::async_with_vars(
