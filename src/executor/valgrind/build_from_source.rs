@@ -60,6 +60,11 @@ fn missing_build_dependencies() -> Vec<&'static str> {
         .collect()
 }
 
+/// On a multilib host, `configure` also enables the 32-bit secondary platform, whose
+/// callgrind build gets no capstone flags and fails on the `#error` in `cycledecode.c`.
+/// CodSpeed only instruments the primary 64-bit platform anyway.
+const CONFIGURE_ARGS: &[&str] = &["--enable-only64bit"];
+
 fn parallel_jobs() -> usize {
     std::thread::available_parallelism()
         .map(|jobs| jobs.get())
@@ -116,7 +121,7 @@ async fn fetch_and_compile() -> Result<TempDir> {
     // The scripts are addressed by absolute path: how a relative program path is resolved against
     // the working directory of the child is platform specific and unspecified.
     run_build_command(command_in(path, path.join("autogen.sh"), &[])).await?;
-    run_build_command(command_in(path, path.join("configure"), &[])).await?;
+    run_build_command(command_in(path, path.join("configure"), CONFIGURE_ARGS)).await?;
     run_build_command(command_in(
         path,
         "make",
