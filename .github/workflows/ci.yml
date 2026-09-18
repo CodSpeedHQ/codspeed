@@ -163,6 +163,7 @@ jobs:
         workload: [ls, dd, tar]
     env:
       CODSPEED_REV: ${{ github.event.pull_request.head.sha || github.sha }}
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -172,13 +173,35 @@ jobs:
       - uses: ./.github/actions/install-bpf-deps
 
       - name: Install memtrack
-        run: cargo install --git https://github.com/CodSpeedHQ/codspeed --rev "$CODSPEED_REV" --locked memtrack
+        uses: baptiste0928/cargo-install@8195d4f734a149db85385bb4102b42efcd373759 # v3.5.0
+        with:
+          crate: memtrack
+          git: https://github.com/CodSpeedHQ/codspeed
+          commit: ${{ env.CODSPEED_REV }}
 
+      - name: Install codspeed-runner
+        uses: baptiste0928/cargo-install@8195d4f734a149db85385bb4102b42efcd373759 # v3.5.0
+        with:
+          crate: codspeed-runner
+          git: https://github.com/CodSpeedHQ/codspeed
+          commit: ${{ env.CODSPEED_REV }}
+
+      # The CodSpeed action reinstalls the runner into CARGO_INSTALL_ROOT; pointing
+      # it at the cached install root makes cargo see the same revision as already
+      # installed and skip the rebuild.
+      - name: Reuse the cached runner install
+        run: echo "CARGO_INSTALL_ROOT=$HOME/.cargo-install/codspeed-runner" >> "$GITHUB_ENV"
+
+      - name: Verify installed binaries
+        run: |
+          which codspeed codspeed-memtrack
+          codspeed --version
+          codspeed-memtrack --version
+
+      # The benchmarked command is memtrack itself, which needs file capabilities
+      # to load its eBPF programs even though the runner measures walltime.
       - name: Grant memtrack file capabilities
-        run: cargo r -- setup --mode memory
-
-      - name: Verify memtrack binary
-        run: codspeed-memtrack --version
+        run: codspeed setup --mode memory
 
       # The write benchmarks overwrite these files every round; creating them
       # inside a measured round would time one-off disk allocation.
