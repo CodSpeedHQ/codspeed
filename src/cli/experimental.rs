@@ -26,6 +26,14 @@ pub struct ExperimentalArgs {
         value_parser = clap::builder::FalseyValueParser::new()
     )]
     pub experimental_memory_track_physical: bool,
+    /// Capture allocation call stacks in memory mode.
+    #[arg(
+        long,
+        default_value_t = false,
+        help_heading = "Experimental",
+        env = "CODSPEED_EXPERIMENTAL_MEMORY_CAPTURE_STACK"
+    )]
+    pub experimental_memory_capture_stack: bool,
 
     /// Do not set PYTHONMALLOC for simulation runs.
     #[arg(
@@ -57,6 +65,9 @@ impl ExperimentalArgs {
         }
         if self.experimental_disable_pythonmalloc_override {
             flags.push("--experimental-disable-pythonmalloc-override");
+        }
+        if self.experimental_memory_capture_stack {
+            flags.push("--experimental-memory-capture-stack");
         }
         flags
     }

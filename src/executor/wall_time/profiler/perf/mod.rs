@@ -10,6 +10,7 @@ use crate::executor::helpers::env::suppress_go_perf_unwinding_warning;
 use crate::executor::helpers::harvest_perf_maps_for_pids::harvest_perf_maps_for_pids;
 use crate::executor::helpers::run_with_sudo::wrap_with_sudo;
 use crate::executor::shared::fifo::FifoBenchmarkData;
+use crate::executor::shared::module_artifacts::save_artifacts;
 use crate::executor::wall_time::profiler::NO_BENCHMARKS_DETECTED_WARNING;
 use crate::executor::wall_time::profiler::Profiler;
 use crate::executor::wall_time::profiler::SAMPLING_RATE_HZ;
@@ -29,16 +30,9 @@ use runner_shared::metadata::WalltimeMetadata;
 use std::path::Path;
 use std::path::PathBuf;
 
-mod debug_info;
-mod elf_helper;
 mod jit_dump;
-mod loaded_module;
-mod module_symbols;
-mod naming;
 mod parse_perf_file;
-mod save_artifacts;
 pub(crate) mod setup;
-mod unwind_data;
 
 pub mod fifo;
 pub mod perf_executable;
@@ -306,11 +300,7 @@ impl BenchmarkData<'_> {
             uri_by_ts: self.marker_result.uri_by_ts.clone(),
             ignored_modules_by_pid: artifacts.ignored_modules_by_pid,
             markers: self.marker_result.markers.clone(),
-            debug_info: artifacts.debug_info,
-            mapped_process_debug_info_by_pid: artifacts.mapped_process_debug_info_by_pid,
-            mapped_process_unwind_data_by_pid: artifacts.mapped_process_unwind_data_by_pid,
-            mapped_process_module_symbols: artifacts.symbol_pid_mappings_by_pid,
-            path_key_to_path: artifacts.key_to_path,
+            artifacts: artifacts.artifacts,
             // Deprecated fields below are no longer used
             debug_info_by_pid: Default::default(),
             ignored_modules: Default::default(),

@@ -4,6 +4,8 @@ mod bpf_token;
 mod ebpf;
 mod ipc;
 mod kernel;
+#[cfg(feature = "ebpf")]
+mod perf_mappings;
 pub mod prelude;
 #[cfg(feature = "ebpf")]
 mod session;

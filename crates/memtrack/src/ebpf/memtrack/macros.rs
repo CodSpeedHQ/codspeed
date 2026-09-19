@@ -85,8 +85,19 @@ macro_rules! attach_uprobe_uretprobe {
                 let Some(offset) = symbols.offset(symbol) else {
                     return Ok(false);
                 };
+                let key = (lib_path.to_path_buf(), offset);
+                if self.attached_offsets.contains(&key) {
+                    log::trace!(
+                        "Skipping alias {} at {:#x} in {} (already instrumented)",
+                        symbol,
+                        offset,
+                        lib_path.display()
+                    );
+                    return Ok(true);
+                }
                 self.[<try_ $name>](lib_path, offset)
                     .with_context(|| format!("Failed to attach {symbol}"))?;
+                self.attached_offsets.insert(key);
                 log::trace!("Attached {} at {:#x}", symbol, offset);
                 Ok(true)
             }
@@ -121,8 +132,19 @@ macro_rules! attach_uprobe {
                 let Some(offset) = symbols.offset(symbol) else {
                     return Ok(false);
                 };
+                let key = (lib_path.to_path_buf(), offset);
+                if self.attached_offsets.contains(&key) {
+                    log::trace!(
+                        "Skipping alias {} at {:#x} in {} (already instrumented)",
+                        symbol,
+                        offset,
+                        lib_path.display()
+                    );
+                    return Ok(true);
+                }
                 self.[<try_ $name>](lib_path, offset)
                     .with_context(|| format!("Failed to attach {symbol}"))?;
+                self.attached_offsets.insert(key);
                 log::trace!("Attached {} at {:#x}", symbol, offset);
                 Ok(true)
             }

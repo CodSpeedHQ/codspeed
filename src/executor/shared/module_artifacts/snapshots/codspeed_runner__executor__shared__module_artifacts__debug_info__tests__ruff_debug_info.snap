@@ -1,5 +1,5 @@
 ---
-source: src/executor/wall_time/perf/debug_info.rs
+source: src/executor/shared/module_artifacts/debug_info.rs
 expression: module_debug_info.debug_infos
 ---
 [
