@@ -1,7 +1,5 @@
 use super::{ExecutionContext, ExecutorName, get_executor_from_mode, run_executor};
 use crate::api_client::CodSpeedAPIClient;
-use crate::binary_installer::ensure_binary_installed;
-use crate::binary_pins::{self, PinnedBinary};
 use crate::cli::exec::multi_targets;
 use crate::cli::run::logger::Logger;
 use crate::executor::config::BenchmarkTarget;
@@ -16,9 +14,6 @@ use crate::upload::{UploadResult, upload};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-
-pub const EXEC_HARNESS_COMMAND: &str = "exec-harness";
-pub const EXEC_HARNESS_VERSION: &str = binary_pins::EXEC_HARNESS_VERSION;
 
 /// Shared orchestration state created once per CLI invocation.
 ///
@@ -82,13 +77,6 @@ impl Orchestrator {
             .collect();
 
         if !exec_targets.is_empty() {
-            ensure_binary_installed(
-                EXEC_HARNESS_COMMAND,
-                EXEC_HARNESS_VERSION,
-                PinnedBinary::ExecHarnessInstaller,
-            )
-            .await?;
-
             let pipe_cmd = multi_targets::build_exec_targets_pipe_command(&exec_targets)?;
             let label = match exec_targets.as_slice() {
                 [BenchmarkTarget::Exec { command, .. }] => {
@@ -143,7 +131,7 @@ impl Orchestrator {
         for (run_part_index, part) in run_parts.into_iter().enumerate() {
             let config = self
                 .config
-                .executor_config_for_command(part.command, !part.uses_exec_harness);
+                .executor_config_for_command(part.command, part.uses_exec_harness);
             let mut executor = get_executor_from_mode(part.mode, self.config.walltime_profiler);
             let profile_folder =
                 self.resolve_profile_folder(&executor.name(), run_part_index, total_parts)?;

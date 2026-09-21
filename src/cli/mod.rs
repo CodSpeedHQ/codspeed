@@ -1,6 +1,9 @@
 mod auth;
 pub(crate) mod exec;
+pub(crate) mod exec_harness;
 pub(crate) mod experimental;
+#[cfg(target_os = "linux")]
+pub(crate) mod memtrack;
 mod profile;
 pub(crate) mod run;
 pub(crate) mod samply;
@@ -108,39 +111,84 @@ enum Commands {
 #[derive(Subcommand, Debug)]
 pub(crate) enum InternalCommands {
     /// Run the bundled samply profiler. Args are forwarded to samply.
-    #[command(disable_help_flag = true, disable_help_subcommand = true)]
+    #[command(hide = true, disable_help_flag = true, disable_help_subcommand = true)]
     Samply(samply::SamplyArgs),
+    /// Run the bundled exec-harness. Args are forwarded to exec-harness.
+    #[command(hide = true, disable_help_flag = true, disable_help_subcommand = true)]
+    ExecHarness(exec_harness::ExecHarnessArgs),
+    /// Run the bundled memtrack. Args are forwarded to memtrack.
+    #[cfg(target_os = "linux")]
+    #[command(hide = true, disable_help_flag = true, disable_help_subcommand = true)]
+    Memtrack(memtrack::MemtrackArgs),
 }
 
-/// Overrides the executable used to re-invoke internal subcommands.
+/// Test-only override for the executable internal subcommands re-exec: under
+/// `cargo test` [`std::env::current_exe`] is the test harness.
 ///
-/// [`std::env::current_exe`] is not always a binary that can dispatch them: it
-/// resolves to the host executable when this crate is linked into one, and to
-/// a wrapper when the CLI is invoked through a launcher script.
+/// `cfg(test)` because this path goes to `sudo setcap <caps>+ep`.
+#[cfg(test)]
 pub(crate) const SELF_EXE_ENV_VAR: &str = "CODSPEED_SELF_EXE";
+
+/// The executable that internal subcommands are re-invoked through.
+///
+/// The memory executor `setcap`s this exact path before running it, and `setcap`
+/// on a path that is not the one later exec'd succeeds while changing nothing.
+pub(crate) fn self_exe() -> Result<PathBuf> {
+    #[cfg(test)]
+    if let Some(path) = std::env::var_os(SELF_EXE_ENV_VAR) {
+        return Ok(PathBuf::from(path));
+    }
+
+    std::env::current_exe().context("failed to resolve current executable for internal subcommand")
+}
 
 impl InternalCommands {
     /// Build a [`CommandBuilder`] that re-execs the current binary into this
     /// internal subcommand. Each variant owns its own arg layout.
     pub fn get_command_builder(&self) -> Result<CommandBuilder> {
-        let self_exe = match std::env::var_os(SELF_EXE_ENV_VAR) {
-            Some(path) => PathBuf::from(path),
-            None => std::env::current_exe()
-                .context("failed to resolve current executable for internal subcommand")?,
-        };
-        let mut builder = CommandBuilder::new(self_exe);
+        let mut builder = CommandBuilder::new(self_exe()?);
         match self {
             InternalCommands::Samply(args) => {
                 builder.arg("samply");
                 builder.args(args.args.iter().cloned());
             }
+            InternalCommands::ExecHarness(args) => {
+                builder.arg("exec-harness");
+                builder.args(args.args.iter().cloned());
+            }
+            #[cfg(target_os = "linux")]
+            InternalCommands::Memtrack(args) => {
+                builder.arg("memtrack");
+                builder.args(args.args.iter().cloned());
+            }
         }
         Ok(builder)
+    }
+
+    pub fn get_shell_command(&self) -> Result<String> {
+        Ok(self.get_command_builder()?.as_command_line())
+    }
+}
+
+/// Dispatch a bundled subcommand, before any runner setup: these run in the
+/// benchmark's working directory, where a stray `codspeed.yaml` would otherwise
+/// abort the measurement.
+fn run_internal(command: InternalCommands) -> Result<()> {
+    match command {
+        InternalCommands::Samply(args) => samply::run(args),
+        InternalCommands::ExecHarness(args) => exec_harness::run(args),
+        #[cfg(target_os = "linux")]
+        InternalCommands::Memtrack(args) => memtrack::run(args),
     }
 }
 
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
+
+    if let Commands::Internal(command) = cli.command {
+        return run_internal(command);
+    }
+
     let codspeed_config = load_config(&cli)?;
     let mut api_client = build_api_client(&cli, &codspeed_config);
 
@@ -158,7 +206,8 @@ pub async fn run() -> Result<()> {
     let setup_cache_dir = setup_cache_dir.as_deref();
 
     match cli.command {
-        Commands::Run(_) | Commands::Exec(_) | Commands::Internal(InternalCommands::Samply(_)) => {} // these are responsible for their own logger initialization
+        // These initialize their own logging.
+        Commands::Run(_) | Commands::Exec(_) => {}
         _ => {
             init_local_logger()?;
         }
@@ -210,7 +259,9 @@ pub async fn run() -> Result<()> {
         Commands::Use(args) => use_mode::run(args)?,
         Commands::Show => show::run()?,
         Commands::Update => update::run().await?,
-        Commands::Internal(InternalCommands::Samply(args)) => samply::run(args)?,
+        Commands::Internal(_) => {
+            unreachable!("internal subcommands are dispatched before runner setup")
+        }
     }
     Ok(())
 }
