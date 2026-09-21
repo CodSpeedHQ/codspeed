@@ -1,4 +1,3 @@
-use crate::MeasurementMode;
 use crate::constants::INTEGRATION_NAME;
 use crate::constants::INTEGRATION_VERSION;
 use crate::prelude::*;
@@ -8,7 +7,7 @@ use crate::uri;
 use instrument_hooks_bindings::InstrumentHooks;
 use std::process::Command;
 
-pub fn perform(commands: Vec<BenchmarkCommand>, mode: MeasurementMode) -> Result<()> {
+pub fn perform(commands: Vec<BenchmarkCommand>) -> Result<()> {
     let hooks = InstrumentHooks::instance(INTEGRATION_NAME, INTEGRATION_VERSION);
 
     for benchmark_cmd in commands {
