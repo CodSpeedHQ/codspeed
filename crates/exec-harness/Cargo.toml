@@ -28,5 +28,6 @@ rstest = { workspace = true }
 [build-dependencies]
 cc = "1"
 
+# Bundled in the runner binary, not released on its own.
 [package.metadata.dist]
-targets = ["aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"]
+dist = false
