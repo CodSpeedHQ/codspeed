@@ -1,5 +1,4 @@
 use crate::executor::config::BenchmarkTarget;
-use crate::executor::orchestrator::EXEC_HARNESS_COMMAND;
 use crate::prelude::*;
 use crate::project_config::{Target, TargetCommand, WalltimeOptions};
 use exec_harness::BenchmarkCommand;
@@ -69,8 +68,11 @@ pub fn build_benchmark_targets(
         .collect()
 }
 
-/// Build a shell command string that pipes BenchmarkTarget::Exec variants to exec-harness via stdin
+/// Build a shell command string that pipes BenchmarkTarget::Exec variants to exec-harness via stdin.
+///
+/// `exec_harness` is the already shell-quoted invocation of exec-harness.
 pub fn build_exec_targets_pipe_command(
+    exec_harness: &str,
     targets: &[&crate::executor::config::BenchmarkTarget],
 ) -> Result<String> {
     let inputs: Vec<BenchmarkCommand> = targets
@@ -92,9 +94,9 @@ pub fn build_exec_targets_pipe_command(
         .collect::<Result<Vec<_>>>()?;
 
     let json = serde_json::to_string(&inputs).context("Failed to serialize targets to JSON")?;
-    Ok(build_pipe_command_from_json(&json))
+    Ok(build_pipe_command_from_json(exec_harness, &json))
 }
 
-fn build_pipe_command_from_json(json: &str) -> String {
-    format!("{EXEC_HARNESS_COMMAND} - <<'CODSPEED_EOF'\n{json}\nCODSPEED_EOF")
+fn build_pipe_command_from_json(exec_harness: &str, json: &str) -> String {
+    format!("{exec_harness} - <<'CODSPEED_EOF'\n{json}\nCODSPEED_EOF")
 }
