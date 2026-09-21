@@ -6,10 +6,7 @@ use std::ffi::OsString;
 
 #[derive(Parser, Debug)]
 #[command(name = "exec-harness")]
-#[command(
-    version,
-    about = "CodSpeed exec harness - wraps commands with performance instrumentation"
-)]
+#[command(about = "CodSpeed exec harness - wraps commands with performance instrumentation")]
 struct Args {
     /// Optional benchmark name, else the command will be used as the name
     #[arg(long)]
