@@ -154,10 +154,7 @@ fi
             .await
     }
 
-    /// Path to the `exec-harness` binary, built on first use.
-    ///
-    /// Production runs install a pinned release and invoke it by name, which
-    /// would make the tests depend on what is installed on the machine.
+    /// Path to the standalone `exec-harness` binary, built on first use.
     pub async fn exec_harness_binary_path() -> &'static str {
         static BINARY: OnceCell<String> = OnceCell::const_new();
 
@@ -445,7 +442,9 @@ fi
 #[cfg(target_os = "linux")]
 mod memory {
     use super::helpers::*;
+    use crate::executor::helpers::run_with_sudo::{can_elevate_without_prompt, is_root_user};
     use crate::executor::memory::executor::MemoryExecutor;
+    use crate::executor::memory::setup::{has_memtrack_capabilities, memtrack_setcap_spec};
 
     async fn get_memory_executor() -> (
         SemaphorePermit<'static>,
@@ -457,10 +456,28 @@ mod memory {
 
         MEMORY_INIT
             .get_or_init(|| async {
-                let executor = MemoryExecutor;
-                let system_info = SystemInfo::new().unwrap();
-                executor.setup(&system_info, None).await.unwrap();
-                executor.grant_privileges().unwrap();
+                // `grant_privileges` setcaps `current_exe`, the test harness here.
+                let self_exe = codspeed_binary_path().await;
+                temp_env::async_with_vars(&[(SELF_EXE_ENV_VAR, Some(self_exe))], async {
+                    // `cargo test` hides the sudo prompt and then blocks on it
+                    // forever. Capabilities are an xattr, so this is needed on
+                    // every relink, not once.
+                    let needs_grant = !is_root_user() && !has_memtrack_capabilities();
+                    assert!(
+                        !needs_grant || can_elevate_without_prompt(),
+                        "The memory tests have to `setcap` {self_exe}, and sudo would prompt for a \
+                         password here -- a prompt `cargo test` hides and then blocks on forever.\n\
+                         Cache the credentials first (`sudo -v && cargo test ...`), or grant them \
+                         by hand:\n  sudo setcap {} {self_exe}",
+                        memtrack_setcap_spec(),
+                    );
+
+                    let executor = MemoryExecutor;
+                    let system_info = SystemInfo::new().unwrap();
+                    executor.setup(&system_info, None).await.unwrap();
+                    executor.grant_privileges().unwrap();
+                })
+                .await;
             })
             .await;
 
@@ -487,12 +504,17 @@ mod memory {
     async fn test_memory_executor(#[case] cmd: &str) {
         let (_permit, _lock, mut executor) = get_memory_executor().await;
 
+        // The executor re-execs `current_exe`, the test harness here.
+        let self_exe = codspeed_binary_path().await;
         // Unset GITHUB_ACTIONS to force LocalProvider which supports repository_override
-        temp_env::async_with_vars(&[("GITHUB_ACTIONS", None::<&str>)], async {
-            let config = memory_config(cmd);
-            let (execution_context, _temp_dir) = create_test_setup(config).await;
-            executor.run(&execution_context, &None).await.unwrap();
-        })
+        temp_env::async_with_vars(
+            &[("GITHUB_ACTIONS", None), (SELF_EXE_ENV_VAR, Some(self_exe))],
+            async {
+                let config = memory_config(cmd);
+                let (execution_context, _temp_dir) = create_test_setup(config).await;
+                executor.run(&execution_context, &None).await.unwrap();
+            },
+        )
         .await;
     }
 
@@ -502,8 +524,13 @@ mod memory {
         let (_permit, _lock, mut executor) = get_memory_executor().await;
 
         let (env_var, env_value) = env_case;
+        let self_exe = codspeed_binary_path().await;
         temp_env::async_with_vars(
-            &[(env_var, Some(env_value)), ("GITHUB_ACTIONS", None)],
+            &[
+                (env_var, Some(env_value)),
+                ("GITHUB_ACTIONS", None),
+                (SELF_EXE_ENV_VAR, Some(self_exe)),
+            ],
             async {
                 let cmd = env_var_validation_script(env_var, env_value);
                 let config = memory_config(&cmd);
@@ -533,9 +560,16 @@ fi
         let (execution_context, _temp_dir) = create_test_setup(config).await;
         let (_permit, _lock, mut executor) = get_memory_executor().await;
 
-        temp_env::async_with_vars(&[("PATH", Some(&modified_path))], async {
-            executor.run(&execution_context, &None).await.unwrap();
-        })
+        let self_exe = codspeed_binary_path().await;
+        temp_env::async_with_vars(
+            &[
+                ("PATH", Some(modified_path.as_str())),
+                (SELF_EXE_ENV_VAR, Some(self_exe)),
+            ],
+            async {
+                executor.run(&execution_context, &None).await.unwrap();
+            },
+        )
         .await;
     }
 
@@ -564,9 +598,16 @@ fi
         let (execution_context, _temp_dir) = create_test_setup(config).await;
         let (_permit, _lock, mut executor) = get_memory_executor().await;
 
-        temp_env::async_with_vars(&[("LD_LIBRARY_PATH", Some(&modified))], async {
-            executor.run(&execution_context, &None).await.unwrap();
-        })
+        let self_exe = codspeed_binary_path().await;
+        temp_env::async_with_vars(
+            &[
+                ("LD_LIBRARY_PATH", Some(modified.as_str())),
+                (SELF_EXE_ENV_VAR, Some(self_exe)),
+            ],
+            async {
+                executor.run(&execution_context, &None).await.unwrap();
+            },
+        )
         .await;
     }
 }
