@@ -10,12 +10,11 @@
 //! minutes and installs system-wide, so an interactive user is asked first.
 
 use crate::executor::helpers::command::CommandBuilder;
+use crate::executor::helpers::confirm::confirm_default_yes;
 use crate::executor::helpers::run_command_with_log_pipe::run_command_with_log_pipe;
 use crate::executor::helpers::run_with_sudo::wrap_with_sudo;
 use crate::local_logger::rolling_buffer::{activate_rolling_buffer, deactivate_rolling_buffer};
-use crate::local_logger::{IS_TTY, suspend_progress_bar};
 use crate::prelude::*;
-use console::Term;
 use std::env;
 use std::ffi::OsStr;
 use std::path::Path;
@@ -139,9 +138,7 @@ async fn install_build(source_dir: &Path) -> Result<()> {
 /// Decision, in order:
 ///
 /// - [`BUILD_FROM_SOURCE_ENV`] set to `true` or `false`: that answer, unconditionally;
-/// - not a TTY (CI, unattended runs): build, since nobody is there to answer and
-///   failing the run outright is the worse outcome;
-/// - otherwise: ask, defaulting to building when the answer is empty.
+/// - otherwise: ask, which on a run with no terminal means building without asking.
 ///
 /// Declining is a legitimate choice, not a failure: the caller then points at a
 /// manual installation, which is what happens on a failed build too.
@@ -159,33 +156,13 @@ pub(super) fn is_wanted() -> bool {
         Err(_) => {}
     }
 
-    if !*IS_TTY {
-        debug!("Not attached to a terminal, building valgrind from source without asking");
-        return true;
-    }
-
-    suspend_progress_bar(prompt_for_source_build)
-}
-
-/// Ask whether to build valgrind from source, defaulting to yes on an empty answer.
-///
-/// Mirrors the confirmation the walltime executor uses before installing bash: the
-/// question goes to stderr so it stays visible whatever the caller does with stdout.
-fn prompt_for_source_build() -> bool {
-    eprintln!(
+    let accepted = confirm_default_yes(
         "CodSpeed can build valgrind-codspeed from source for this system. It clones the sources \
          into a temporary directory, compiles them (a few minutes) and installs them system-wide \
          with sudo. Declining leaves the installation to you, see \
-         https://github.com/CodSpeedHQ/valgrind-codspeed"
+         https://github.com/CodSpeedHQ/valgrind-codspeed",
+        "Build valgrind-codspeed from source now?",
     );
-    eprint!("\nBuild valgrind-codspeed from source now? [Y/n] ");
-
-    let line = Term::stderr().read_line().unwrap_or_default();
-    let answer = line.trim();
-
-    // Default to yes on empty input (just pressing Enter), as the `[Y/n]` prompt announces.
-    let accepted =
-        answer.is_empty() || answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes");
     if !accepted {
         info!(
             "Skipping the source build. Set {BUILD_FROM_SOURCE_ENV}=true to build without being asked"
