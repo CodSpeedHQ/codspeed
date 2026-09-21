@@ -11,7 +11,7 @@ use std::thread;
 
 #[derive(Parser)]
 #[command(name = "memtrack")]
-#[command(version, about = "Track memory allocations using eBPF", long_about = None)]
+#[command(about = "Track memory allocations using eBPF", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
