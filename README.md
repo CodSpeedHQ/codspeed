@@ -1,9 +1,11 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://codspeed.io/codspeed-logo-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="https://codspeed.io/codspeed-logo-light.svg">
-    <img alt="CodSpeed logo" src="https://codspeed.io/codspeed-logo-light.svg" width="400px">
-  </picture>
+  <a href="https://codspeed.io/?utm_source=codspeed&utm_medium=readme">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://codspeed.io/codspeed-logo-dark.svg">
+      <source media="(prefers-color-scheme: light)" srcset="https://codspeed.io/codspeed-logo-light.svg">
+      <img alt="CodSpeed logo" src="https://codspeed.io/codspeed-logo-light.svg" width="400px">
+    </picture>
+  </a>
 </p>
 
 <h3 align="center">Optimize code performance and catch regressions early.</h3>
