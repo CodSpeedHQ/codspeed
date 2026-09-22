@@ -133,7 +133,6 @@ pub struct ExecutorConfig {
     /// Whether to enable language-level introspection (Node.js, Go wrappers in PATH).
     /// Disabled for exec-harness targets since they don't need it.
     pub enable_introspection: bool,
-    pub uses_exec_harness: bool,
     /// Enable valgrind's --fair-sched option.
     pub fair_sched: bool,
     /// Enable valgrind's --cycle-estimation option.
@@ -199,7 +198,9 @@ impl OrchestratorConfig {
     /// Produce a per-execution [`ExecutorConfig`] for the given command and mode.
     ///
     /// `uses_exec_harness` gates the language-level wrappers (Node.js, Go) in
-    /// `PATH` and valgrind's `--instr-atstart`.
+    /// `PATH`, and forces subprocess tracking on: exec-harness toggles the
+    /// instrumentation in its own process and then forks the benchmark, which is
+    /// only measured if valgrind propagates that state across `fork`/`exec`.
     pub fn executor_config_for_command(
         &self,
         command: String,
@@ -218,11 +219,10 @@ impl OrchestratorConfig {
             go_runner_version: self.go_runner_version.clone(),
             extra_env: self.extra_env.clone(),
             enable_introspection: !uses_exec_harness,
-            uses_exec_harness,
             fair_sched: self.fair_sched,
             cycle_estimation: self.cycle_estimation,
             exclude_allocations: self.exclude_allocations,
-            simulation_track_subprocess: self.simulation_track_subprocess,
+            simulation_track_subprocess: self.simulation_track_subprocess || uses_exec_harness,
             memory_track_physical: self.memory_track_physical,
             disable_pythonmalloc_override: self.disable_pythonmalloc_override,
         }

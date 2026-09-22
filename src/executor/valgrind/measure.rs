@@ -33,18 +33,11 @@ fn get_valgrind_args(tool: &SimulationTool, config: &ExecutorConfig) -> Vec<Stri
     .map(|x| x.to_string())
     .collect();
 
-    // exec-harness toggles the instrumentation in its own process and then forks
-    // the benchmark, so the child is measured only if valgrind propagates that
-    // state across `fork`/`exec`. With `no` the run dumps a single zero-cost part.
-    if config.simulation_track_subprocess || config.uses_exec_harness {
-        args.push("--instr-atstart=inherit".to_string());
-    } else {
-        args.push("--instr-atstart=no".to_string());
-    }
-
     if config.simulation_track_subprocess {
+        args.push("--instr-atstart=inherit".to_string());
         args.push("--separate-threads=yes".to_string());
     } else {
+        args.push("--instr-atstart=no".to_string());
         args.push("--separate-threads=no".to_string());
     }
 
