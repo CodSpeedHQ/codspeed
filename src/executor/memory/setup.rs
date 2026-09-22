@@ -1,7 +1,6 @@
 use crate::cli::self_exe;
 use crate::executor::helpers::capabilities::binary_has_capabilities;
 use crate::executor::helpers::run_with_sudo::{is_root_user, run_with_sudo};
-use crate::executor::{ToolInstallStatus, ToolStatus};
 use crate::prelude::*;
 use caps::Capability;
 use std::path::PathBuf;
@@ -91,14 +90,4 @@ pub fn ensure_memtrack_capabilities() -> Result<()> {
     }
 
     Ok(())
-}
-
-pub fn get_memtrack_status() -> ToolStatus {
-    // memtrack ships inside this binary, so it is installed by construction.
-    ToolStatus {
-        tool_name: MEMTRACK_COMMAND.to_string(),
-        status: ToolInstallStatus::Installed {
-            version: env!("CARGO_PKG_VERSION").to_string(),
-        },
-    }
 }

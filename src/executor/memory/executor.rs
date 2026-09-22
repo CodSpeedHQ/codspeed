@@ -27,14 +27,11 @@ use runner_shared::fifo::Command as FifoCommand;
 use runner_shared::fifo::IntegrationMode;
 use semver::Version;
 use std::fs::canonicalize;
-use std::path::Path;
 use std::rc::Rc;
 use tempfile::NamedTempFile;
 use tokio::time::{Duration, timeout};
 
-use super::setup::{
-    MEMTRACK_COMMAND, ensure_memtrack_capabilities, get_memtrack_status, has_memtrack_capabilities,
-};
+use super::setup::{MEMTRACK_COMMAND, ensure_memtrack_capabilities, has_memtrack_capabilities};
 
 pub struct MemoryExecutor;
 
@@ -111,7 +108,7 @@ impl Executor for MemoryExecutor {
     }
 
     fn tool_status(&self) -> Option<ToolStatus> {
-        Some(get_memtrack_status())
+        None
     }
 
     fn privilege_status(&self) -> Option<PrivilegeStatus> {
@@ -140,15 +137,6 @@ impl Executor for MemoryExecutor {
             SupportedOs::Linux(_) => ExecutorSupport::FullySupported,
             SupportedOs::Macos { .. } => ExecutorSupport::Unsupported,
         }
-    }
-
-    async fn setup(
-        &self,
-        _system_info: &SystemInfo,
-        _setup_cache_dir: Option<&Path>,
-    ) -> Result<()> {
-        // memtrack ships inside this binary, nothing to install.
-        Ok(())
     }
 
     fn grant_privileges(&self) -> Result<()> {
