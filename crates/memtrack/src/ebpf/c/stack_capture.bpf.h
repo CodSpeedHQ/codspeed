@@ -18,6 +18,10 @@ const volatile __u32 stack_copy_budget = 4096;
 #define FNV64_OFFSET 0xcbf29ce484222325ULL
 #define FNV64_PRIME 0x00000100000001b3ULL
 
+/* Map helpers reject two arguments pointing into the same ring reservation,
+ * so the dedup value lives in .rodata while the key stays in the record. */
+static const __u8 seen_stack_marker = 1;
+
 struct {
     __uint(type, BPF_MAP_TYPE_STACK_TRACE);
     __uint(max_entries, 16384);
@@ -91,14 +95,14 @@ static __always_inline __u64 capture_stack_inner(struct pt_regs* ctx, struct tas
         return 0;
     }
 
-    __u64 sp = PT_REGS_SP(ctx);
-    __u8* payload = (__u8*)slot + sizeof(struct stack_header);
-    __u64 lanes[4] = {
-        FNV64_OFFSET ^ 0,
-        FNV64_OFFSET ^ 1,
-        FNV64_OFFSET ^ 2,
-        FNV64_OFFSET ^ 3,
-    };
+    /* Keep hashing scratch in the unpublished record. Large kprobe-family BPF
+     * stacks may use per-CPU storage, which nested uprobes can overwrite. */
+    struct stack_header* header = (struct stack_header*)slot;
+    __u64* lanes = &header->hash;
+    lanes[0] = FNV64_OFFSET ^ 0;
+    lanes[1] = FNV64_OFFSET ^ 1;
+    lanes[2] = FNV64_OFFSET ^ 2;
+    lanes[3] = FNV64_OFFSET ^ 3;
     __u32 got = 0;
 
     /* Chunked reads stop at the first unreadable stack region.
@@ -106,11 +110,12 @@ static __always_inline __u64 capture_stack_inner(struct pt_regs* ctx, struct tas
      * so every slot access is provably in range. */
 #pragma clang loop unroll(disable)
     for (__u32 off = 0; off + STACK_COPY_CHUNK <= stack_copy_budget; off += STACK_COPY_CHUNK) {
-        if (bpf_probe_read_user(payload + off, STACK_COPY_CHUNK, (void*)(sp + off)) != 0) {
+        if (bpf_probe_read_user((__u8*)slot + sizeof(struct stack_header) + off, STACK_COPY_CHUNK,
+                                (void*)(PT_REGS_SP(ctx) + off)) != 0) {
             break;
         }
 
-        fnv64_hash_chunk(lanes, (const __u64*)(payload + off));
+        fnv64_hash_chunk(lanes, (const __u64*)((__u8*)slot + sizeof(struct stack_header) + off));
         got = off + STACK_COPY_CHUNK;
     }
 
@@ -135,8 +140,9 @@ static __always_inline __u64 capture_stack_inner(struct pt_regs* ctx, struct tas
         hash = FNV64_OFFSET;
     }
 
-    __u8 marker = 1;
-    long gate_result = bpf_map_update_elem(&seen_stack_hashes, &hash, &marker, BPF_NOEXIST);
+    header->hash = hash;
+    long gate_result =
+        bpf_map_update_elem(&seen_stack_hashes, &header->hash, &seen_stack_marker, BPF_NOEXIST);
     if (gate_result == -17) { /* -EEXIST */
         bpf_ringbuf_discard(slot, 0);
         return hash;
@@ -151,11 +157,10 @@ static __always_inline __u64 capture_stack_inner(struct pt_regs* ctx, struct tas
         bump_stack_counter(MEMTRACK_STACK_COUNTER_STACKID_FAILED);
     }
 
-    struct stack_header* header = (struct stack_header*)slot;
     header->hash = hash;
     header->timestamp = bpf_ktime_get_ns();
     header->stackid = stackid;
-    header->sp = sp;
+    header->sp = PT_REGS_SP(ctx);
     header->pid = ids.tgid;
     header->tid = ids.tid;
     header->copy_len = got;
