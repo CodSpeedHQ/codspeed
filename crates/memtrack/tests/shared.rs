@@ -268,20 +268,35 @@ pub fn track_command_with_rmap_checkpoint(
 /// none of them can be compared across variants.
 type EventProfile = std::collections::BTreeMap<String, usize>;
 
+/// Frees count only when they release an allocation the run saw: glibc's
+/// `free` can re-enter itself on a thread's first free (lazy tcache init), so
+/// one call may fire the uprobe once or twice depending on scheduling.
 fn event_profile(events: &[Event]) -> EventProfile {
+    use itertools::Itertools;
+
     let mut profile = EventProfile::new();
-    for event in events {
+    let mut live = std::collections::HashSet::new();
+    for event in events.iter().sorted_by_key(|e| e.timestamp) {
         // Only allocator events are comparable across variants: RSS and
         // lifecycle values (sizes, pids) are per-run.
-        if !matches!(
-            event.kind,
+        match event.kind {
+            MemtrackEventKind::Free { .. } => {
+                if !live.remove(&event.addr) {
+                    continue;
+                }
+            }
+            MemtrackEventKind::Realloc { old_addr, .. } => {
+                if let Some(old_addr) = old_addr {
+                    live.remove(&old_addr);
+                }
+                live.insert(event.addr);
+            }
             MemtrackEventKind::Malloc { .. }
-                | MemtrackEventKind::Free { .. }
-                | MemtrackEventKind::Calloc { .. }
-                | MemtrackEventKind::Realloc { .. }
-                | MemtrackEventKind::AlignedAlloc { .. }
-        ) {
-            continue;
+            | MemtrackEventKind::Calloc { .. }
+            | MemtrackEventKind::AlignedAlloc { .. } => {
+                live.insert(event.addr);
+            }
+            _ => continue,
         }
         *profile.entry(describe_kind(&event.kind)).or_default() += 1;
     }
