@@ -1,7 +1,7 @@
 use crate::AllocatorLib;
 use crate::ebpf::MemtrackBpf;
 use crate::ebpf::events::AttachRequest;
-use crate::ebpf::poller::RingBufferPoller;
+use crate::ebpf::poller::{POLL_INTERVAL_MS, RingBufferPoller};
 use crate::prelude::*;
 use parking_lot::Mutex;
 use std::collections::HashSet;
@@ -14,7 +14,6 @@ use std::time::Duration;
 use super::proc_fs::{Resolution, resolve_mapping, wait_all_stopped};
 
 const STOP_DEADLINE: Duration = Duration::from_secs(1);
-const POLL_INTERVAL_MS: u64 = 10;
 const RECV_TIMEOUT: Duration = Duration::from_millis(100);
 
 /// SIGCONTs `pid` on drop, ignoring errors. Guarantees a stopped process is
