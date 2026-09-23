@@ -1,3 +1,4 @@
+use crate::ebpf::ring_stats::RingStats;
 use anyhow::{Context, Result};
 use libbpf_rs::{AsRawLibbpf, MapCore, RingBuffer, RingBufferBuilder, libbpf_sys};
 use parking_lot::Mutex;
@@ -69,6 +70,11 @@ fn poll_iteration<T>(
     }
 }
 
+fn ring_of(ringbuf: &RingBuffer) -> *mut libbpf_sys::ring {
+    // SAFETY: a built `RingBuffer` holds exactly the one ring added in `new`.
+    unsafe { libbpf_sys::ring_buffer__ring(ringbuf.as_libbpf_object().as_ptr(), 0) }
+}
+
 /// Polls a BPF ring buffer in a background thread, parsing raw entries with a
 /// user-supplied closure and forwarding them to an mpsc channel in batches.
 ///
@@ -114,32 +120,43 @@ impl RingBufferPoller {
             0
         })?;
         let ringbuf = builder.build()?;
+        let name = rb_map.name().to_string_lossy().into_owned();
 
         // The control channel doubles as the poll pacing: a received message is
         // a drain request (acked after a full consume), a timeout is a regular
         // poll tick, and disconnection is the shutdown signal.
         let (ctl, ctl_rx) = mpsc::channel::<Sender<()>>();
         let poll_thread = std::thread::spawn(move || {
-            // SAFETY: the built `RingBuffer` holds exactly the one ring added above.
-            let ring =
-                unsafe { libbpf_sys::ring_buffer__ring(ringbuf.as_libbpf_object().as_ptr(), 0) };
-            while poll_iteration(
-                ctl_rx.recv_timeout(Duration::from_millis(poll_interval_ms)),
-                || consume_all(&ringbuf, ring),
-                || {
-                    let _ = ringbuf.poll(Duration::ZERO);
-                },
-                &batch,
-                &tx,
-            ) {
+            let mut stats = RingStats::enabled().then(|| RingStats::new(name, ring_of(&ringbuf)));
+            loop {
+                let control = ctl_rx.recv_timeout(Duration::from_millis(poll_interval_ms));
+                let tick = stats.as_ref().map(RingStats::begin);
+                let running = poll_iteration(
+                    control,
+                    || consume_all(&ringbuf, ring_of(&ringbuf)),
+                    || {
+                        let _ = ringbuf.poll(Duration::ZERO);
+                    },
+                    &batch,
+                    &tx,
+                );
+                if let (Some(stats), Some(tick)) = (&mut stats, tick) {
+                    stats.end(tick);
+                }
+                if !running {
+                    break;
+                }
                 if let Some(on_drained) = &on_drained
-                    && unsafe { libbpf_sys::ring__avail_data_size(ring) } == 0
+                    && unsafe { libbpf_sys::ring__avail_data_size(ring_of(&ringbuf)) } == 0
                 {
                     on_drained();
                 }
             }
             if let Some(on_drained) = &on_drained {
                 on_drained();
+            }
+            if let Some(stats) = &stats {
+                stats.report_run();
             }
         });
 
