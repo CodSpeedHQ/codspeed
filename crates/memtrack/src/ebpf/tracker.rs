@@ -191,9 +191,14 @@ impl Tracker {
     }
 
     /// Number of events the kernel dropped because the ring buffer was full.
-    /// A non-zero value means the resulting trace is incomplete.
+    /// A non-zero value means the resulting trace is incomplete. Includes
+    /// allocation-stack ring overflow: missing stack records make the capture
+    /// incomplete just like ordinary event-ring or mapping loss.
     pub fn dropped_events_count(&self) -> Result<u64> {
-        Ok(self.bpf.lock().dropped_events_count()? + self.mapping_lost.load(Ordering::Relaxed))
+        let bpf = self.bpf.lock();
+        Ok(bpf.dropped_events_count()?
+            + bpf.stack_capture_stats()?.ring_full
+            + self.mapping_lost.load(Ordering::Relaxed))
     }
 
     /// Per-cause counts of stack captures that were skipped or truncated.
