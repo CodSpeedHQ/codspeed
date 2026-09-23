@@ -1,4 +1,5 @@
 use crate::ebpf::attach_worker::AttachWorker;
+use crate::ebpf::poller::POLL_INTERVAL_MS;
 use crate::ebpf::spawn::{resume, spawn_stopped, wrap_stopped};
 use crate::ebpf::stacks::StackCaptureFailureStats;
 use crate::ebpf::{BpfVariant, MemtrackBpf, OwnershipMaps};
@@ -143,9 +144,12 @@ impl Tracker {
                 let mut bpf = self.bpf.lock();
                 bpf.add_tracked_pid(pid)?;
                 let stack_poller = capture_stacks
-                    .then(|| bpf.poll_stacks(10, tx.clone()))
+                    .then(|| bpf.poll_stacks(POLL_INTERVAL_MS, tx.clone()))
                     .transpose()?;
-                (bpf.poll_events_with_channel(10, tx.clone())?, stack_poller)
+                (
+                    bpf.poll_events_with_channel(POLL_INTERVAL_MS, tx.clone())?,
+                    stack_poller,
+                )
             };
             let perf_mapping_poller = capture_stacks
                 .then(|| PerfMappingPoller::start(pid, tx, self.mapping_lost.clone()))

@@ -6,6 +6,9 @@ use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
+/// Ring-buffer poll interval shared by every poller.
+pub(crate) const POLL_INTERVAL_MS: u64 = 1;
+
 /// Items buffered before a channel send. `std::sync::mpsc` allocates a block
 /// every 31 messages, so sending one item at a time makes that allocation
 /// dominate the pipeline; batching amortizes it over a whole batch.
