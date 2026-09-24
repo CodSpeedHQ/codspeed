@@ -1,0 +1,29 @@
+# Nothing here is `force = true`, so a shell exporting `CFLAGS` or `CPATH` wins
+# and breaks the musl build.
+#
+# `libbpf-sys` vendors elfutils, whose `configure` looks for `argp`, `obstack`
+# and `fts`; musl has none of them, so it stops before libelf even though a
+# libelf-only build never calls them. Pre-seeding the cache skips the checks.
+# Only autoconf reads these names, so a gnu build is unaffected.
+# Upstream tracks this at https://github.com/libbpf/libbpf-sys/issues/153.
+[env]
+ac_cv_search_argp_parse = "none required"
+ac_cv_search__obstack_free = "none required"
+ac_cv_search_fts_close = "none required"
+
+# The `argp.h` stub. `CPATH` and not a `-I` in the flags below, because
+# `relative = true` only works on a bare path. It is therefore global to the
+# build, so the stub defers to the real header wherever one exists.
+CPATH = { value = "crates/memtrack/musl", relative = true }
+
+# Debian's musl-gcc runs with -nostdinc, so the kernel UAPI headers libbpf needs
+# have to be added back, last so they never shadow the toolchain's own. Scoped
+# per target: cc-rs looks up `CFLAGS_<target>` before `CFLAGS`, and libbpf-sys
+# builds zlib, elfutils and libbpf from `cc::Tool::cflags_env()`.
+CFLAGS_x86_64_unknown_linux_musl = "-idirafter /usr/include/x86_64-linux-gnu -idirafter /usr/include"
+CFLAGS_aarch64_unknown_linux_musl = "-idirafter /usr/include/aarch64-linux-gnu -idirafter /usr/include"
+
+# rustc links with `-nodefaultlibs`; libbpf's C code needs the outline-atomic
+# helpers from libgcc on aarch64.
+[target.aarch64-unknown-linux-musl]
+rustflags = ["-C", "link-arg=-lgcc"]

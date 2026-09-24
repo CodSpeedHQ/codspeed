@@ -11,7 +11,7 @@ benchmarks:
   # through `bash -c`, so output can be redirected away: otherwise every round
   # dumps the whole listing into the runner log.
   - name: "memtrack track ls"
-    exec: env CODSPEED_MEMTRACK_TRACK_PHYSICAL=0 codspeed-memtrack track "ls -la /usr/bin > /dev/null" --output /tmp/codspeed-memtrack-bench
+    exec: env CODSPEED_MEMTRACK_TRACK_PHYSICAL=0 codspeed memtrack track "ls -la /usr/bin > /dev/null" --output /tmp/codspeed-memtrack-bench
 
   - name: "memtrack track ls (with physical)"
-    exec: env CODSPEED_MEMTRACK_TRACK_PHYSICAL=1 codspeed-memtrack track "ls -la /usr/bin > /dev/null" --output /tmp/codspeed-memtrack-bench
+    exec: env CODSPEED_MEMTRACK_TRACK_PHYSICAL=1 codspeed memtrack track "ls -la /usr/bin > /dev/null" --output /tmp/codspeed-memtrack-bench
