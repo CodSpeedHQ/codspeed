@@ -4,6 +4,7 @@
 #include "../event.h"
 #include "../stack_capture.bpf.h"
 #include "map_helpers.h"
+#include "pressure.bpf.h"
 #include "process_tracking.h"
 
 BPF_RINGBUF(events, 256 * 1024 * 1024);
@@ -61,6 +62,7 @@ static __always_inline __u64* take_param(void* map) {
             if (drops) {                                                \
                 __sync_fetch_and_add(drops, 1);                         \
             }                                                           \
+            memtrack_check_ring_pressure(&events, ids.tgid);            \
             return 0;                                                   \
         }                                                               \
                                                                         \
@@ -72,6 +74,7 @@ static __always_inline __u64* take_param(void* map) {
         fill_data;                                                      \
                                                                         \
         bpf_ringbuf_submit(e, wake_flags());                            \
+        memtrack_check_ring_pressure(&events, ids.tgid);                \
         return 0;                                                       \
     }
 

@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use libbpf_rs::{MapCore, RingBufferBuilder};
+use libbpf_rs::{AsRawLibbpf, MapCore, RingBuffer, RingBufferBuilder, libbpf_sys};
 use parking_lot::Mutex;
 use std::sync::Arc;
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
@@ -24,6 +24,19 @@ fn flush_batch<T>(batch: &Mutex<Vec<T>>, tx: &Sender<Vec<T>>) {
     let items = std::mem::replace(&mut *buf, Vec::with_capacity(BATCH_ITEMS));
     drop(buf);
     let _ = tx.send(items);
+}
+
+/// `consume()` stops at a record a producer is still writing, not only at an
+/// empty ring, so retry until the ring is empty: stopping early would leave
+/// committed records unread without counting them as dropped.
+fn consume_all(ringbuf: &RingBuffer, ring: *mut libbpf_sys::ring) {
+    loop {
+        let _ = ringbuf.consume();
+        if unsafe { libbpf_sys::ring__avail_data_size(ring) } == 0 {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
 }
 
 fn poll_iteration<T>(
@@ -70,6 +83,7 @@ impl RingBufferPoller {
         parse: F,
         tx: Sender<Vec<T>>,
         poll_interval_ms: u64,
+        on_drained: Option<Box<dyn Fn() + Send>>,
     ) -> Result<Self>
     where
         M: MapCore,
@@ -104,17 +118,27 @@ impl RingBufferPoller {
         // poll tick, and disconnection is the shutdown signal.
         let (ctl, ctl_rx) = mpsc::channel::<Sender<()>>();
         let poll_thread = std::thread::spawn(move || {
+            // SAFETY: the built `RingBuffer` holds exactly the one ring added above.
+            let ring =
+                unsafe { libbpf_sys::ring_buffer__ring(ringbuf.as_libbpf_object().as_ptr(), 0) };
             while poll_iteration(
                 ctl_rx.recv_timeout(Duration::from_millis(poll_interval_ms)),
-                || {
-                    let _ = ringbuf.consume();
-                },
+                || consume_all(&ringbuf, ring),
                 || {
                     let _ = ringbuf.poll(Duration::ZERO);
                 },
                 &batch,
                 &tx,
-            ) {}
+            ) {
+                if let Some(on_drained) = &on_drained
+                    && unsafe { libbpf_sys::ring__avail_data_size(ring) } == 0
+                {
+                    on_drained();
+                }
+            }
+            if let Some(on_drained) = &on_drained {
+                on_drained();
+            }
         });
 
         Ok(Self {
@@ -166,6 +190,7 @@ impl ThreadedRingBufferPoller {
         resolve: R,
         tx: Sender<Vec<U>>,
         poll_interval_ms: u64,
+        on_drained: Option<Box<dyn Fn() + Send>>,
     ) -> Result<Self>
     where
         M: MapCore,
@@ -175,7 +200,7 @@ impl ThreadedRingBufferPoller {
         R: Fn(T) -> U + Send + 'static,
     {
         let (parsed_tx, parsed_rx) = mpsc::channel::<Vec<T>>();
-        let ring = RingBufferPoller::new(rb_map, parse, parsed_tx, poll_interval_ms)?;
+        let ring = RingBufferPoller::new(rb_map, parse, parsed_tx, poll_interval_ms, on_drained)?;
         let resolver = std::thread::spawn(move || {
             for batch in parsed_rx {
                 let resolved = batch.into_iter().map(&resolve).collect();

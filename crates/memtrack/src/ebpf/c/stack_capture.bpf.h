@@ -3,6 +3,7 @@
 
 #include "event.h"
 #include "utils/map_helpers.h"
+#include "utils/pressure.bpf.h"
 #include "utils/process_tracking.h"
 
 /* Emit raw stack bytes and registers once per hash for offline DWARF unwinding.
@@ -92,6 +93,7 @@ static __always_inline __u64 capture_stack_inner(struct pt_regs* ctx, struct tas
     void* slot = bpf_ringbuf_reserve(&stacks, sizeof(struct stack_header) + stack_copy_budget, 0);
     if (!slot) {
         bump_stack_counter(MEMTRACK_STACK_COUNTER_RING_FULL);
+        memtrack_check_ring_pressure(&stacks, ids.tgid);
         return 0;
     }
 
@@ -122,6 +124,7 @@ static __always_inline __u64 capture_stack_inner(struct pt_regs* ctx, struct tas
     if (got == 0) {
         bpf_ringbuf_discard(slot, 0);
         bump_stack_counter(MEMTRACK_STACK_COUNTER_COPY_FAILED);
+        memtrack_check_ring_pressure(&stacks, ids.tgid);
         return 0;
     }
 
@@ -145,6 +148,7 @@ static __always_inline __u64 capture_stack_inner(struct pt_regs* ctx, struct tas
         bpf_map_update_elem(&seen_stack_hashes, &header->hash, &seen_stack_marker, BPF_NOEXIST);
     if (gate_result == -17) { /* -EEXIST */
         bpf_ringbuf_discard(slot, 0);
+        memtrack_check_ring_pressure(&stacks, ids.tgid);
         return hash;
     }
     if (gate_result != 0) {
@@ -171,6 +175,7 @@ static __always_inline __u64 capture_stack_inner(struct pt_regs* ctx, struct tas
     fill_stack_regs(&header->regs, ctx);
 
     bpf_ringbuf_submit(slot, 0);
+    memtrack_check_ring_pressure(&stacks, ids.tgid);
     return hash;
 }
 

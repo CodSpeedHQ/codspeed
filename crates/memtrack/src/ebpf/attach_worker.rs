@@ -1,6 +1,7 @@
 use crate::AllocatorLib;
 use crate::ebpf::MemtrackBpf;
 use crate::ebpf::events::AttachRequest;
+use crate::ebpf::pause::StoppedProcesses;
 use crate::ebpf::poller::{POLL_INTERVAL_MS, RingBufferPoller};
 use crate::prelude::*;
 use parking_lot::Mutex;
@@ -16,16 +17,22 @@ use super::proc_fs::{Resolution, resolve_mapping, wait_all_stopped};
 const STOP_DEADLINE: Duration = Duration::from_secs(1);
 const RECV_TIMEOUT: Duration = Duration::from_millis(100);
 
-/// SIGCONTs `pid` on drop, ignoring errors. Guarantees a stopped process is
-/// resumed on every exit path, including panics.
-struct ContGuard(i32);
+/// Releases the attach worker's hold on `pid` on drop, including panics.
+struct AttachHold {
+    stops: Arc<StoppedProcesses>,
+    pid: u32,
+}
 
-impl Drop for ContGuard {
+impl AttachHold {
+    fn new(stops: Arc<StoppedProcesses>, pid: u32) -> Self {
+        Self { stops, pid }
+    }
+}
+
+impl Drop for AttachHold {
     fn drop(&mut self) {
-        // SAFETY: kill with SIGCONT has no memory effects; errors (e.g. the
-        // process already exited) are intentionally ignored.
-        unsafe {
-            libc::kill(self.0, libc::SIGCONT);
+        if let Err(error) = self.stops.release_attach(self.pid) {
+            warn!("failed to release attach stop of {}: {error:#}", self.pid);
         }
     }
 }
@@ -48,12 +55,19 @@ impl AttachWorker {
         let root_pid = Arc::new(AtomicI32::new(0));
 
         let (tx, rx) = mpsc::channel();
-        let poller = bpf.lock().poll_attach_with_channel(POLL_INTERVAL_MS, tx)?;
+        let (poller, stops) = {
+            let bpf = bpf.lock();
+            (
+                bpf.poll_attach_with_channel(POLL_INTERVAL_MS, tx)?,
+                bpf.stopped_processes(),
+            )
+        };
 
         let worker = Worker {
             poller,
             rx,
             bpf: bpf.clone(),
+            stops,
             shutdown: shutdown.clone(),
             fatal: fatal.clone(),
             root_pid: root_pid.clone(),
@@ -122,6 +136,7 @@ struct Worker {
     poller: RingBufferPoller,
     rx: mpsc::Receiver<Vec<AttachRequest>>,
     bpf: Arc<Mutex<MemtrackBpf>>,
+    stops: Arc<StoppedProcesses>,
     shutdown: Arc<AtomicBool>,
     fatal: Arc<Mutex<Option<String>>>,
     root_pid: Arc<AtomicI32>,
@@ -167,14 +182,14 @@ impl Worker {
     }
 
     /// Stop every producing pid (fixpoint, draining until no new pid appears),
-    /// then classify + attach for each unique `(dev, ino)`. `guards` resume every
-    /// stopped pid exactly once when this returns, including the error path.
+    /// then classify + attach for each unique `(dev, ino)`. `holds` release
+    /// every stopped pid exactly once when this returns, including the error path.
     fn process_batch(
         &self,
         batch: &mut Vec<AttachRequest>,
         known: &mut HashSet<(u64, u64)>,
     ) -> Result<()> {
-        let mut guards: Vec<ContGuard> = Vec::new();
+        let mut holds: Vec<AttachHold> = Vec::new();
         let mut stopped: HashSet<u32> = HashSet::new();
 
         loop {
@@ -190,7 +205,7 @@ impl Worker {
 
             for pid in new_pids {
                 stopped.insert(pid);
-                guards.push(ContGuard(pid as i32));
+                holds.push(AttachHold::new(self.stops.clone(), pid));
                 wait_all_stopped(pid, STOP_DEADLINE)?;
             }
 
