@@ -89,7 +89,44 @@ static __always_inline void fill_stack_regs(struct stack_regs* out, struct pt_re
 #error "stack capture needs a DWARF register mapping for this architecture"
 #endif
 
-static __always_inline __u64 capture_stack_inner(struct pt_regs* ctx, struct task_ids ids) {
+static __always_inline void fnv64_lanes_init(__u64 lanes[4]) {
+    lanes[0] = FNV64_OFFSET ^ 0;
+    lanes[1] = FNV64_OFFSET ^ 1;
+    lanes[2] = FNV64_OFFSET ^ 2;
+    lanes[3] = FNV64_OFFSET ^ 3;
+}
+
+/* Length distinguishes a full copy from the same bytes as a truncated prefix.
+ * Zero is reserved for allocation events without a stack. */
+static __always_inline __u64 fnv64_finish(const __u64 lanes[4], __u32 got) {
+    __u64 hash =
+        (((lanes[0] * FNV64_PRIME) ^ lanes[1]) * FNV64_PRIME ^ lanes[2]) * FNV64_PRIME ^ lanes[3];
+    hash = (hash ^ got) * FNV64_PRIME;
+    return hash ? hash : FNV64_OFFSET;
+}
+
+/* Copies the user stack into `dst` in STACK_COPY_CHUNK pieces, stopping at the
+ * first unreadable region, and hashes each chunk. Returns the bytes copied.
+ * The bound is the frozen stack_copy_budget, so `dst` must have room for the
+ * full budget for every access to be provably in range. */
+static __always_inline __u32 read_stack_chunks(__u8* dst, __u64 lanes[4], __u64 sp) {
+    __u32 got = 0;
+    fnv64_lanes_init(lanes);
+#pragma clang loop unroll(disable)
+    for (__u32 off = 0; off + STACK_COPY_CHUNK <= stack_copy_budget; off += STACK_COPY_CHUNK) {
+        if (bpf_probe_read_user(dst + off, STACK_COPY_CHUNK, (void*)(sp + off)) != 0) {
+            break;
+        }
+
+        fnv64_hash_chunk(lanes, (const __u64*)(dst + off));
+        got = off + STACK_COPY_CHUNK;
+    }
+    return got;
+}
+
+#include "stack_delta.bpf.h"
+
+static __always_inline __u64 capture_stack_raw(struct pt_regs* ctx, struct task_ids ids) {
     void* slot = bpf_ringbuf_reserve(&stacks, sizeof(struct stack_header) + stack_copy_budget, 0);
     if (!slot) {
         bump_stack_counter(MEMTRACK_STACK_COUNTER_RING_FULL);
@@ -101,25 +138,8 @@ static __always_inline __u64 capture_stack_inner(struct pt_regs* ctx, struct tas
      * stacks may use per-CPU storage, which nested uprobes can overwrite. */
     struct stack_header* header = (struct stack_header*)slot;
     __u64* lanes = &header->hash;
-    lanes[0] = FNV64_OFFSET ^ 0;
-    lanes[1] = FNV64_OFFSET ^ 1;
-    lanes[2] = FNV64_OFFSET ^ 2;
-    lanes[3] = FNV64_OFFSET ^ 3;
-    __u32 got = 0;
-
-    /* Chunked reads stop at the first unreadable stack region.
-     * Loop bound is checked against stack_copy_budget (a frozen rodata constant)
-     * so every slot access is provably in range. */
-#pragma clang loop unroll(disable)
-    for (__u32 off = 0; off + STACK_COPY_CHUNK <= stack_copy_budget; off += STACK_COPY_CHUNK) {
-        if (bpf_probe_read_user((__u8*)slot + sizeof(struct stack_header) + off, STACK_COPY_CHUNK,
-                                (void*)(PT_REGS_SP(ctx) + off)) != 0) {
-            break;
-        }
-
-        fnv64_hash_chunk(lanes, (const __u64*)((__u8*)slot + sizeof(struct stack_header) + off));
-        got = off + STACK_COPY_CHUNK;
-    }
+    __u32 got =
+        read_stack_chunks((__u8*)slot + sizeof(struct stack_header), lanes, PT_REGS_SP(ctx));
 
     if (got == 0) {
         bpf_ringbuf_discard(slot, 0);
@@ -133,15 +153,7 @@ static __always_inline __u64 capture_stack_inner(struct pt_regs* ctx, struct tas
         bump_stack_counter(MEMTRACK_STACK_COUNTER_TRUNCATED);
     }
 
-    __u64 hash =
-        (((lanes[0] * FNV64_PRIME) ^ lanes[1]) * FNV64_PRIME ^ lanes[2]) * FNV64_PRIME ^ lanes[3];
-
-    /* Length distinguishes a full copy from the same bytes as a truncated prefix.
-     * Zero is reserved for allocation events without a stack. */
-    hash = (hash ^ got) * FNV64_PRIME;
-    if (hash == 0) {
-        hash = FNV64_OFFSET;
-    }
+    __u64 hash = fnv64_finish(lanes, got);
 
     header->hash = hash;
     long gate_result =
@@ -161,22 +173,35 @@ static __always_inline __u64 capture_stack_inner(struct pt_regs* ctx, struct tas
         bump_stack_counter(MEMTRACK_STACK_COUNTER_STACKID_FAILED);
     }
 
+    header->kind = STACK_RECORD_RAW;
+    header->copy_len = got;
     header->hash = hash;
     header->timestamp = bpf_ktime_get_ns();
     header->stackid = stackid;
     header->sp = PT_REGS_SP(ctx);
     header->pid = ids.tgid;
     header->tid = ids.tid;
-    header->copy_len = got;
     header->truncated = truncated;
-    header->_pad[0] = 0;
-    header->_pad[1] = 0;
-    header->_pad[2] = 0;
+#pragma unroll
+    for (int i = 0; i < 7; i++) {
+        header->_pad[i] = 0;
+    }
     fill_stack_regs(&header->regs, ctx);
 
     bpf_ringbuf_submit(slot, 0);
     memtrack_check_ring_pressure(&stacks, ids.tgid);
     return hash;
+}
+
+static __always_inline __u64 capture_stack_inner(struct pt_regs* ctx, struct task_ids ids) {
+    if (stack_compression_enabled) {
+        struct stack_ref* ref = stack_ref_get(ids.tid);
+        if (ref) {
+            return capture_stack_delta(ctx, ids, ref);
+        }
+        bump_stack_counter(MEMTRACK_STACK_COUNTER_DELTA_FALLBACK);
+    }
+    return capture_stack_raw(ctx, ids);
 }
 
 static __always_inline __u64 capture_stack(struct pt_regs* ctx) {

@@ -8,6 +8,7 @@ pub struct StackCaptureFailureStats {
     pub stackid_failed: u64,
     pub truncated: u64,
     pub ring_full: u64,
+    pub delta_fallback: u64,
 }
 
 impl StackCaptureFailureStats {
@@ -18,6 +19,7 @@ impl StackCaptureFailureStats {
             stackid_failed: slot(map, MEMTRACK_STACK_COUNTER_STACKID_FAILED)?,
             truncated: slot(map, MEMTRACK_STACK_COUNTER_TRUNCATED)?,
             ring_full: slot(map, MEMTRACK_STACK_COUNTER_RING_FULL)?,
+            delta_fallback: slot(map, MEMTRACK_STACK_COUNTER_DELTA_FALLBACK)?,
         })
     }
 }

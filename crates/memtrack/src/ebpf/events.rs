@@ -104,6 +104,11 @@ pub fn parse_event(data: &[u8]) -> Option<MemtrackEvent> {
     })
 }
 
+/// Every stack ring record starts with its `STACK_RECORD_*` kind.
+pub fn stack_record_kind(data: &[u8]) -> Option<u32> {
+    Some(u32::from_ne_bytes(data.get(..4)?.try_into().ok()?))
+}
+
 /// Decode one stack record from the ring buffer, returning it alongside the
 /// `bpf_get_stackid()` result its frame-pointer chain is stored under.
 pub fn parse_stack(data: &[u8]) -> Option<(MemtrackEvent, i64)> {
@@ -118,6 +123,11 @@ pub fn parse_stack(data: &[u8]) -> Option<(MemtrackEvent, i64)> {
         );
         return None;
     };
+
+    if header.kind != STACK_RECORD_RAW {
+        warn!("unexpected stack record kind: {}", header.kind);
+        return None;
+    }
 
     let record_len = header_len + header.copy_len as usize;
     if data.len() < record_len {
@@ -370,6 +380,7 @@ mod stack_tests {
 
     fn header(copy_len: u32) -> stack_header {
         stack_header {
+            kind: STACK_RECORD_RAW,
             hash: 0x0123_4567_89ab_cdef,
             timestamp: 987_654_321,
             stackid: -17,
@@ -378,7 +389,7 @@ mod stack_tests {
             tid: 42,
             copy_len,
             truncated: 1,
-            _pad: [0; 3],
+            _pad: [0; 7],
             regs: stack_regs {
                 reg: std::array::from_fn(|index| 0x1000 + index as u64),
             },
