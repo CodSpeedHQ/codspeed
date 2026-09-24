@@ -134,8 +134,13 @@ fn track_command(
         .map(|n| n.get().saturating_sub(2).max(1))
         .unwrap_or(4);
 
-    let pipeline_thread =
-        thread::spawn(move || encode_events(event_rx.into_iter().flatten(), out_file, n_workers));
+    let pipeline_thread = thread::spawn(move || {
+        let events = event_rx
+            .into_iter()
+            .inspect(|batch| stats::add_received(batch.len()))
+            .flatten();
+        encode_events(events, out_file, n_workers, stats::encoder_window)
+    });
 
     // A worker failure must not skip disabling tracking, draining, joining the
     // encoder, or detaching probes. Keep the wait result until teardown is done.
@@ -155,9 +160,6 @@ fn track_command(
     // encode pipeline join below would block forever.
     debug!("Stopping the ring buffer poller");
     drop(session);
-    if let Err(error) = stats::finish() {
-        warn!("{error:#}");
-    }
 
     debug!("Waiting for the encode pipeline to finish");
     let total = pipeline_thread
@@ -167,6 +169,9 @@ fn track_command(
 
     if let Ok(total) = &total {
         info!("Wrote {total} memtrack events to disk");
+    }
+    if let Err(error) = stats::finish() {
+        warn!("{error:#}");
     }
 
     // Stop background workers after the ring pipeline has drained. Fatal
