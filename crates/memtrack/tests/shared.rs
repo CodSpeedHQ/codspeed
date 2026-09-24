@@ -358,7 +358,7 @@ fn track_command_with_tracker(command: Command, tracker: Tracker) -> TrackResult
 /// Run `command` to completion under `tracker` and drain its events, handing
 /// back the still-live tracker so BPF state can be read before teardown.
 /// `checkpoint` runs while the tracked tree is still live.
-fn run_tracked<T>(
+pub fn run_tracked<T>(
     command: Command,
     tracker: Tracker,
     checkpoint: impl FnOnce(&Tracker, i32) -> anyhow::Result<T>,

@@ -1,8 +1,8 @@
 use crate::ebpf::poller::{RingBufferPoller, ThreadedRingBufferPoller};
 use crate::prelude::*;
-use libbpf_rs::Link;
 use libbpf_rs::skel::OpenSkel;
 use libbpf_rs::skel::SkelBuilder;
+use libbpf_rs::{Link, MapCore};
 use std::collections::HashMap;
 use std::mem::MaybeUninit;
 use std::os::fd::{AsFd, AsRawFd, RawFd};
@@ -142,6 +142,7 @@ impl MemtrackBpf {
         });
         let physical = options.physical;
         let capture_stacks = options.stack_capture;
+        let stack_compression = options.stack_compression;
         let stack_copy_budget = ((options.stack_budget / 512) * 512)
             .clamp(512, crate::ebpf::events::bindings::MEMTRACK_MAX_STACK_COPY);
         let page_shift = page_shift()?;
@@ -173,6 +174,9 @@ impl MemtrackBpf {
                     if capture_stacks {
                         rodata.capture_stacks_enabled = 1;
                         rodata.stack_copy_budget = stack_copy_budget;
+                        if stack_compression {
+                            rodata.stack_compression_enabled = 1;
+                        }
                     }
                 }
 
@@ -183,6 +187,10 @@ impl MemtrackBpf {
                     open_skel.maps.stack_traces.set_max_entries(1)?;
                     open_skel.maps.seen_stack_hashes.set_max_entries(1)?;
                     open_skel.maps.pending_stack_hash.set_max_entries(1)?;
+                }
+
+                if !capture_stacks || !stack_compression {
+                    open_skel.maps.stack_refs.set_max_entries(1)?;
                 }
 
                 // Autoload is decided before load(), so missing fentry targets must be off here.
@@ -259,26 +267,61 @@ impl MemtrackBpf {
         poll_interval_ms: u64,
         tx: std::sync::mpsc::Sender<Vec<runner_shared::artifacts::MemtrackEvent>>,
     ) -> Result<ThreadedRingBufferPoller> {
-        use crate::ebpf::events;
+        use crate::ebpf::events::{self, bindings::*};
+        use crate::ebpf::stack_codec::{StackDecodeError, StackDecoder};
         use runner_shared::artifacts::MemtrackEventKind;
 
-        // The resolver owns the map handle because it outlives this skeleton borrow.
-        let stack_traces = with_skel!(self, skel => {
-            libbpf_rs::MapHandle::try_from(&skel.maps.stack_traces)
-                .context("Failed to create handle for stack_traces map")?
+        enum IncomingRecord {
+            Raw(runner_shared::artifacts::MemtrackEvent, i64),
+            Delta(Vec<u8>),
+        }
+
+        // The resolver owns the map handles because it outlives this skeleton borrow.
+        let (stack_traces, stack_refs, seen_stack_hashes) = with_skel!(self, skel => {
+            let traces = libbpf_rs::MapHandle::try_from(&skel.maps.stack_traces)
+                .context("Failed to create handle for stack_traces map")?;
+            let refs = libbpf_rs::MapHandle::try_from(&skel.maps.stack_refs)
+                .context("Failed to create handle for stack_refs map")?;
+            let hashes = libbpf_rs::MapHandle::try_from(&skel.maps.seen_stack_hashes)
+                .context("Failed to create handle for seen_stack_hashes map")?;
+            (traces, refs, hashes)
         });
 
+        let mut decoder = StackDecoder::default();
+
         let resolve =
-            move |(mut event, stackid): (runner_shared::artifacts::MemtrackEvent, i64)| {
+            move |record: IncomingRecord| -> Option<runner_shared::artifacts::MemtrackEvent> {
+                let (mut event, stackid) = match record {
+                    IncomingRecord::Raw(event, stackid) => (event, stackid),
+                    IncomingRecord::Delta(bytes) => match decoder.decode(&bytes) {
+                        Ok(res) => res,
+                        Err(e) => {
+                            debug!("failed to decode delta stack record: {e}");
+                            if let StackDecodeError::Desync { tid, hash, .. } = e {
+                                let _ = stack_refs.delete(&tid.to_ne_bytes());
+                                let _ = seen_stack_hashes.delete(&hash.to_ne_bytes());
+                            }
+                            return None;
+                        }
+                    },
+                };
+
                 if let MemtrackEventKind::Stack { record } = &mut event.kind {
                     record.fp_chain = events::fp_chain(&stack_traces, stackid);
                 }
-                event
+                Some(event)
             };
 
         with_skel!(self, skel => ThreadedRingBufferPoller::new(
             &skel.maps.stacks,
-            events::parse_stack,
+            |data| match events::stack_record_kind(data)? {
+                STACK_RECORD_RAW => {
+                    let (event, stackid) = events::parse_stack(data)?;
+                    Some(IncomingRecord::Raw(event, stackid))
+                }
+                STACK_RECORD_DELTA => Some(IncomingRecord::Delta(data.to_vec())),
+                _ => None,
+            },
             resolve,
             tx,
             poll_interval_ms,

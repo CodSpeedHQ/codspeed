@@ -33,24 +33,75 @@
 #define MEMTRACK_STACK_COUNTER_STACKID_FAILED 2
 #define MEMTRACK_STACK_COUNTER_TRUNCATED 3
 #define MEMTRACK_STACK_COUNTER_RING_FULL 4
-#define MEMTRACK_STACK_COUNTER_COUNT 5
+/* Delta encoding could not get a reference slot and fell back to a raw record. */
+#define MEMTRACK_STACK_COUNTER_DELTA_FALLBACK 5
+#define MEMTRACK_STACK_COUNTER_COUNT 6
 
 struct stack_regs {
     uint64_t reg[MEMTRACK_STACK_REGS];
 };
 
-/* Fixed header followed by `copy_len` bytes read upward from `sp`. */
+/* Both stack ring record layouts start with `kind` so the consumer can
+ * dispatch on it; raw and delta records share one ring. */
+#define STACK_RECORD_RAW 1
+#define STACK_RECORD_DELTA 2
+
+/* Raw record: fixed header followed by `copy_len` bytes read upward from `sp`. */
 struct stack_header {
+    uint32_t kind;     /* STACK_RECORD_RAW */
+    uint32_t copy_len;
     uint64_t hash;
     uint64_t timestamp; /* monotonic time in nanoseconds (CLOCK_MONOTONIC) */
     int64_t stackid;    /* bpf_get_stackid() result; negative means unavailable */
     uint64_t sp;        /* user stack pointer the copy starts at */
     uint32_t pid;
     uint32_t tid;
-    uint32_t copy_len;
     uint8_t truncated; /* the copy hit the size cap */
-    uint8_t _pad[3];
+    uint8_t _pad[7];
     struct stack_regs regs;
+};
+
+/* Delta record. The stack is expressed as an XOR against the previous record
+ * emitted for the same tid (the reference), aligned by absolute address:
+ * word i of this copy (bytes [8i, 8i+8) above `sp`) pairs with reference word
+ * j = i + (sp - ref.sp) / 8, or with 0 when j is outside the reference copy.
+ * A keyframe (ref_hash == 0) encodes against an all-zero, empty reference,
+ * so the same layout carries a plain sparse copy.
+ *
+ *   header
+ *   u64 reg literal        x popcount(regs_mask)          (ascending register)
+ *   for each set bit g of group_mask, ascending:
+ *       u64 word_bitmap    bit k set <=> delta word 64g+k != 0
+ *       u64 literal        x popcount(word_bitmap)        (ascending word)
+ *
+ * A group is 64 words (512 bytes). Groups whose delta is all zero are omitted
+ * and have their group_mask bit clear. `hash` covers the reconstructed raw
+ * bytes and uses the same function as the raw record, so the consumer can
+ * check that it decoded against the right reference.
+ */
+#define MEMTRACK_STACK_GROUP_WORDS 64
+#define MEMTRACK_STACK_MAX_WORDS (MEMTRACK_MAX_STACK_COPY / 8)
+#define MEMTRACK_STACK_MAX_GROUPS (MEMTRACK_STACK_MAX_WORDS / MEMTRACK_STACK_GROUP_WORDS)
+#define MEMTRACK_STACK_DELTA_MAX_PAYLOAD \
+    (MEMTRACK_STACK_REGS * 8 + MEMTRACK_STACK_MAX_GROUPS * 8 + MEMTRACK_MAX_STACK_COPY)
+
+#define STACK_DELTA_FLAG_TRUNCATED 1
+
+struct stack_delta_header {
+    uint32_t kind;        /* STACK_RECORD_DELTA */
+    uint32_t copy_len;    /* reconstructed raw byte count, multiple of 512 */
+    uint64_t hash;        /* hash of the reconstructed raw bytes */
+    uint64_t ref_hash;    /* hash of the reference record; 0 on a keyframe */
+    uint64_t timestamp;   /* monotonic time in nanoseconds (CLOCK_MONOTONIC) */
+    int64_t stackid;      /* bpf_get_stackid() result; negative means unavailable */
+    uint64_t sp;          /* user stack pointer the copy starts at */
+    uint32_t pid;
+    uint32_t tid;
+    uint32_t payload_len; /* bytes following this header */
+    uint8_t flags;        /* STACK_DELTA_FLAG_* */
+    uint8_t _pad[3];
+    uint64_t group_mask;  /* bit g set <=> group g present in the payload */
+    uint64_t regs_mask;   /* bit r set <=> register r literal present */
 };
 
 /* Common header shared by all event types */

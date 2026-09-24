@@ -1,6 +1,7 @@
 //! The stack copy budget is a frozen rodata constant, so the verifier's cost of
 //! the capture program scales with it. Loading at the default proves nothing
-//! about the maximum; both must load.
+//! about the maximum; both must load. Capture must be enabled: with it frozen
+//! off the verifier prunes the capture path and checks nothing.
 use memtrack::{BpfVariant, MemtrackBpf, TrackerOptions};
 use rstest::rstest;
 
@@ -9,14 +10,18 @@ use rstest::rstest;
 #[case(8192)]
 #[case(u32::MAX)]
 #[test_log::test]
-fn skeleton_loads_at_stack_budget(#[case] budget: u32) {
+fn skeleton_loads_at_stack_budget(#[case] budget: u32, #[values(false, true)] compression: bool) {
     for variant in [BpfVariant::Legacy, BpfVariant::Token] {
         let options = TrackerOptions::builder()
             .variant(Some(variant))
+            .stack_capture(true)
+            .stack_compression(compression)
             .stack_budget(budget)
             .build();
         MemtrackBpf::new(&options).unwrap_or_else(|e| {
-            panic!("{variant:?} skeleton failed to load at budget {budget}: {e:#}")
+            panic!(
+                "{variant:?} skeleton failed to load at budget {budget} (compression {compression}): {e:#}"
+            )
         });
     }
 }

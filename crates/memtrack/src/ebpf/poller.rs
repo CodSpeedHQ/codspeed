@@ -91,7 +91,7 @@ pub struct RingBufferPoller {
 impl RingBufferPoller {
     pub fn new<M, T, F>(
         rb_map: &M,
-        parse: F,
+        mut parse: F,
         tx: Sender<Vec<T>>,
         poll_interval_ms: u64,
         on_drained: Option<OnDrained>,
@@ -99,7 +99,7 @@ impl RingBufferPoller {
     where
         M: MapCore,
         T: Send + 'static,
-        F: Fn(&[u8]) -> Option<T> + Send + 'static,
+        F: FnMut(&[u8]) -> Option<T> + Send + 'static,
     {
         // `Arc<Mutex<_>>` rather than `Rc<RefCell<_>>`: the built `RingBuffer` moves
         // into the poll thread, so the callback must be `Send`.
@@ -206,7 +206,7 @@ impl ThreadedRingBufferPoller {
     pub fn new<M, T, U, F, R>(
         rb_map: &M,
         parse: F,
-        resolve: R,
+        mut resolve: R,
         tx: Sender<Vec<U>>,
         poll_interval_ms: u64,
         on_drained: Option<OnDrained>,
@@ -215,15 +215,17 @@ impl ThreadedRingBufferPoller {
         M: MapCore,
         T: Send + 'static,
         U: Send + 'static,
-        F: Fn(&[u8]) -> Option<T> + Send + 'static,
-        R: Fn(T) -> U + Send + 'static,
+        F: FnMut(&[u8]) -> Option<T> + Send + 'static,
+        R: FnMut(T) -> Option<U> + Send + 'static,
     {
         let (parsed_tx, parsed_rx) = mpsc::channel::<Vec<T>>();
         let ring = RingBufferPoller::new(rb_map, parse, parsed_tx, poll_interval_ms, on_drained)?;
         let resolver = std::thread::spawn(move || {
             for batch in parsed_rx {
-                let resolved = batch.into_iter().map(&resolve).collect();
-                let _ = tx.send(resolved);
+                let resolved: Vec<U> = batch.into_iter().filter_map(&mut resolve).collect();
+                if !resolved.is_empty() {
+                    let _ = tx.send(resolved);
+                }
             }
         });
 

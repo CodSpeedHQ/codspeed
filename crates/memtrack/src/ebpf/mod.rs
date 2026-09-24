@@ -5,6 +5,7 @@ pub(crate) mod pause;
 pub(crate) mod poller;
 mod proc_fs;
 mod spawn;
+pub mod stack_codec;
 mod stacks;
 pub mod stats;
 mod tracker;
