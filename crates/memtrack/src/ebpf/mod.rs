@@ -4,9 +4,9 @@ mod memtrack;
 pub(crate) mod pause;
 pub(crate) mod poller;
 mod proc_fs;
-mod ring_stats;
 mod spawn;
 mod stacks;
+pub mod stats;
 mod tracker;
 
 pub use memtrack::{

@@ -1,3 +1,4 @@
+use crate::ebpf::stats;
 use crate::prelude::*;
 use libbpf_rs::{MapCore, MapFlags, MapHandle};
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
@@ -34,13 +35,15 @@ impl StoppedProcesses {
     }
 
     /// Resume every pressure-stopped producer; call once a ring is flushed.
-    pub(crate) fn release_pressure(&self) -> Result<()> {
+    pub(crate) fn release_pressure(&self, ring: &str) -> Result<()> {
         // Deleting while iterating restarts hash iteration, so snapshot the keys first.
         let keys: Vec<Vec<u8>> = self.pressure_stopped.keys().collect();
         if keys.is_empty() {
             return Ok(());
         }
         self.pressure_stops.fetch_add(keys.len() as u64, Relaxed);
+        let record_stats = stats::enabled();
+        let mut stopped_at = Vec::new();
         for key in keys {
             let pid = u32::from_le_bytes(
                 key.as_slice()
@@ -48,7 +51,22 @@ impl StoppedProcesses {
                     .context("Invalid pressure_stopped key size")?,
             );
             debug!("Releasing pressure stop of pid {pid}");
+            // Read the stop time before release deletes the entry; a missing
+            // entry means the pid already exited.
+            if record_stats
+                && let Some(value) = self.pressure_stopped.lookup(&key, MapFlags::ANY)?
+                && let Ok(bytes) = <[u8; 8]>::try_from(value.as_slice())
+            {
+                stopped_at.push((pid, u64::from_le_bytes(bytes)));
+            }
             Self::release(pid, &self.pressure_stopped, &self.attach_stopped)?;
+        }
+        if record_stats {
+            stats::emit(&stats::Record::Pressure {
+                ring,
+                t: stats::now_ns(),
+                pids: &stopped_at,
+            });
         }
         Ok(())
     }
