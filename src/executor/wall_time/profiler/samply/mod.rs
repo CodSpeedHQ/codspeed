@@ -235,26 +235,13 @@ fn bash_in_path_is_compatible() -> anyhow::Result<bool> {
 
 #[cfg(target_os = "macos")]
 fn confirm_bash_install() -> anyhow::Result<()> {
-    use crate::local_logger::IS_TTY;
-    use console::Term;
+    use crate::executor::helpers::confirm::confirm_default_yes;
 
-    // Non-interactive (CI): just install
-    if !*IS_TTY {
-        return Ok(());
-    }
-
-    eprintln!(
-        "CodSpeed depends on bash for benchmark execution, but can't use /bin/bash because system executables are signed in a way that prevents profiling. Because of this, we need to install bash with Homebrew. This is a one-time setup, your system bash is untouched."
+    let accepted = confirm_default_yes(
+        "CodSpeed depends on bash for benchmark execution, but can't use /bin/bash because system executables are signed in a way that prevents profiling. Because of this, we need to install bash with Homebrew. This is a one-time setup, your system bash is untouched.",
+        "Run `brew install bash` now?",
     );
-    eprint!("\nRun `brew install bash` now? [Y/n] ");
-    let line = Term::stderr().read_line().unwrap_or_default();
-    let answer = line.trim();
-
-    // Default to yes on empty input (just pressing Enter).
-    if !(answer.is_empty()
-        || answer.eq_ignore_ascii_case("y")
-        || answer.eq_ignore_ascii_case("yes"))
-    {
+    if !accepted {
         bail!("Declined; cannot continue without an unsigned bash");
     }
     Ok(())
