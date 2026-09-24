@@ -5,20 +5,13 @@
 
 #include "map_helpers.h"
 #include "process_tracking.h"
+#include "stopped.h"
 
 /* Ring pressure stop. Call only after submit/discard or a failed reserve:
  * stopping with a live reservation would wedge the ring. A tracked producer
  * that writes while the ring is over the watermark is stopped and recorded,
  * so processes that do not write keep running. Userspace resumes the
  * recorded producers once it has flushed the ring. */
-
-#ifndef MEMTRACK_SIGSTOP
-#define MEMTRACK_SIGSTOP 19
-#endif
-
-/* tgid -> 1 for every producer stopped under pressure. Sized like
- * tracked_pids; a producer that cannot be recorded is never stopped. */
-BPF_HASH_MAP(pressure_stopped, __u32, __u8, 10000);
 
 #define MEMTRACK_PRESSURE_HEADROOM_FRAC 4 /* stop at (FRAC-1)/FRAC = 75% used */
 

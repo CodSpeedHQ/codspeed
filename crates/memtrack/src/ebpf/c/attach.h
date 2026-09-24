@@ -4,6 +4,7 @@
 #include "event.h"
 #include "utils/map_helpers.h"
 #include "utils/process_tracking.h"
+#include "utils/stopped.h"
 
 /* == Exec-mapping watcher ==
  *
@@ -12,7 +13,6 @@
  * classifies the file, attaches allocator probes, then resumes it. */
 
 #define MEMTRACK_PROT_EXEC 0x4
-#define MEMTRACK_SIGSTOP 19
 
 struct inode_key {
     __u64 dev;
@@ -24,10 +24,6 @@ BPF_HASH_MAP(known_inodes, struct inode_key, __u8, 8192);
 /* Requests are 24 B and rare; overflow aborts the run via the counter below */
 BPF_RINGBUF(attach_requests, 128 * 1024);
 BPF_ARRAY_MAP(attach_request_dropped, __u64, 1);
-/* tgid -> 1 while stopped for an attach request; the attach worker deletes it.
- * A pid stopped for both attach and ring pressure resumes only once neither
- * map holds it. */
-BPF_HASH_MAP(attach_stopped, __u32, __u8, 10000);
 
 SEC("fentry/security_mmap_file")
 int BPF_PROG(watch_exec_mmap, struct file* file, unsigned long prot, unsigned long flags) {
@@ -63,7 +59,9 @@ int BPF_PROG(watch_exec_mmap, struct file* file, unsigned long prot, unsigned lo
     bpf_ringbuf_submit(req, 0);
 
     __u8 marker = 1;
-    bpf_map_update_elem(&attach_stopped, &tgid, &marker, BPF_ANY);
+    if (bpf_map_update_elem(&attach_stopped, &tgid, &marker, BPF_ANY) != 0) {
+        return 0;
+    }
     bpf_send_signal(MEMTRACK_SIGSTOP);
     return 0;
 }
