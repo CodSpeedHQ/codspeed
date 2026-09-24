@@ -31,8 +31,8 @@ static __always_inline void memtrack_check_ring_pressure(void* ring, __u32 curre
         return;
     }
 
-    __u8 marker = 1;
-    if (bpf_map_update_elem(&pressure_stopped, &current_tgid, &marker, BPF_ANY) != 0) {
+    __u64 stopped_at = bpf_ktime_get_ns();
+    if (bpf_map_update_elem(&pressure_stopped, &current_tgid, &stopped_at, BPF_ANY) != 0) {
         return;
     }
     bpf_send_signal(MEMTRACK_SIGSTOP);
