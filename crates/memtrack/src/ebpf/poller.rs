@@ -1,4 +1,4 @@
-use crate::ebpf::stats::RingSampler;
+use crate::ebpf::stats::{self, RingSampler};
 use anyhow::{Context, Result};
 use libbpf_rs::{AsRawLibbpf, MapCore, RingBuffer, RingBufferBuilder, libbpf_sys};
 use parking_lot::Mutex;
@@ -221,8 +221,18 @@ impl ThreadedRingBufferPoller {
         let (parsed_tx, parsed_rx) = mpsc::channel::<Vec<T>>();
         let ring = RingBufferPoller::new(rb_map, parse, parsed_tx, poll_interval_ms, on_drained)?;
         let resolver = std::thread::spawn(move || {
+            let record_stats = stats::enabled();
             for batch in parsed_rx {
+                let t0 = record_stats.then(stats::now_ns);
+                let n = batch.len();
                 let resolved = batch.into_iter().map(&resolve).collect();
+                if let Some(t0) = t0 {
+                    stats::emit(&stats::Record::Resolve {
+                        t0,
+                        t1: stats::now_ns(),
+                        n,
+                    });
+                }
                 let _ = tx.send(resolved);
             }
         });
