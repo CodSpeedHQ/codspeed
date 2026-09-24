@@ -31,6 +31,9 @@ pub struct TrackerOptions {
     /// raw stack copying.
     #[builder(default = false)]
     pub stack_capture: bool,
+    /// Compress user stack captures in eBPF via delta encoding.
+    #[builder(default = true)]
+    pub stack_compression: bool,
     /// Maximum bytes of user stack to copy per captured call stack.
     #[builder(default = 8192)]
     pub stack_budget: u32,
@@ -51,6 +54,10 @@ impl TrackerOptions {
             .stack_capture(
                 std::env::var("CODSPEED_MEMTRACK_CAPTURE_STACKS").is_ok_and(|v| v == "1"),
             )
+            .stack_compression(!matches!(
+                std::env::var("CODSPEED_MEMTRACK_STACK_COMPRESSION").as_deref(),
+                Ok("0") | Ok("false")
+            ))
             .stack_budget(
                 std::env::var("CODSPEED_MEMTRACK_STACK_BUDGET")
                     .ok()
@@ -260,5 +267,44 @@ impl Tracker {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tracker_options_defaults() {
+        let opts = TrackerOptions::builder().build();
+        assert!(opts.stack_compression);
+    }
+
+    #[test]
+    fn tracker_options_from_env_compression_override() {
+        let key = "CODSPEED_MEMTRACK_STACK_COMPRESSION";
+        let prev = std::env::var(key).ok();
+
+        unsafe {
+            std::env::set_var(key, "0");
+        }
+        assert!(!TrackerOptions::from_env().stack_compression);
+
+        unsafe {
+            std::env::set_var(key, "false");
+        }
+        assert!(!TrackerOptions::from_env().stack_compression);
+
+        unsafe {
+            std::env::set_var(key, "1");
+        }
+        assert!(TrackerOptions::from_env().stack_compression);
+
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var(key, v),
+                None => std::env::remove_var(key),
+            }
+        }
     }
 }
