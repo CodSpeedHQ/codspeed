@@ -1,5 +1,6 @@
 use crate::prelude::*;
 use libbpf_rs::{MapCore, MapFlags, MapHandle};
+use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 
 /// Processes stopped by BPF, either for ring pressure or for an attach request.
 ///
@@ -10,6 +11,9 @@ use libbpf_rs::{MapCore, MapFlags, MapHandle};
 pub(crate) struct StoppedProcesses {
     pressure_stopped: MapHandle,
     attach_stopped: MapHandle,
+    // Stop counts, only used for stats.
+    pressure_stops: AtomicU64,
+    attach_stops: AtomicU64,
 }
 
 impl StoppedProcesses {
@@ -17,11 +21,15 @@ impl StoppedProcesses {
         Self {
             pressure_stopped,
             attach_stopped,
+            pressure_stops: AtomicU64::new(0),
+            attach_stops: AtomicU64::new(0),
         }
     }
 
     /// Attach worker is done with pid.
     pub(crate) fn release_attach(&self, pid: u32) -> Result<()> {
+        debug!("Releasing attach stop of pid {pid}");
+        self.attach_stops.fetch_add(1, Relaxed);
         Self::release(pid, &self.attach_stopped, &self.pressure_stopped)
     }
 
@@ -29,15 +37,17 @@ impl StoppedProcesses {
     pub(crate) fn release_pressure(&self) -> Result<()> {
         // Deleting while iterating restarts hash iteration, so snapshot the keys first.
         let keys: Vec<Vec<u8>> = self.pressure_stopped.keys().collect();
-        if !keys.is_empty() {
-            debug!("Resuming {} pressure-stopped producers", keys.len());
+        if keys.is_empty() {
+            return Ok(());
         }
+        self.pressure_stops.fetch_add(keys.len() as u64, Relaxed);
         for key in keys {
             let pid = u32::from_le_bytes(
                 key.as_slice()
                     .try_into()
                     .context("Invalid pressure_stopped key size")?,
             );
+            debug!("Releasing pressure stop of pid {pid}");
             Self::release(pid, &self.pressure_stopped, &self.attach_stopped)?;
         }
         Ok(())
@@ -56,5 +66,15 @@ impl StoppedProcesses {
             return Ok(());
         }
         crate::ebpf::spawn::resume(pid as i32)
+    }
+}
+
+impl Drop for StoppedProcesses {
+    fn drop(&mut self) {
+        debug!(
+            "Process stops: {} pressure, {} attach",
+            self.pressure_stops.get_mut(),
+            self.attach_stops.get_mut(),
+        );
     }
 }
