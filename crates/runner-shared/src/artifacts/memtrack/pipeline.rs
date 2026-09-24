@@ -1,4 +1,5 @@
 use std::io::{BufWriter, Write};
+use std::time::{Duration, Instant};
 
 use rayon::prelude::*;
 
@@ -18,17 +19,34 @@ const WINDOW_FRAMES: usize = 16;
 /// in-flight frame; undershooting only costs the doublings it fails to avoid.
 const FRAME_BYTES_PER_EVENT: usize = 16;
 
+/// Timing and size of one encoded window, reported through `encode_events`'
+/// `on_window` callback.
+pub struct WindowStats {
+    pub events: usize,
+    /// Blocked on the input iterator, i.e. waiting for events.
+    pub wait: Duration,
+    pub encode: Duration,
+    pub write: Duration,
+    pub msgpack_bytes: u64,
+    pub zstd_bytes: u64,
+}
+
 /// Encode a stream of events into a single compressed artifact stream,
 /// compressing frames in parallel across a Rayon pool of `n_workers` threads.
 ///
 /// Events are grouped into fixed-size frames; each frame is one self-contained
 /// zstd frame. Frames are encoded a window at a time: a window is compressed in
-/// parallel, then its frames are written in input order before the next window
+/// parallel, then its frames are written in input order before the next one
 /// starts, so the output matches the input order and peak memory stays bounded.
 ///
 /// Blocks the calling thread until `events` is exhausted. Returns the total
 /// number of events written.
-pub fn encode_events<S, W>(events: S, out: W, n_workers: usize) -> anyhow::Result<u64>
+pub fn encode_events<S, W>(
+    events: S,
+    out: W,
+    n_workers: usize,
+    mut on_window: impl FnMut(&WindowStats),
+) -> anyhow::Result<u64>
 where
     S: IntoIterator<Item = MemtrackEvent>,
     W: Write,
@@ -45,6 +63,7 @@ where
     let mut events = events.into_iter();
     let mut window: Vec<MemtrackEvent> = Vec::with_capacity(cap);
     loop {
+        let waiting = Instant::now();
         window.clear();
         window.extend(events.by_ref().take(cap));
         if window.is_empty() {
@@ -52,36 +71,48 @@ where
         }
         total += window.len() as u64;
 
-        let frames: Vec<Vec<u8>> = pool.install(|| {
+        let encoding = Instant::now();
+        let frames: Vec<(Vec<u8>, u64)> = pool.install(|| {
             window
                 .par_chunks(FRAME_EVENTS)
                 .map(encode_frame)
                 .collect::<anyhow::Result<_>>()
         })?;
 
-        for frame in frames {
-            out.write_all(&frame)?;
+        let writing = Instant::now();
+        for (frame, _) in &frames {
+            out.write_all(frame)?;
         }
+        on_window(&WindowStats {
+            events: window.len(),
+            wait: encoding - waiting,
+            encode: writing - encoding,
+            write: writing.elapsed(),
+            msgpack_bytes: frames.iter().map(|(_, raw)| raw).sum(),
+            zstd_bytes: frames.iter().map(|(frame, _)| frame.len() as u64).sum(),
+        });
         wrote_any = true;
     }
 
     // Always emit at least one (possibly empty) frame so the artifact stream is
     // valid and decodable even when no events were recorded.
     if !wrote_any {
-        out.write_all(&encode_frame(&[])?)?;
+        out.write_all(&encode_frame(&[])?.0)?;
     }
 
     out.flush()?;
     Ok(total)
 }
 
-/// Encode one batch as a single self-contained zstd frame.
-fn encode_frame(batch: &[MemtrackEvent]) -> anyhow::Result<Vec<u8>> {
+/// Encode one batch as a single self-contained zstd frame, returned together
+/// with its uncompressed msgpack size.
+fn encode_frame(batch: &[MemtrackEvent]) -> anyhow::Result<(Vec<u8>, u64)> {
     let mut writer = MemtrackWriter::new(Vec::with_capacity(batch.len() * FRAME_BYTES_PER_EVENT))?;
     for event in batch {
         writer.write_event(event)?;
     }
-    writer.finish()
+    let raw = writer.uncompressed_bytes();
+    Ok((writer.finish()?, raw))
 }
 
 #[cfg(test)]
@@ -113,7 +144,7 @@ mod tests {
         let events = malloc_events(0..(FRAME_EVENTS as u64 * 3 + 7));
 
         let mut out = Vec::new();
-        let total = encode_events(events.clone(), &mut out, 4)?;
+        let total = encode_events(events.clone(), &mut out, 4, |_| {})?;
         assert_eq!(total, events.len() as u64);
 
         let decoded: Vec<_> = MemtrackArtifact::decode_streamed(Cursor::new(out))?.collect();
@@ -127,7 +158,7 @@ mod tests {
         let events = malloc_events(0..(FRAME_EVENTS * WINDOW_FRAMES + 1) as u64);
 
         let mut out = Vec::new();
-        let total = encode_events(events.clone(), &mut out, 4)?;
+        let total = encode_events(events.clone(), &mut out, 4, |_| {})?;
         assert_eq!(total, events.len() as u64);
 
         let decoded: Vec<_> = MemtrackArtifact::decode_streamed(Cursor::new(out))?.collect();
@@ -141,7 +172,7 @@ mod tests {
         let events: Vec<MemtrackEvent> = Vec::new();
 
         let mut out = Vec::new();
-        let total = encode_events(events, &mut out, 4)?;
+        let total = encode_events(events, &mut out, 4, |_| {})?;
         assert_eq!(total, 0);
 
         assert!(MemtrackArtifact::is_empty(Cursor::new(out)));
