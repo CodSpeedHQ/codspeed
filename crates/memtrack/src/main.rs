@@ -4,7 +4,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 use clap::Parser;
 use ipc_channel::ipc;
 use memtrack::prelude::*;
-use memtrack::{MemtrackIpcMessage, Tracker, handle_ipc_message};
+use memtrack::{MemtrackIpcMessage, Tracker, handle_ipc_message, stats};
 use runner_shared::artifacts::{ArtifactExt, MemtrackArtifact, encode_events};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -87,6 +87,7 @@ fn track_command(
         None
     };
 
+    stats::init_from_env()?;
     let tracker = Arc::new(Tracker::new()?);
 
     // Spawn IPC handler thread with the now-available tracker
@@ -154,6 +155,9 @@ fn track_command(
     // encode pipeline join below would block forever.
     debug!("Stopping the ring buffer poller");
     drop(session);
+    if let Err(error) = stats::finish() {
+        warn!("{error:#}");
+    }
 
     debug!("Waiting for the encode pipeline to finish");
     let total = pipeline_thread

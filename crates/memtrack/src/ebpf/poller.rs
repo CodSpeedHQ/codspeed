@@ -1,4 +1,4 @@
-use crate::ebpf::ring_stats::RingStats;
+use crate::ebpf::stats::RingSampler;
 use anyhow::{Context, Result};
 use libbpf_rs::{AsRawLibbpf, MapCore, RingBuffer, RingBufferBuilder, libbpf_sys};
 use parking_lot::Mutex;
@@ -9,6 +9,9 @@ use std::time::Duration;
 
 /// Ring-buffer poll interval shared by every poller.
 pub(crate) const POLL_INTERVAL_MS: u64 = 1;
+
+/// Called with the ring's map name each time the poller finds the ring empty.
+pub(crate) type OnDrained = Box<dyn Fn(&str) + Send>;
 
 /// Items buffered before a channel send. `std::sync::mpsc` allocates a block
 /// every 31 messages, so sending one item at a time makes that allocation
@@ -91,7 +94,7 @@ impl RingBufferPoller {
         parse: F,
         tx: Sender<Vec<T>>,
         poll_interval_ms: u64,
-        on_drained: Option<Box<dyn Fn() + Send>>,
+        on_drained: Option<OnDrained>,
     ) -> Result<Self>
     where
         M: MapCore,
@@ -127,10 +130,10 @@ impl RingBufferPoller {
         // poll tick, and disconnection is the shutdown signal.
         let (ctl, ctl_rx) = mpsc::channel::<Sender<()>>();
         let poll_thread = std::thread::spawn(move || {
-            let mut stats = RingStats::enabled().then(|| RingStats::new(name, ring_of(&ringbuf)));
+            let mut sampler = RingSampler::new(name.clone(), ring_of(&ringbuf));
             loop {
                 let control = ctl_rx.recv_timeout(Duration::from_millis(poll_interval_ms));
-                let tick = stats.as_ref().map(RingStats::begin);
+                let tick = sampler.as_ref().map(RingSampler::begin);
                 let running = poll_iteration(
                     control,
                     || consume_all(&ringbuf, ring_of(&ringbuf)),
@@ -140,8 +143,8 @@ impl RingBufferPoller {
                     &batch,
                     &tx,
                 );
-                if let (Some(stats), Some(tick)) = (&mut stats, tick) {
-                    stats.end(tick);
+                if let (Some(sampler), Some(tick)) = (&mut sampler, tick) {
+                    sampler.end(tick);
                 }
                 if !running {
                     break;
@@ -149,14 +152,11 @@ impl RingBufferPoller {
                 if let Some(on_drained) = &on_drained
                     && unsafe { libbpf_sys::ring__avail_data_size(ring_of(&ringbuf)) } == 0
                 {
-                    on_drained();
+                    on_drained(&name);
                 }
             }
             if let Some(on_drained) = &on_drained {
-                on_drained();
-            }
-            if let Some(stats) = &stats {
-                stats.report_run();
+                on_drained(&name);
             }
         });
 
@@ -209,7 +209,7 @@ impl ThreadedRingBufferPoller {
         resolve: R,
         tx: Sender<Vec<U>>,
         poll_interval_ms: u64,
-        on_drained: Option<Box<dyn Fn() + Send>>,
+        on_drained: Option<OnDrained>,
     ) -> Result<Self>
     where
         M: MapCore,
