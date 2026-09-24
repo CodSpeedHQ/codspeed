@@ -207,6 +207,7 @@ impl Worker {
                 stopped.insert(pid);
                 holds.push(AttachHold::new(self.stops.clone(), pid));
                 wait_all_stopped(pid, STOP_DEADLINE)?;
+                debug!("Stopped pid {pid} for attach");
             }
 
             // Every producer is stopped, so a synchronous drain is complete.

@@ -74,19 +74,22 @@ impl MemtrackBpf {
     }
 
     pub(super) fn open_stopped_processes(skel: &Skel) -> Result<StoppedProcesses> {
-        let (pressure_stopped, attach_stopped) = match skel {
+        let (pressure_stopped, attach_stopped, stop_record_failed) = match skel {
             Skel::Token(skel) => (
                 MapHandle::try_from(&skel.maps.pressure_stopped),
                 MapHandle::try_from(&skel.maps.attach_stopped),
+                MapHandle::try_from(&skel.maps.stop_record_failed),
             ),
             Skel::Legacy(skel) => (
                 MapHandle::try_from(&skel.maps.pressure_stopped),
                 MapHandle::try_from(&skel.maps.attach_stopped),
+                MapHandle::try_from(&skel.maps.stop_record_failed),
             ),
         };
         Ok(StoppedProcesses::new(
             pressure_stopped.context("Failed to create handle for pressure_stopped map")?,
             attach_stopped.context("Failed to create handle for attach_stopped map")?,
+            stop_record_failed.context("Failed to create handle for stop_record_failed map")?,
         ))
     }
 

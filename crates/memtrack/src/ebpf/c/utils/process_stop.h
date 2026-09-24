@@ -14,6 +14,8 @@
  * neither map holds it. Sized like tracked_pids. */
 BPF_HASH_MAP(pressure_stopped, __u32, __u8, 10000);
 BPF_HASH_MAP(attach_stopped, __u32, __u8, 10000);
+/* Stops that could not be recorded because the map was full; userspace warns. */
+BPF_ARRAY_MAP(stop_record_failed, __u64, 1);
 
 /* Stop the current process and record it in `map`. SIGSTOP is queued before
  * the record is written: it only takes effect on return to user mode, so any
@@ -26,10 +28,22 @@ static __always_inline void memtrack_stop_current(void* map, __u32 tgid) {
     }
 
     __u8 marker = 1;
-    if (bpf_map_update_elem(map, &tgid, &marker, BPF_ANY) != 0) {
-        /* Unrecorded, so nothing would resume it. */
-        bpf_send_signal(MEMTRACK_SIGCONT);
+    if (bpf_map_update_elem(map, &tgid, &marker, BPF_ANY) == 0) {
+        return;
     }
+
+    __u32 zero = 0;
+    __u64* failed = bpf_map_lookup_elem(&stop_record_failed, &zero);
+    if (failed) {
+        __sync_fetch_and_add(failed, 1);
+    }
+    /* Unrecorded, so nothing would resume it for this reason. Keep it stopped
+     * if the other reason holds it: that release will resume it. */
+    if (bpf_map_lookup_elem(&pressure_stopped, &tgid) ||
+        bpf_map_lookup_elem(&attach_stopped, &tgid)) {
+        return;
+    }
+    bpf_send_signal(MEMTRACK_SIGCONT);
 }
 
 #endif /* __PROCESS_STOP_H__ */
