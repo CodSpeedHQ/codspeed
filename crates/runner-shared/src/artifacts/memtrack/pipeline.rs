@@ -13,6 +13,10 @@ const FRAME_EVENTS: usize = 64 * 1024;
 /// memory to roughly `FRAME_EVENTS * WINDOW_FRAMES` events regardless of how long
 /// the source runs.
 const WINDOW_FRAMES: usize = 16;
+/// Compressed bytes to reserve per event, so a frame's output buffer does not
+/// grow-and-copy its way up from zero. Overshooting wastes a little memory per
+/// in-flight frame; undershooting only costs the doublings it fails to avoid.
+const FRAME_BYTES_PER_EVENT: usize = 16;
 
 /// Encode a stream of events into a single compressed artifact stream,
 /// compressing frames in parallel across a Rayon pool of `n_workers` threads.
@@ -73,7 +77,7 @@ where
 
 /// Encode one batch as a single self-contained zstd frame.
 fn encode_frame(batch: &[MemtrackEvent]) -> anyhow::Result<Vec<u8>> {
-    let mut writer = MemtrackWriter::new(Vec::new())?;
+    let mut writer = MemtrackWriter::new(Vec::with_capacity(batch.len() * FRAME_BYTES_PER_EVENT))?;
     for event in batch {
         writer.write_event(event)?;
     }
@@ -94,7 +98,10 @@ mod tests {
                 tid: 1,
                 timestamp: i,
                 addr: i,
-                kind: MemtrackEventKind::Malloc { size: i },
+                kind: MemtrackEventKind::Malloc {
+                    size: i,
+                    stack_hash: 0,
+                },
             })
             .collect()
     }

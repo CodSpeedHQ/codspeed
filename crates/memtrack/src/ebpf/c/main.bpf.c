@@ -11,6 +11,7 @@
 #include "process_tracking.bpf.h"
 #include "rmap.bpf.h"
 #include "rss.bpf.h"
+#include "stack_capture.bpf.h"
 #include "utils/event_helpers.h"
 #include "utils/folio.h"
 #include "utils/map_helpers.h"
