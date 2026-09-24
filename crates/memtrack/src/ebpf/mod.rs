@@ -1,6 +1,7 @@
 mod attach_worker;
 mod events;
 mod memtrack;
+pub(crate) mod pause;
 pub(crate) mod poller;
 mod proc_fs;
 mod spawn;

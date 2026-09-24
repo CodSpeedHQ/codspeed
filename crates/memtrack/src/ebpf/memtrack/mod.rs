@@ -126,6 +126,7 @@ pub struct MemtrackBpf {
     /// the same file offset as their canonical function; attaching each
     /// alias would double-instrument the one underlying function.
     attached_offsets: std::collections::HashSet<(std::path::PathBuf, usize)>,
+    stopped: std::sync::Arc<crate::ebpf::pause::StoppedProcesses>,
 }
 
 impl MemtrackBpf {
@@ -224,8 +225,10 @@ impl MemtrackBpf {
             }
         };
 
+        let stopped = std::sync::Arc::new(Self::open_stopped_processes(&skel)?);
         Ok(Self {
             skel,
+            stopped,
             probes: Vec::new(),
             rmap,
             physical,
@@ -235,7 +238,7 @@ impl MemtrackBpf {
 
     /// Poll the allocation-event ring buffer into `tx`. The returned poller
     /// keeps the pipeline alive; events stop flowing when it is dropped.
-    pub fn poll_events_with_channel(
+    pub(crate) fn poll_events_with_channel(
         &self,
         poll_interval_ms: u64,
         tx: std::sync::mpsc::Sender<Vec<runner_shared::artifacts::MemtrackEvent>>,
@@ -245,6 +248,7 @@ impl MemtrackBpf {
             crate::ebpf::events::parse_event,
             tx,
             poll_interval_ms,
+            None,
         ))
     }
 
@@ -278,6 +282,7 @@ impl MemtrackBpf {
             resolve,
             tx,
             poll_interval_ms,
+            Some(self.on_ring_drained()),
         ))
     }
 
@@ -293,6 +298,7 @@ impl MemtrackBpf {
             crate::ebpf::events::AttachRequest::parse,
             tx,
             poll_interval_ms,
+            None,
         ))
     }
 

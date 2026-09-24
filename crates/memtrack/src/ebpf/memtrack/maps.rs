@@ -1,7 +1,9 @@
-use super::MemtrackBpf;
+use super::{MemtrackBpf, Skel};
+use crate::ebpf::pause::StoppedProcesses;
 use crate::ebpf::stacks::StackCaptureFailureStats;
 use crate::prelude::*;
-use libbpf_rs::MapCore;
+use libbpf_rs::{MapCore, MapHandle};
+use std::sync::Arc;
 
 impl MemtrackBpf {
     pub fn add_tracked_pid(&mut self, pid: i32) -> Result<()> {
@@ -63,6 +65,39 @@ impl MemtrackBpf {
             with_skel!(self, skel => &skel.maps.dropped_events),
             "dropped_events",
         )
+    }
+
+    /// Owned map handles, so callers can release stopped processes without
+    /// holding the `MemtrackBpf` lock.
+    pub(crate) fn stopped_processes(&self) -> Arc<StoppedProcesses> {
+        self.stopped.clone()
+    }
+
+    pub(super) fn open_stopped_processes(skel: &Skel) -> Result<StoppedProcesses> {
+        let (pressure_stopped, attach_stopped) = match skel {
+            Skel::Token(skel) => (
+                MapHandle::try_from(&skel.maps.pressure_stopped),
+                MapHandle::try_from(&skel.maps.attach_stopped),
+            ),
+            Skel::Legacy(skel) => (
+                MapHandle::try_from(&skel.maps.pressure_stopped),
+                MapHandle::try_from(&skel.maps.attach_stopped),
+            ),
+        };
+        Ok(StoppedProcesses::new(
+            pressure_stopped.context("Failed to create handle for pressure_stopped map")?,
+            attach_stopped.context("Failed to create handle for attach_stopped map")?,
+        ))
+    }
+
+    /// Callback that resumes every pressure-stopped process.
+    pub(super) fn on_ring_drained(&self) -> Box<dyn Fn() + Send> {
+        let stopped = self.stopped.clone();
+        Box::new(move || {
+            if let Err(error) = stopped.release_pressure() {
+                error!("failed to release pressure-stopped producers: {error:#}");
+            }
+        })
     }
 
     pub fn stack_capture_stats(&self) -> Result<StackCaptureFailureStats> {

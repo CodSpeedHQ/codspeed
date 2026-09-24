@@ -34,6 +34,10 @@ pub struct TrackerOptions {
     /// Maximum bytes of user stack to copy per captured call stack.
     #[builder(default = 8192)]
     pub stack_budget: u32,
+    /// Event and stack ring poll interval. Larger values let the rings fill,
+    /// which is useful for exercising ring pressure on demand.
+    #[builder(default = POLL_INTERVAL_MS)]
+    pub poll_interval_ms: u64,
 }
 
 impl TrackerOptions {
@@ -52,6 +56,12 @@ impl TrackerOptions {
                     .ok()
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(8192),
+            )
+            .poll_interval_ms(
+                std::env::var("CODSPEED_MEMTRACK_POLL_INTERVAL_MS")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(POLL_INTERVAL_MS),
             )
             .build()
     }
@@ -122,6 +132,7 @@ impl Tracker {
     /// read back, so it cannot be preserved through the wrap).
     pub fn spawn(&self, cmd: &Command, uid_gid: Option<(u32, u32)>) -> Result<Session> {
         let capture_stacks = self.options.stack_capture;
+        let poll_interval_ms = self.options.poll_interval_ms;
 
         let mut wrapped = wrap_stopped(cmd);
         if let Some((uid, gid)) = uid_gid {
@@ -144,10 +155,10 @@ impl Tracker {
                 let mut bpf = self.bpf.lock();
                 bpf.add_tracked_pid(pid)?;
                 let stack_poller = capture_stacks
-                    .then(|| bpf.poll_stacks(POLL_INTERVAL_MS, tx.clone()))
+                    .then(|| bpf.poll_stacks(poll_interval_ms, tx.clone()))
                     .transpose()?;
                 (
-                    bpf.poll_events_with_channel(POLL_INTERVAL_MS, tx.clone())?,
+                    bpf.poll_events_with_channel(poll_interval_ms, tx.clone())?,
                     stack_poller,
                 )
             };
@@ -178,6 +189,7 @@ impl Tracker {
             perf_mapping_poller,
         ))
     }
+
     /// Enable allocator-event tracking in the BPF program. Lifetime events
     /// (rss_stat, rmap, fork/exec/exit) are emitted for tracked pids
     /// regardless of this toggle.

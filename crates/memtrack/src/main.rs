@@ -136,9 +136,12 @@ fn track_command(
     let pipeline_thread =
         thread::spawn(move || encode_events(event_rx.into_iter().flatten(), out_file, n_workers));
 
-    // Wait for the command to complete
-    let status = session.wait().context("Failed to wait for command")?;
-    debug!("Command exited with status: {status}");
+    // A worker failure must not skip disabling tracking, draining, joining the
+    // encoder, or detaching probes. Keep the wait result until teardown is done.
+    let status = session.wait().context("Failed to wait for command");
+    if let Ok(status) = &status {
+        debug!("Command exited with status: {status}");
+    }
 
     // Stop allocator-event production before draining: the child has exited,
     // so anything still arriving is already in the ring buffer.
@@ -155,18 +158,26 @@ fn track_command(
     debug!("Waiting for the encode pipeline to finish");
     let total = pipeline_thread
         .join()
-        .map_err(|_| anyhow::anyhow!("Failed to join memtrack encode pipeline"))??;
+        .map_err(|_| anyhow::anyhow!("Failed to join memtrack encode pipeline"))
+        .and_then(|result| result);
 
-    info!("Wrote {total} memtrack events to disk");
+    if let Ok(total) = &total {
+        info!("Wrote {total} memtrack events to disk");
+    }
 
-    // Stop the attach worker and surface any fatal error it recorded (missed
-    // exec mappings mean incomplete allocator coverage).
-    tracker.finish()?;
-
-    if tracker.stack_capture_enabled() {
-        let stats = tracker
-            .stack_capture_stats()
-            .context("Failed to read stack capture stats")?;
+    // Stop background workers after the ring pipeline has drained. Fatal
+    // worker errors mean the capture is incomplete.
+    let finish = tracker.finish();
+    let stack_stats = if tracker.stack_capture_enabled() {
+        Some(
+            tracker
+                .stack_capture_stats()
+                .context("Failed to read stack capture stats"),
+        )
+    } else {
+        None
+    };
+    if let Some(Ok(stats)) = &stack_stats {
         debug!("stack capture stats: {stats:?}");
     }
 
@@ -174,6 +185,13 @@ fn track_command(
     // tracker would otherwise never be dropped before process::exit and the
     // kernel would close every link fd serially during exit.
     tracker.detach();
+
+    let status = status?;
+    total?;
+    finish?;
+    if let Some(stats) = stack_stats {
+        stats?;
+    }
 
     // Read the eBPF dropped-event counter after the run is complete.
     // A non-zero value means the ring buffer overflowed and the trace is
