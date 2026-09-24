@@ -26,13 +26,15 @@ fn flush_batch<T>(batch: &Mutex<Vec<T>>, tx: &Sender<Vec<T>>) {
     let _ = tx.send(items);
 }
 
-/// `consume()` stops at a record a producer is still writing, not only at an
-/// empty ring, so retry until the ring is empty: stopping early would leave
-/// committed records unread without counting them as dropped.
+/// `consume()` also stops at a record a producer is still writing, so retry
+/// until everything reserved before the call has been consumed. Bounding by a
+/// producer-position snapshot, not an empty ring, keeps producers that are
+/// never stopped from starving the drain.
 fn consume_all(ringbuf: &RingBuffer, ring: *mut libbpf_sys::ring) {
+    let target = unsafe { libbpf_sys::ring__producer_pos(ring) };
     loop {
         let _ = ringbuf.consume();
-        if unsafe { libbpf_sys::ring__avail_data_size(ring) } == 0 {
+        if unsafe { libbpf_sys::ring__consumer_pos(ring) } >= target {
             return;
         }
         std::thread::sleep(Duration::from_millis(1));
