@@ -248,7 +248,7 @@ impl MemtrackBpf {
             crate::ebpf::events::parse_event,
             tx,
             poll_interval_ms,
-            Some(self.on_ring_drained()),
+            None,
         ))
     }
 

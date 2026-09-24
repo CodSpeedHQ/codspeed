@@ -26,7 +26,7 @@ static __always_inline void memtrack_check_ring_pressure(void* ring, __u32 curre
         return;
     }
 
-    /* Never stop a foreign RSS/rmap producer sharing the event ring. */
+    /* Never stop an untracked process that happens to trigger a probe. */
     if (!is_tracked(current_tgid)) {
         return;
     }

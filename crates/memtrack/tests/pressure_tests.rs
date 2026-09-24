@@ -1,6 +1,6 @@
-//! Ring-pressure pause under a deliberately slow poller: the event ring fills
-//! well before the next poll tick, so writing producers must stay paused
-//! until the poller has flushed the ring.
+//! Ring-pressure pause under a deliberately slow poller: with stack capture on,
+//! the stack ring fills well before the next poll tick, so writing producers
+//! must stay paused until the poller has flushed the ring.
 
 mod shared;
 
@@ -72,6 +72,7 @@ fn slow_poller_pause_recovers_without_loss() -> anyhow::Result<()> {
         &binary,
         [THREADS, ITERATIONS],
         TrackerOptions::builder()
+            .stack_capture(true)
             .poll_interval_ms(SLOW_POLL_MS)
             .build(),
     )?;
@@ -103,6 +104,7 @@ fn slow_poller_pause_resumes_every_writing_process() -> anyhow::Result<()> {
         &binary,
         [PROCESSES, ITERATIONS],
         TrackerOptions::builder()
+            .stack_capture(true)
             .poll_interval_ms(SLOW_POLL_MS)
             .build(),
     )?;
