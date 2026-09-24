@@ -44,13 +44,13 @@ impl StoppedProcesses {
     }
 
     /// Deletes `pid` from `own`, then resumes it unless `other` still holds it.
+    /// A missing entry means the process already exited or was released.
     fn release(pid: u32, own: &MapHandle, other: &MapHandle) -> Result<()> {
         let key = pid.to_le_bytes();
         match own.delete(&key) {
-            Err(err) if err.kind() != libbpf_rs::ErrorKind::NotFound => {
-                return Err(err).context("Failed to delete stop entry");
-            }
-            _ => {}
+            Ok(()) => {}
+            Err(err) if err.kind() == libbpf_rs::ErrorKind::NotFound => return Ok(()),
+            Err(err) => return Err(err).context("Failed to delete stop entry"),
         }
         if other.lookup(&key, MapFlags::ANY)?.is_some() {
             return Ok(());

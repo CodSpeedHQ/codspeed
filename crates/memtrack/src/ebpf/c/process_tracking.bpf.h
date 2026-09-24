@@ -4,6 +4,7 @@
 #include "event.h"
 #include "utils/event_helpers.h"
 #include "utils/mm_ownership.h"
+#include "utils/process_stop.h"
 #include "utils/process_tracking.h"
 
 /* FORK lets userland seed a child's RSS from its parent at fork time: the
@@ -83,9 +84,11 @@ int BPF_PROG(tracepoint_sched_process_exit) {
         return 0;
     }
 
-    /* Drop the ownership mapping so foreign actors stop attributing to a pid
-     * the kernel may reuse. */
+    /* Drop the ownership mapping and stop records so neither foreign actors
+     * nor a later release act on a pid the kernel may reuse. */
     rebind_pid_mm(pid, 0);
+    bpf_map_delete_elem(&pressure_stopped, &pid);
+    bpf_map_delete_elem(&attach_stopped, &pid);
 
     SUBMIT_EVENT_AS(pid, EVENT_TYPE_EXIT, {});
 }

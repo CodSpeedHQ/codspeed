@@ -4,6 +4,7 @@
 #include <bpf/bpf_helpers.h>
 
 #include "map_helpers.h"
+#include "process_stop.h"
 #include "process_tracking.h"
 
 /* Ring pressure stop. Call only after submit/discard or a failed reserve:
@@ -11,14 +12,6 @@
  * that writes while the ring is over the watermark is stopped and recorded,
  * so processes that do not write keep running. Userspace resumes the
  * recorded producers once it has flushed the ring. */
-
-#ifndef MEMTRACK_SIGSTOP
-#define MEMTRACK_SIGSTOP 19
-#endif
-
-/* tgid -> 1 for every producer stopped under pressure. Sized like
- * tracked_pids; a producer that cannot be recorded is never stopped. */
-BPF_HASH_MAP(pressure_stopped, __u32, __u8, 10000);
 
 /* Stop producers once this percentage of the ring holds unconsumed data. */
 #define MEMTRACK_PRESSURE_WATERMARK_PERCENT 75
@@ -39,11 +32,7 @@ static __always_inline void memtrack_check_ring_pressure(void* ring, __u32 curre
         return;
     }
 
-    __u8 marker = 1;
-    if (bpf_map_update_elem(&pressure_stopped, &current_tgid, &marker, BPF_ANY) != 0) {
-        return;
-    }
-    bpf_send_signal(MEMTRACK_SIGSTOP);
+    memtrack_stop_current(&pressure_stopped, current_tgid);
 }
 
 #endif /* __PRESSURE_BPF_H__ */
