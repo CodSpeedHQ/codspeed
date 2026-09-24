@@ -91,10 +91,10 @@ impl MemtrackBpf {
     }
 
     /// Callback that resumes every pressure-stopped process.
-    pub(super) fn on_ring_drained(&self) -> Box<dyn Fn() + Send> {
+    pub(super) fn on_ring_drained(&self) -> crate::ebpf::poller::OnDrained {
         let stopped = self.stopped.clone();
-        Box::new(move || {
-            if let Err(error) = stopped.release_pressure() {
+        Box::new(move |ring| {
+            if let Err(error) = stopped.release_pressure(ring) {
                 error!("failed to release pressure-stopped producers: {error:#}");
             }
         })

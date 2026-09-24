@@ -4,7 +4,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 use clap::Parser;
 use ipc_channel::ipc;
 use memtrack::prelude::*;
-use memtrack::{MemtrackIpcMessage, Tracker, handle_ipc_message};
+use memtrack::{MemtrackIpcMessage, Tracker, handle_ipc_message, stats};
 use runner_shared::artifacts::{ArtifactExt, MemtrackArtifact, encode_events};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -87,6 +87,7 @@ fn track_command(
         None
     };
 
+    stats::init_from_env()?;
     let tracker = Arc::new(Tracker::new()?);
 
     // Spawn IPC handler thread with the now-available tracker
@@ -133,8 +134,13 @@ fn track_command(
         .map(|n| n.get().saturating_sub(2).max(1))
         .unwrap_or(4);
 
-    let pipeline_thread =
-        thread::spawn(move || encode_events(event_rx.into_iter().flatten(), out_file, n_workers));
+    let pipeline_thread = thread::spawn(move || {
+        let events = event_rx
+            .into_iter()
+            .inspect(|batch| stats::add_received(batch.len()))
+            .flatten();
+        encode_events(events, out_file, n_workers, stats::encoder_window)
+    });
 
     // A worker failure must not skip disabling tracking, draining, joining the
     // encoder, or detaching probes. Keep the wait result until teardown is done.
@@ -163,6 +169,9 @@ fn track_command(
 
     if let Ok(total) = &total {
         info!("Wrote {total} memtrack events to disk");
+    }
+    if let Err(error) = stats::finish() {
+        warn!("{error:#}");
     }
 
     // Stop background workers after the ring pipeline has drained. Fatal
