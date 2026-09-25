@@ -1,4 +1,5 @@
 use crate::ebpf::attach_worker::AttachWorker;
+use crate::ebpf::poller::POLL_INTERVAL_MS;
 use crate::ebpf::spawn::{resume, spawn_stopped, wrap_stopped};
 use crate::ebpf::stacks::StackCaptureFailureStats;
 use crate::ebpf::{BpfVariant, MemtrackBpf, OwnershipMaps};
@@ -33,6 +34,10 @@ pub struct TrackerOptions {
     /// Maximum bytes of user stack to copy per captured call stack.
     #[builder(default = 8192)]
     pub stack_budget: u32,
+    /// Event and stack ring poll interval. Larger values let the rings fill,
+    /// which is useful for exercising ring pressure on demand.
+    #[builder(default = POLL_INTERVAL_MS)]
+    pub poll_interval_ms: u64,
 }
 
 impl TrackerOptions {
@@ -51,6 +56,12 @@ impl TrackerOptions {
                     .ok()
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(8192),
+            )
+            .poll_interval_ms(
+                std::env::var("CODSPEED_MEMTRACK_POLL_INTERVAL_MS")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(POLL_INTERVAL_MS),
             )
             .build()
     }
@@ -121,6 +132,7 @@ impl Tracker {
     /// read back, so it cannot be preserved through the wrap).
     pub fn spawn(&self, cmd: &Command, uid_gid: Option<(u32, u32)>) -> Result<Session> {
         let capture_stacks = self.options.stack_capture;
+        let poll_interval_ms = self.options.poll_interval_ms;
 
         let mut wrapped = wrap_stopped(cmd);
         if let Some((uid, gid)) = uid_gid {
@@ -143,9 +155,12 @@ impl Tracker {
                 let mut bpf = self.bpf.lock();
                 bpf.add_tracked_pid(pid)?;
                 let stack_poller = capture_stacks
-                    .then(|| bpf.poll_stacks(10, tx.clone()))
+                    .then(|| bpf.poll_stacks(poll_interval_ms, tx.clone()))
                     .transpose()?;
-                (bpf.poll_events_with_channel(10, tx.clone())?, stack_poller)
+                (
+                    bpf.poll_events_with_channel(poll_interval_ms, tx.clone())?,
+                    stack_poller,
+                )
             };
             let perf_mapping_poller = capture_stacks
                 .then(|| PerfMappingPoller::start(pid, tx, self.mapping_lost.clone()))
@@ -174,6 +189,7 @@ impl Tracker {
             perf_mapping_poller,
         ))
     }
+
     /// Enable allocator-event tracking in the BPF program. Lifetime events
     /// (rss_stat, rmap, fork/exec/exit) are emitted for tracked pids
     /// regardless of this toggle.
@@ -187,9 +203,14 @@ impl Tracker {
     }
 
     /// Number of events the kernel dropped because the ring buffer was full.
-    /// A non-zero value means the resulting trace is incomplete.
+    /// A non-zero value means the resulting trace is incomplete. Includes
+    /// allocation-stack ring overflow: missing stack records make the capture
+    /// incomplete just like ordinary event-ring or mapping loss.
     pub fn dropped_events_count(&self) -> Result<u64> {
-        Ok(self.bpf.lock().dropped_events_count()? + self.mapping_lost.load(Ordering::Relaxed))
+        let bpf = self.bpf.lock();
+        Ok(bpf.dropped_events_count()?
+            + bpf.stack_capture_stats()?.ring_full
+            + self.mapping_lost.load(Ordering::Relaxed))
     }
 
     /// Per-cause counts of stack captures that were skipped or truncated.

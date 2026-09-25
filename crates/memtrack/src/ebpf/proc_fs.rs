@@ -38,7 +38,7 @@ impl ResolvedMapping {
 /// Block until every thread of `pid` is group-stopped.
 ///
 /// The process state is the first non-space char after the LAST `)` in
-/// `/proc/<pid>/task/<tid>/stat`. Success means every thread is `T`/`t`.
+/// `/proc/<pid>/task/<tid>/stat`. Success means every thread is `T`/`t` or exited.
 ///
 /// - A vanished process (`/proc/<pid>` gone) is success: the stop is moot.
 /// - At the deadline, threads still in uninterruptible sleep (`D`) are treated
@@ -47,31 +47,18 @@ impl ResolvedMapping {
 ///   running breaks the drain guarantee.
 pub(super) fn wait_all_stopped(pid: u32, deadline: Duration) -> Result<()> {
     let start = Instant::now();
-    let task_dir = format!("/proc/{pid}/task");
 
     loop {
-        let Ok(entries) = std::fs::read_dir(&task_dir) else {
+        let Some(states) = task_states(pid) else {
             return Ok(());
         };
 
         let mut all_stopped = true;
         let mut running_tid: Option<u32> = None;
 
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            let Some(tid) = name.to_str().and_then(|s| s.parse::<u32>().ok()) else {
-                continue;
-            };
-
-            let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else {
-                continue;
-            };
-            let Some(state) = task_state(&stat) else {
-                continue;
-            };
-
+        for (tid, state) in states {
             match state {
-                'T' | 't' => {}
+                'T' | 't' | 'Z' | 'X' => {}
                 'D' => all_stopped = false,
                 _ => {
                     all_stopped = false;
@@ -103,6 +90,21 @@ pub(super) fn wait_all_stopped(pid: u32, deadline: Duration) -> Result<()> {
 fn task_state(stat: &str) -> Option<char> {
     let idx = stat.rfind(')')?;
     stat[idx + 1..].trim_start().chars().next()
+}
+
+/// `(tid, state)` of every readable thread of `pid`; `None` once
+/// `/proc/<pid>/task` is gone.
+fn task_states(pid: u32) -> Option<Vec<(u32, char)>> {
+    let entries = std::fs::read_dir(format!("/proc/{pid}/task")).ok()?;
+    let states = entries
+        .flatten()
+        .filter_map(|entry| {
+            let tid = entry.file_name().to_str()?.parse::<u32>().ok()?;
+            let stat = std::fs::read_to_string(entry.path().join("stat")).ok()?;
+            Some((tid, task_state(&stat)?))
+        })
+        .collect();
+    Some(states)
 }
 
 /// The outcome of resolving a watcher `(dev, ino)` against `/proc/<pid>/maps`.
