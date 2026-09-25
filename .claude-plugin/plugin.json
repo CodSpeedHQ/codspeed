@@ -1,6 +1,6 @@
 {
   "name": "codspeed",
-  "description": "CodSpeed plugin for Claude Code helping with performance measurement and optimization.",
+  "description": "Performance measurement and optimization with CodSpeed: benchmark results, flamegraphs, and regression detection.",
   "version": "1.0.0",
   "author": {
     "name": "CodSpeed"

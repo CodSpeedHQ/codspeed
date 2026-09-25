@@ -1,0 +1,46 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "codspeed",
+  "version": "1.0.0",
+  "description": "Performance measurement and optimization with CodSpeed: benchmark results, flamegraphs, and regression detection.",
+  "author": {
+    "name": "CodSpeed",
+    "email": "support@codspeed.io",
+    "url": "https://codspeed.io"
+  },
+  "homepage": "https://codspeed.io/docs/ai/mcp",
+  "repository": "https://github.com/CodSpeedHQ/codspeed",
+  "license": "MIT",
+  "keywords": [
+    "codspeed",
+    "performance",
+    "benchmarking",
+    "profiling",
+    "flamegraph",
+    "optimization",
+    "regression"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "CodSpeed",
+        "shortDescription": "Measure performance and optimize code with CodSpeed.",
+        "longDescription": "Measure and optimize code performance with CodSpeed. Inspect benchmark runs, compare commits to find regressions and verify gains, and query flamegraphs to locate CPU hotspots. Included skills help set up a benchmark suite and guide an iterative optimization loop: measure, change code, and re-measure until improvements flatten out.",
+        "developerName": "CodSpeed",
+        "category": "Engineering & IT",
+        "capabilities": ["Read"],
+        "websiteURL": "https://codspeed.io",
+        "privacyPolicyURL": "https://codspeed.io/privacy",
+        "termsOfServiceURL": "https://codspeed.io/terms",
+        "defaultPrompt": [
+          "@CodSpeed Which function regressed in our latest release? Compare with the previous release and inspect the flamegraph.",
+          "@CodSpeed Improve this project's performance: benchmark it, optimize the hottest code path, and measure the gain.",
+          "@CodSpeed Analyze this PR's performance impact: compare it with the base branch and explain regressions and gains."
+        ],
+        "brandColor": "#D8390E",
+        "composerIcon": "./assets/icon.png",
+        "logo": "./assets/logo.png"
+      }
+    }
+  }
+}
