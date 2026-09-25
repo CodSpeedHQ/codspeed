@@ -41,6 +41,9 @@ fn consume_all(ringbuf: &RingBuffer, ring: *mut libbpf_sys::ring) {
     }
 }
 
+/// Records read per regular-tick chunk. Bounds the work between fill checks.
+const CONSUME_CHUNK_RECORDS: usize = BATCH_ITEMS;
+
 fn poll_iteration<T>(
     control: std::result::Result<Sender<()>, RecvTimeoutError>,
     consume: impl FnOnce(),
@@ -72,8 +75,9 @@ fn poll_iteration<T>(
 /// Polls a BPF ring buffer in a background thread, parsing raw entries with a
 /// user-supplied closure and forwarding them to an mpsc channel in batches.
 ///
-/// The poll thread runs until the poller is dropped, doing a final full
-/// `consume()` on shutdown so no buffered entries are lost.
+/// Regular ticks consume bounded chunks and check the low-fill release
+/// watermark between chunks. Shutdown performs a final full `consume()` so no
+/// buffered entries are lost.
 pub struct RingBufferPoller {
     ctl: Option<Sender<Sender<()>>>,
     poll_thread: Option<JoinHandle<()>>,
@@ -85,7 +89,7 @@ impl RingBufferPoller {
         parse: F,
         tx: Sender<Vec<T>>,
         poll_interval_ms: u64,
-        on_drained: Option<Box<dyn Fn() + Send>>,
+        on_low_fill: Option<Box<dyn Fn() + Send>>,
     ) -> Result<Self>
     where
         M: MapCore,
@@ -123,23 +127,34 @@ impl RingBufferPoller {
             // SAFETY: the built `RingBuffer` holds exactly the one ring added above.
             let ring =
                 unsafe { libbpf_sys::ring_buffer__ring(ringbuf.as_libbpf_object().as_ptr(), 0) };
+            // Resume below 1/4 fill; BPF stops at 3/4, which leaves hysteresis.
+            let release_if_low = || {
+                if let Some(on_low_fill) = &on_low_fill
+                    && unsafe { libbpf_sys::ring__avail_data_size(ring) }
+                        < unsafe { libbpf_sys::ring__size(ring) } / 4
+                {
+                    on_low_fill();
+                }
+            };
             while poll_iteration(
                 ctl_rx.recv_timeout(Duration::from_millis(poll_interval_ms)),
                 || consume_all(&ringbuf, ring),
                 || {
-                    let _ = ringbuf.poll(Duration::ZERO);
+                    // A short or failed chunk ends the tick; the loop body below
+                    // checks the fill after it.
+                    while ringbuf.consume_raw_n(CONSUME_CHUNK_RECORDS)
+                        == CONSUME_CHUNK_RECORDS as i32
+                    {
+                        release_if_low();
+                    }
                 },
                 &batch,
                 &tx,
             ) {
-                if let Some(on_drained) = &on_drained
-                    && unsafe { libbpf_sys::ring__avail_data_size(ring) } == 0
-                {
-                    on_drained();
-                }
+                release_if_low();
             }
-            if let Some(on_drained) = &on_drained {
-                on_drained();
+            if let Some(on_low_fill) = &on_low_fill {
+                on_low_fill();
             }
         });
 
@@ -192,7 +207,7 @@ impl ThreadedRingBufferPoller {
         resolve: R,
         tx: Sender<Vec<U>>,
         poll_interval_ms: u64,
-        on_drained: Option<Box<dyn Fn() + Send>>,
+        on_low_fill: Option<Box<dyn Fn() + Send>>,
     ) -> Result<Self>
     where
         M: MapCore,
@@ -202,7 +217,7 @@ impl ThreadedRingBufferPoller {
         R: Fn(T) -> U + Send + 'static,
     {
         let (parsed_tx, parsed_rx) = mpsc::channel::<Vec<T>>();
-        let ring = RingBufferPoller::new(rb_map, parse, parsed_tx, poll_interval_ms, on_drained)?;
+        let ring = RingBufferPoller::new(rb_map, parse, parsed_tx, poll_interval_ms, on_low_fill)?;
         let resolver = std::thread::spawn(move || {
             for batch in parsed_rx {
                 let resolved = batch.into_iter().map(&resolve).collect();
