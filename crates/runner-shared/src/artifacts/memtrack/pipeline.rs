@@ -1,9 +1,12 @@
+use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::io::{BufWriter, Write};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 
+use serde::Serialize;
+
 use super::MemtrackEvent;
-use super::writer::MemtrackWriter;
+use super::writer::COMPRESSION_LEVEL;
 
 /// Events per self-contained zstd frame. Larger frames compress better; smaller
 /// frames cap the work (and memory) a single worker holds while encoding.
@@ -12,7 +15,9 @@ const FRAME_EVENTS: usize = 64 * 1024;
 /// oldest frame, bounding memory to about `cap + 1` frames.
 const MAX_IN_FLIGHT_PER_WORKER: usize = 2;
 
-type FrameResult = Receiver<anyhow::Result<Vec<u8>>>;
+/// An encoded frame, plus the event buffer it was built from so the reader can
+/// reuse it for the next frame instead of allocating a new one.
+type EncodedFrame = (anyhow::Result<Vec<u8>>, Vec<MemtrackEvent>);
 
 /// Encode a stream of events into a single compressed artifact stream,
 /// compressing frames in parallel across a Rayon pool of `n_workers` threads.
@@ -38,14 +43,24 @@ where
     let mut out = BufWriter::new(out);
     let mut total = 0u64;
     let mut wrote_any = false;
-    let mut in_flight: VecDeque<FrameResult> = VecDeque::with_capacity(max_in_flight);
+    let mut in_flight: VecDeque<Receiver<EncodedFrame>> = VecDeque::with_capacity(max_in_flight);
+    // Event buffers handed back by workers, reused for the next frames.
+    let mut spare: Vec<Vec<MemtrackEvent>> = Vec::new();
 
-    let submit = |frame: Vec<MemtrackEvent>, in_flight: &mut VecDeque<FrameResult>| {
+    let submit = |frame: Vec<MemtrackEvent>| {
         let (tx, rx) = mpsc::sync_channel(1);
         pool.spawn(move || {
-            let _ = tx.send(encode_frame(&frame));
+            let encoded = encode_frame(&frame);
+            let _ = tx.send((encoded, frame));
         });
-        in_flight.push_back(rx);
+        rx
+    };
+    let mut collect = |(encoded, mut frame): EncodedFrame, spare: &mut Vec<Vec<MemtrackEvent>>| {
+        out.write_all(&encoded?)?;
+        wrote_any = true;
+        frame.clear();
+        spare.push(frame);
+        anyhow::Ok(())
     };
 
     let mut frame: Vec<MemtrackEvent> = Vec::with_capacity(FRAME_EVENTS);
@@ -55,37 +70,32 @@ where
             continue;
         }
         total += frame.len() as u64;
-        let full = std::mem::replace(&mut frame, Vec::with_capacity(FRAME_EVENTS));
-        submit(full, &mut in_flight);
+        let next = spare
+            .pop()
+            .unwrap_or_else(|| Vec::with_capacity(FRAME_EVENTS));
+        in_flight.push_back(submit(std::mem::replace(&mut frame, next)));
 
+        // Write finished frames in input order. Wait for the oldest frame only
+        // while the queue is at the cap.
         while let Some(rx) = in_flight.front() {
-            match rx.try_recv() {
-                Ok(encoded) => {
-                    out.write_all(&encoded?)?;
-                    wrote_any = true;
-                    in_flight.pop_front();
-                }
-                Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => {
-                    anyhow::bail!("frame encoder worker exited without a result")
-                }
-            }
-        }
-
-        if in_flight.len() >= max_in_flight {
-            let rx = in_flight.pop_front().expect("in-flight queue is non-empty");
-            out.write_all(&recv_frame(&rx)?)?;
-            wrote_any = true;
+            let at_cap = in_flight.len() >= max_in_flight;
+            let result = match rx.try_recv() {
+                Ok(result) => result,
+                Err(TryRecvError::Empty) if !at_cap => break,
+                // Blocks at the cap; fails at once if the worker is gone.
+                Err(_) => recv_frame(rx)?,
+            };
+            in_flight.pop_front();
+            collect(result, &mut spare)?;
         }
     }
 
     if !frame.is_empty() {
         total += frame.len() as u64;
-        submit(frame, &mut in_flight);
+        in_flight.push_back(submit(frame));
     }
     for rx in in_flight.drain(..) {
-        out.write_all(&recv_frame(&rx)?)?;
-        wrote_any = true;
+        collect(recv_frame(&rx)?, &mut spare)?;
     }
 
     // Always emit at least one (possibly empty) frame so the artifact stream is
@@ -99,25 +109,69 @@ where
 }
 
 /// Block until the frame behind `rx` is encoded.
-fn recv_frame(rx: &FrameResult) -> anyhow::Result<Vec<u8>> {
+fn recv_frame(rx: &Receiver<EncodedFrame>) -> anyhow::Result<EncodedFrame> {
     rx.recv()
-        .map_err(|_| anyhow::anyhow!("frame encoder worker exited without a result"))?
+        .map_err(|_| anyhow::anyhow!("frame encoder worker exited without a result"))
+}
+
+/// Upper estimate of the msgpack size of one event, used to size the frame
+/// buffer up front. Growing it by doubling instead would leave each worker
+/// pinning about twice a frame's msgpack size.
+const MSGPACK_BYTES_PER_EVENT: usize = 80;
+
+/// Per-thread scratch state reused across frames: the msgpack buffer and the
+/// zstd compression context.
+///
+/// Each worker keeps its buffer (about one frame's msgpack, ~5 MiB) until the
+/// pool exits, even when idle. Peak usage needs it anyway, since every busy
+/// worker holds one, and allocating it per frame measured about 9% slower with
+/// a single worker.
+struct FrameEncoder {
+    msgpack: Vec<u8>,
+    compressor: zstd::bulk::Compressor<'static>,
+}
+
+thread_local! {
+    static FRAME_ENCODER: RefCell<Option<FrameEncoder>> = const { RefCell::new(None) };
 }
 
 /// Encode one batch as a single self-contained zstd frame.
+///
+/// The batch is serialized with `rmp_serde` into a reused buffer, then
+/// compressed in one shot with a reused zstd context. The decoded bytes are the
+/// same msgpack stream `MemtrackWriter` produces.
 fn encode_frame(batch: &[MemtrackEvent]) -> anyhow::Result<Vec<u8>> {
-    let mut writer = MemtrackWriter::new(Vec::new())?;
-    for event in batch {
-        writer.write_event(event)?;
-    }
-    writer.finish()
+    FRAME_ENCODER.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        let enc = match slot.as_mut() {
+            Some(enc) => enc,
+            None => slot.insert(FrameEncoder {
+                msgpack: Vec::new(),
+                compressor: zstd::bulk::Compressor::new(COMPRESSION_LEVEL)?,
+            }),
+        };
+
+        enc.msgpack.clear();
+        enc.msgpack
+            .reserve_exact(batch.len() * MSGPACK_BYTES_PER_EVENT);
+        let mut serializer = rmp_serde::Serializer::new(&mut enc.msgpack);
+        for event in batch {
+            event.serialize(&mut serializer)?;
+        }
+
+        let mut compressed = enc.compressor.compress(&enc.msgpack)?;
+        // Trim the worst-case compression bound so in-flight frames only hold
+        // their actual size.
+        compressed.shrink_to_fit();
+        Ok(compressed)
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use std::io::Cursor;
 
-    use super::super::{MemtrackArtifact, MemtrackEventKind};
+    use super::super::{MemtrackArtifact, MemtrackEventKind, MemtrackWriter};
     use super::*;
 
     fn malloc_events(range: std::ops::Range<u64>) -> Vec<MemtrackEvent> {
@@ -158,6 +212,25 @@ mod tests {
 
         let decoded: Vec<_> = MemtrackArtifact::decode_streamed(Cursor::new(out))?.collect();
         assert_eq!(decoded, events);
+
+        Ok(())
+    }
+
+    #[test]
+    fn frame_payload_matches_memtrack_writer() -> anyhow::Result<()> {
+        let events = malloc_events(0..10_000);
+
+        let mut reference = MemtrackWriter::new(Vec::new())?;
+        for event in &events {
+            reference.write_event(event)?;
+        }
+        let reference = zstd::decode_all(Cursor::new(reference.finish()?))?;
+
+        // Encode twice to also exercise the reused per-thread buffers.
+        for _ in 0..2 {
+            let frame = zstd::decode_all(Cursor::new(encode_frame(&events)?))?;
+            assert_eq!(frame, reference);
+        }
 
         Ok(())
     }
