@@ -27,6 +27,9 @@ repos:
       - id: clang-format
         files: ^crates/memtrack/src/ebpf/c/.*\.(c|h|bpf\.c)$
         args: [--style=file, -i, --version=22.1.2]
+        # The hook pip-installs clang-format on first use; parallel batches
+        # race on that install and fail with a PermissionError on a cold cache.
+        require_serial: true
   - repo: local
     hooks:
       - id: init-worktree
