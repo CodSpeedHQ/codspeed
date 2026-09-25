@@ -53,16 +53,13 @@ int BPF_PROG(watch_exec_mmap, struct file* file, unsigned long prot, unsigned lo
         }
         return 0;
     }
+    /* The worker may release the pid as soon as the request is visible. */
+    memtrack_stop_current(&attach_stopped, tgid);
+
     req->pid = tgid;
     req->dev = key.dev;
     req->ino = key.ino;
     bpf_ringbuf_submit(req, 0);
-
-    __u8 marker = 1;
-    if (bpf_map_update_elem(&attach_stopped, &tgid, &marker, BPF_ANY) != 0) {
-        return 0;
-    }
-    bpf_send_signal(MEMTRACK_SIGSTOP);
     return 0;
 }
 
