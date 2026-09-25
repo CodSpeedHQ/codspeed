@@ -282,7 +282,7 @@ impl MemtrackBpf {
             resolve,
             tx,
             poll_interval_ms,
-            Some(self.on_ring_drained()),
+            Some(self.on_ring_low_fill()),
         ))
     }
 

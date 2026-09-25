@@ -90,8 +90,8 @@ impl MemtrackBpf {
         ))
     }
 
-    /// Callback that resumes every pressure-stopped process.
-    pub(super) fn on_ring_drained(&self) -> Box<dyn Fn() + Send> {
+    /// Callback that resumes pressure-stopped processes at the low watermark.
+    pub(super) fn on_ring_low_fill(&self) -> Box<dyn Fn() + Send> {
         let stopped = self.stopped.clone();
         Box::new(move || {
             if let Err(error) = stopped.release_pressure() {
