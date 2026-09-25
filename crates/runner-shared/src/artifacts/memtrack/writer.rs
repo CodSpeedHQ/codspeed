@@ -3,6 +3,10 @@ use std::io::{BufWriter, Write};
 
 use super::MemtrackEvent;
 
+/// zstd level used for memtrack artifacts. We're dealing with a lot of events, so
+/// we want to compress as much as possible while not taking too much time.
+pub(crate) const COMPRESSION_LEVEL: i32 = -5;
+
 /// Streaming writer for memtrack events, serializing into a zstd-compressed sink.
 pub struct MemtrackWriter<B: Write> {
     serializer: rmp_serde::Serializer<B>,
@@ -10,9 +14,6 @@ pub struct MemtrackWriter<B: Write> {
 
 impl<W: Write> MemtrackWriter<BufWriter<zstd::Encoder<'static, W>>> {
     pub fn new(writer: W) -> anyhow::Result<Self> {
-        // We're dealing with a lot of events, so we want to compress as much as possible
-        // while not taking too much time to compress.
-        const COMPRESSION_LEVEL: i32 = -5;
         const BUFFER_SIZE: usize = 256 * 1024 /* 256 KB */;
 
         let encoder = zstd::Encoder::new(writer, COMPRESSION_LEVEL)?;
