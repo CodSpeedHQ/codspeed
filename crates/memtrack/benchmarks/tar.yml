@@ -12,7 +12,7 @@ options:
 benchmarks:
   # Allocation- and I/O-heavy: many small file reads.
   - name: "memtrack track tar"
-    exec: env CODSPEED_MEMTRACK_TRACK_PHYSICAL=0 codspeed-memtrack track "tar -cf /tmp/memtrack-bench.tar /usr/bin" --output /tmp/codspeed-memtrack-bench
+    exec: env CODSPEED_MEMTRACK_TRACK_PHYSICAL=0 codspeed memtrack track "tar -cf /tmp/memtrack-bench.tar /usr/bin" --output /tmp/codspeed-memtrack-bench
 
   - name: "memtrack track tar (with physical)"
-    exec: env CODSPEED_MEMTRACK_TRACK_PHYSICAL=1 codspeed-memtrack track "tar -cf /tmp/memtrack-bench.tar /usr/bin" --output /tmp/codspeed-memtrack-bench
+    exec: env CODSPEED_MEMTRACK_TRACK_PHYSICAL=1 codspeed memtrack track "tar -cf /tmp/memtrack-bench.tar /usr/bin" --output /tmp/codspeed-memtrack-bench

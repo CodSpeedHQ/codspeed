@@ -74,7 +74,8 @@ samply = { path = "crates/samply-codspeed/samply" }
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = "0.18"
 caps = "0.5"
-memtrack = { path = "crates/memtrack", default-features = false }
+# Default features on: `ebpf` carries the tracker the bundled subcommand needs.
+memtrack = { path = "crates/memtrack" }
 ipc-channel = { workspace = true }
 
 [dev-dependencies]
@@ -139,3 +140,17 @@ targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-musl", "x86_64-unknown
 binaries.aarch64-apple-darwin = ["codspeed"]
 binaries.aarch64-unknown-linux-musl = ["codspeed"]
 binaries.x86_64-unknown-linux-musl = ["codspeed"]
+
+# memtrack's vendored libbpf/elfutils build runs as part of this package.
+[package.metadata.dist.dependencies.apt]
+build-essential = "*"
+pkgconf = "*"
+zlib1g-dev = "*"
+libbpf-dev = "*"
+musl-tools = "*"
+linux-libc-dev = "*"
+
+# Required for the vendored feature
+autopoint = "*"
+bison = "*"
+flex = "*"

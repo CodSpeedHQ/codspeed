@@ -285,16 +285,13 @@ mod tests {
 
     /// Allocator entry points must resolve to file offsets; a symbol that
     /// silently fails to resolve attaches nothing and loses all events.
+    ///
+    /// CI-only: the path is the Ubuntu one, and a static musl build of this
+    /// binary has no libc of its own to look at.
+    #[test_with::env(GITHUB_ACTIONS)]
     #[test]
     fn libc_allocator_symbols_resolve_to_offsets() {
-        let maps = std::fs::read_to_string("/proc/self/maps").unwrap();
-        let libc_path = maps
-            .lines()
-            .find_map(|line| {
-                let path = line.split_whitespace().last()?;
-                path.contains("libc.so.6").then(|| path.to_owned())
-            })
-            .expect("test process has no mapped libc.so.6");
+        let libc_path = format!("/lib/{}-linux-gnu/libc.so.6", std::env::consts::ARCH);
 
         let symbols = resolve_symbol_offsets(Path::new(&libc_path)).unwrap();
         for symbol in ["malloc", "calloc", "realloc", "free"] {

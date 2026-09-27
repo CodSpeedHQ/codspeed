@@ -49,18 +49,3 @@ rstest = { workspace = true }
 test-log = { workspace = true }
 insta = { workspace = true, features = ["json", "redactions"] }
 test-with = { workspace = true }
-
-[package.metadata.dist]
-targets = ["aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"]
-features = ["libbpf-rs/static"]
-
-[package.metadata.dist.dependencies.apt]
-build-essential = "*"
-pkgconf = "*"
-zlib1g-dev = "*"
-libbpf-dev = "*"
-
-# Required for the vendored feature
-autopoint = "*"
-bison = "*"
-flex = "*"
