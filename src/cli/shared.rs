@@ -139,6 +139,14 @@ pub struct ExecAndRunSharedArgs {
     #[arg(long, env = "CODSPEED_SIMULATION_TRACK_SUBPROCESS")]
     pub simulation_track_subprocess: bool,
 
+    /// Disable physical (resident) memory tracking in memory mode.
+    #[arg(long, env = "CODSPEED_DISABLE_MEMORY_TRACK_PHYSICAL")]
+    pub disable_memory_track_physical: bool,
+
+    /// Disable allocation call stack capture in memory mode.
+    #[arg(long, env = "CODSPEED_DISABLE_MEMORY_CAPTURE_STACK")]
+    pub disable_memory_capture_stack: bool,
+
     #[command(flatten)]
     pub profiler_run_args: ProfilerRunArgs,
 

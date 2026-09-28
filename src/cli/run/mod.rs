@@ -72,6 +72,8 @@ impl RunArgs {
                 cycle_estimation: true,
                 exclude_allocations: false,
                 simulation_track_subprocess: false,
+                disable_memory_track_physical: false,
+                disable_memory_capture_stack: false,
                 profiler_run_args: ProfilerRunArgs {
                     enable_profiler: false,
                     enable_perf: None,
@@ -140,12 +142,12 @@ fn build_orchestrator_config(
         cycle_estimation,
         exclude_allocations,
         simulation_track_subprocess: args.shared.simulation_track_subprocess,
-        memory_track_physical: args.shared.experimental.experimental_memory_track_physical,
+        memory_track_physical: !args.shared.disable_memory_track_physical,
         disable_pythonmalloc_override: args
             .shared
             .experimental
             .experimental_disable_pythonmalloc_override,
-        memory_capture_stack: args.shared.experimental.experimental_memory_capture_stack,
+        memory_capture_stack: !args.shared.disable_memory_capture_stack,
     })
 }
 

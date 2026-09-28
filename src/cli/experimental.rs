@@ -17,24 +17,6 @@ pub struct ExperimentalArgs {
     )]
     pub experimental_fair_sched: bool,
 
-    /// Enable physical (resident) memory tracking in memory mode.
-    #[arg(
-        long,
-        default_value_t = false,
-        help_heading = "Experimental",
-        env = "CODSPEED_MEMTRACK_TRACK_PHYSICAL",
-        value_parser = clap::builder::FalseyValueParser::new()
-    )]
-    pub experimental_memory_track_physical: bool,
-    /// Capture allocation call stacks in memory mode.
-    #[arg(
-        long,
-        default_value_t = false,
-        help_heading = "Experimental",
-        env = "CODSPEED_EXPERIMENTAL_MEMORY_CAPTURE_STACK"
-    )]
-    pub experimental_memory_capture_stack: bool,
-
     /// Do not set PYTHONMALLOC for simulation runs.
     #[arg(
         long,
@@ -51,6 +33,19 @@ pub struct ExperimentalArgs {
     /// Deprecated alias for `--exclude-allocations`, still honored for now.
     #[arg(long, hide = true, env = "CODSPEED_EXPERIMENTAL_EXCLUDE_ALLOCATIONS")]
     pub experimental_exclude_allocations: bool,
+
+    /// Deprecated: physical memory tracking is enabled by default.
+    #[arg(
+        long,
+        hide = true,
+        env = "CODSPEED_MEMTRACK_TRACK_PHYSICAL",
+        value_parser = clap::builder::FalseyValueParser::new()
+    )]
+    pub experimental_memory_track_physical: bool,
+
+    /// Deprecated: allocation call stack capture is enabled by default.
+    #[arg(long, hide = true, env = "CODSPEED_EXPERIMENTAL_MEMORY_CAPTURE_STACK")]
+    pub experimental_memory_capture_stack: bool,
 }
 
 impl ExperimentalArgs {
@@ -60,14 +55,8 @@ impl ExperimentalArgs {
         if self.experimental_fair_sched {
             flags.push("--experimental-fair-sched");
         }
-        if self.experimental_memory_track_physical {
-            flags.push("--experimental-memory-track-physical");
-        }
         if self.experimental_disable_pythonmalloc_override {
             flags.push("--experimental-disable-pythonmalloc-override");
-        }
-        if self.experimental_memory_capture_stack {
-            flags.push("--experimental-memory-capture-stack");
         }
         flags
     }
@@ -96,25 +85,33 @@ impl ExperimentalArgs {
     }
 
     /// Warns about deprecated flags that graduated to stable options. They are still
-    /// honored, but will be removed in a future release.
+    /// accepted, but will be removed in a future release.
     pub fn warn_if_deprecated(&self) {
         let deprecated = [
             (
                 self.experimental_cycle_estimation,
                 "--experimental-cycle-estimation",
-                "--cycle-estimation",
+                "use --cycle-estimation instead",
             ),
             (
                 self.experimental_exclude_allocations,
                 "--experimental-exclude-allocations",
-                "--exclude-allocations",
+                "use --exclude-allocations instead",
+            ),
+            (
+                self.experimental_memory_track_physical,
+                "--experimental-memory-track-physical",
+                "physical memory tracking is enabled by default, use --disable-memory-track-physical to opt out",
+            ),
+            (
+                self.experimental_memory_capture_stack,
+                "--experimental-memory-capture-stack",
+                "stack capture is enabled by default, use --disable-memory-capture-stack to opt out",
             ),
         ];
 
-        for (_, flag, new_flag) in deprecated.iter().filter(|(set, ..)| *set) {
-            eprintln!(
-                "{flag} is deprecated and will be removed in a future release: use {new_flag} instead."
-            );
+        for (_, flag, hint) in deprecated.iter().filter(|(set, ..)| *set) {
+            eprintln!("{flag} is deprecated and will be removed in a future release: {hint}.");
         }
     }
 }

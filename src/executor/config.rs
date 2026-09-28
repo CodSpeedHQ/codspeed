@@ -268,9 +268,9 @@ impl OrchestratorConfig {
             cycle_estimation: true,
             exclude_allocations: false,
             simulation_track_subprocess: false,
-            memory_track_physical: false,
+            memory_track_physical: true,
             disable_pythonmalloc_override: false,
-            memory_capture_stack: false,
+            memory_capture_stack: true,
         }
     }
 }
