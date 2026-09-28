@@ -188,6 +188,21 @@ impl ExecAndRunSharedArgs {
     pub fn resolve_exclude_allocations(&self) -> bool {
         self.exclude_allocations || self.experimental.experimental_exclude_allocations
     }
+
+    /// Resolves physical memory tracking. Any explicit opt-out wins: the
+    /// `--disable-memory-track-physical` flag overrides the deprecated enable alias,
+    /// and the deprecated flag's falsey value (`0`, `false`) overrides the default.
+    pub fn resolve_memory_track_physical(&self) -> bool {
+        !self.disable_memory_track_physical
+            && self.experimental.experimental_memory_track_physical != Some(false)
+    }
+
+    /// Resolves allocation call stack capture, with the same precedence rules as
+    /// [`Self::resolve_memory_track_physical`].
+    pub fn resolve_memory_capture_stack(&self) -> bool {
+        !self.disable_memory_capture_stack
+            && self.experimental.experimental_memory_capture_stack != Some(false)
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, ValueEnum, Default)]

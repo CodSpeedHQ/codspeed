@@ -35,17 +35,28 @@ pub struct ExperimentalArgs {
     pub experimental_exclude_allocations: bool,
 
     /// Deprecated: physical memory tracking is enabled by default.
+    /// Passing a falsey value (`0`, `false`) disables it.
     #[arg(
         long,
         hide = true,
         env = "CODSPEED_MEMTRACK_TRACK_PHYSICAL",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "true",
         value_parser = clap::builder::FalseyValueParser::new()
     )]
-    pub experimental_memory_track_physical: bool,
+    pub experimental_memory_track_physical: Option<bool>,
 
     /// Deprecated: allocation call stack capture is enabled by default.
-    #[arg(long, hide = true, env = "CODSPEED_EXPERIMENTAL_MEMORY_CAPTURE_STACK")]
-    pub experimental_memory_capture_stack: bool,
+    #[arg(
+        long,
+        hide = true,
+        env = "CODSPEED_EXPERIMENTAL_MEMORY_CAPTURE_STACK",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "true"
+    )]
+    pub experimental_memory_capture_stack: Option<bool>,
 }
 
 impl ExperimentalArgs {
@@ -99,14 +110,14 @@ impl ExperimentalArgs {
                 "use --exclude-allocations instead",
             ),
             (
-                self.experimental_memory_track_physical,
+                self.experimental_memory_track_physical.is_some(),
                 "--experimental-memory-track-physical",
-                "physical memory tracking is enabled by default, use --disable-memory-track-physical to opt out",
+                "physical memory tracking is now controlled by --disable-memory-track-physical",
             ),
             (
-                self.experimental_memory_capture_stack,
+                self.experimental_memory_capture_stack.is_some(),
                 "--experimental-memory-capture-stack",
-                "stack capture is enabled by default, use --disable-memory-capture-stack to opt out",
+                "stack capture is now controlled by --disable-memory-capture-stack",
             ),
         ];
 

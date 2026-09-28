@@ -83,10 +83,10 @@ impl RunArgs {
                 },
                 experimental: ExperimentalArgs {
                     experimental_fair_sched: false,
-                    experimental_memory_capture_stack: false,
+                    experimental_memory_capture_stack: None,
                     experimental_cycle_estimation: false,
                     experimental_exclude_allocations: false,
-                    experimental_memory_track_physical: false,
+                    experimental_memory_track_physical: None,
                     experimental_disable_pythonmalloc_override: false,
                 },
             },
@@ -107,6 +107,8 @@ fn build_orchestrator_config(
     let modes = args.shared.resolve_modes()?;
     let cycle_estimation = args.shared.resolve_cycle_estimation();
     let exclude_allocations = args.shared.resolve_exclude_allocations();
+    let memory_track_physical = args.shared.resolve_memory_track_physical();
+    let memory_capture_stack = args.shared.resolve_memory_capture_stack();
     let raw_upload_url = args
         .shared
         .upload_url
@@ -142,12 +144,12 @@ fn build_orchestrator_config(
         cycle_estimation,
         exclude_allocations,
         simulation_track_subprocess: args.shared.simulation_track_subprocess,
-        memory_track_physical: !args.shared.disable_memory_track_physical,
+        memory_track_physical,
         disable_pythonmalloc_override: args
             .shared
             .experimental
             .experimental_disable_pythonmalloc_override,
-        memory_capture_stack: !args.shared.disable_memory_capture_stack,
+        memory_capture_stack,
     })
 }
 
