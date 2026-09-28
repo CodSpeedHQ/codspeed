@@ -84,6 +84,7 @@ fn build_orchestrator_config(
         simulation_tool: args.shared.simulation_tool.unwrap_or_default(),
         profile_folder: args.shared.profile_folder,
         skip_upload: args.shared.skip_upload,
+        export_run_id: args.shared.export_run_id,
         skip_run: args.shared.skip_run,
         skip_setup: args.shared.skip_setup,
         allow_empty: args.shared.allow_empty,

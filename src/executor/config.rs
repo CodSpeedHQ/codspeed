@@ -77,6 +77,8 @@ pub struct OrchestratorConfig {
 
     pub profile_folder: Option<PathBuf>,
     pub skip_upload: bool,
+    /// If true, expose the run id to the next steps of the CI job after the upload
+    pub export_run_id: bool,
     pub skip_run: bool,
     pub skip_setup: bool,
     /// If true, allow execution even when no benchmarks are found
@@ -247,6 +249,7 @@ impl OrchestratorConfig {
             simulation_tool: SimulationTool::default(),
             profile_folder: None,
             skip_upload: false,
+            export_run_id: false,
             skip_run: false,
             skip_setup: false,
             allow_empty: false,

@@ -226,8 +226,10 @@ impl Orchestrator {
             let last_upload_result = self.upload_all(&mut completed_runs, api_client).await?;
             end_group!();
 
-            if let Err(e) = self.provider.export_run_id(&last_upload_result.run_id) {
-                warn!("Failed to expose the run id as a step output: {e}");
+            if self.config.export_run_id {
+                if let Err(e) = self.provider.export_run_id(&last_upload_result.run_id) {
+                    warn!("Failed to expose the run id as a step output: {e}");
+                }
             }
 
             if self.is_local() {

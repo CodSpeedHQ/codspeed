@@ -87,6 +87,15 @@ pub struct ExecAndRunSharedArgs {
     )]
     pub skip_upload: bool,
 
+    /// Used internally by the GitHub Action to expose the run id as the `run-id` step output
+    #[arg(
+        long,
+        default_value = "false",
+        hide = true,
+        env = "CODSPEED_EXPORT_RUN_ID"
+    )]
+    pub export_run_id: bool,
+
     /// Used internally to upload the results after running the benchmarks in a sandbox environment
     /// with no internet access
     #[arg(long, default_value = "false", hide = true)]
