@@ -7,6 +7,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use simplelog::SharedLogger;
 use std::collections::BTreeMap;
+use std::io::Write;
 use std::{env, fs};
 
 use crate::api_client::{Authentication, CodSpeedAPIClient};
@@ -379,6 +380,20 @@ impl RunEnvironmentProvider for GitHubActionsProvider {
                 warn!("Failed to retrieve OIDC token for authentication.");
             }
         }
+
+        Ok(())
+    }
+
+    /// Write the run id as the `run-id` step output.
+    fn export_run_id(&self, run_id: &str) -> Result<()> {
+        let Ok(output_path) = env::var("GITHUB_OUTPUT") else {
+            return Ok(());
+        };
+        let mut output_file = fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(output_path)?;
+        writeln!(output_file, "run-id={run_id}")?;
 
         Ok(())
     }
@@ -832,5 +847,38 @@ mod tests {
                 "#);
             },
         )
+    }
+
+    #[test]
+    fn test_export_run_id() {
+        let output_file = tempfile::NamedTempFile::new().unwrap();
+        fs::write(output_file.path(), "previous=value\n").unwrap();
+
+        with_var("GITHUB_OUTPUT", Some(output_file.path()), || {
+            let github_actions_provider = GitHubActionsProvider {
+                owner: "owner".into(),
+                repository: "repository".into(),
+                ref_: "refs/head/my-branch".into(),
+                head_ref: Some("my-branch".into()),
+                base_ref: None,
+                sender: None,
+                run_id: "123789".into(),
+                job_name: "my_job".into(),
+                event: RunEvent::Push,
+                repository_root_path: "/home/work/my-repo".into(),
+                is_head_repo_fork: false,
+                is_repository_private: false,
+                oidc_config: None,
+            };
+
+            github_actions_provider
+                .export_run_id("66f7e2c1a3b4d5e6f7a8b9c0")
+                .unwrap();
+        });
+
+        assert_eq!(
+            fs::read_to_string(output_file.path()).unwrap(),
+            "previous=value\nrun-id=66f7e2c1a3b4d5e6f7a8b9c0\n"
+        );
     }
 }
