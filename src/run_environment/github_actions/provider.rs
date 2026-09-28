@@ -386,9 +386,7 @@ impl RunEnvironmentProvider for GitHubActionsProvider {
 
     /// Write the run id as the `run-id` step output.
     fn export_run_id(&self, run_id: &str) -> Result<()> {
-        let Ok(output_path) = env::var("GITHUB_OUTPUT") else {
-            return Ok(());
-        };
+        let output_path = get_env_variable("GITHUB_OUTPUT")?;
         let mut output_file = fs::OpenOptions::new()
             .append(true)
             .create(true)
