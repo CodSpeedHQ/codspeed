@@ -102,7 +102,7 @@ pub trait RunEnvironmentProvider {
 
     /// Expose the CodSpeed run id to the next steps of the CI job.
     fn export_run_id(&self, run_id: &str) -> Result<()> {
-        println!("{}", serde_json::json!({ "run_id": run_id }));
+        log_json!(serde_json::json!({ "run_id": run_id }));
         Ok(())
     }
 
