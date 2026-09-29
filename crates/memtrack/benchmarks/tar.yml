@@ -3,7 +3,7 @@ $schema: https://raw.githubusercontent.com/CodSpeedHQ/codspeed/refs/heads/main/s
 # Each tracked run pays a fixed BPF load + uprobe attach cost, so the default
 # 1s warmup / 3s max budgets fit only a handful of rounds.
 options:
-  warmup-time: "5s"
+  warmup-time: "30s"
   max-time: "60s"
 
 # The archive is pre-created by CI before measurement: a first-time multi-GB
