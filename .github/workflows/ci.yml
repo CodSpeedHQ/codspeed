@@ -160,7 +160,7 @@ jobs:
       matrix:
         # Both physical variants of a workload live in the same file, so they
         # are measured back to back.
-        workload: [ls, dd, tar]
+        workload: [dd, tar]
     env:
       CODSPEED_REV: ${{ github.event.pull_request.head.sha || github.sha }}
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
