@@ -113,11 +113,8 @@ static __always_inline int submit_calloc_event(__u64 size, __u64 addr, __u64 sta
     });
 }
 
-static __always_inline int submit_free_event(__u64 addr, __u64 stack_hash) {
-    SUBMIT_GATED_EVENT(EVENT_TYPE_FREE, {
-        e->data.free.addr = addr;
-        e->data.free.stack_hash = stack_hash;
-    });
+static __always_inline int submit_free_event(__u64 addr) {
+    SUBMIT_GATED_EVENT(EVENT_TYPE_FREE, { e->data.free.addr = addr; });
 }
 
 static __always_inline int submit_realloc_event(__u64 old_addr, __u64 new_addr, __u64 size,

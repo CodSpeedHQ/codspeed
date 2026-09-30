@@ -27,6 +27,8 @@
         submit_block;                                \
     }
 
+/* free() carries no stack: the flamegraph only attributes allocations, so a
+ * copy here would double the capture cost for nothing. */
 #define UPROBE_RET(name, arg_expr, submit_block) \
     SEC(UPROBE_SEC)                              \
     int uprobe_##name(struct pt_regs* ctx) {     \
@@ -34,7 +36,6 @@
         if (arg0 == 0) {                         \
             return 0;                            \
         }                                        \
-        __u64 stack_hash = capture_stack(ctx);   \
         submit_block;                            \
     }
 
@@ -86,7 +87,7 @@
 UPROBE_ARG_RET(malloc, PT_REGS_PARM1(ctx),
                { return submit_alloc_event(arg0, ret_val, stack_hash); })
 
-UPROBE_RET(free, PT_REGS_PARM1(ctx), { return submit_free_event(arg0, stack_hash); })
+UPROBE_RET(free, PT_REGS_PARM1(ctx), { return submit_free_event(arg0); })
 
 UPROBE_ARG_RET(calloc, PT_REGS_PARM1(ctx) * PT_REGS_PARM2(ctx),
                { return submit_calloc_event(arg0, ret_val, stack_hash); })

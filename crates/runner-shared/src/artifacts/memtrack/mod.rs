@@ -60,6 +60,9 @@ pub enum MemtrackEventKind {
         stack_hash: u64,
     },
     Free {
+        /// Deprecated: memtrack no longer captures stacks on free, so this is
+        /// always 0. Kept so artifacts from older memtrack versions still
+        /// decode and the platform's event model stays unchanged.
         #[serde(default, skip_serializing_if = "is_zero")]
         stack_hash: u64,
     },

@@ -74,8 +74,7 @@ struct event {
 
         /* Deallocation event (free) */
         struct {
-            uint64_t addr;       /* address to free */
-            uint64_t stack_hash; /* caller stack identity; 0 = not captured */
+            uint64_t addr; /* address to free */
         } free;
 
         /* Reallocation event - includes both old and new addresses */
