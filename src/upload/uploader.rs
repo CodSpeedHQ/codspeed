@@ -28,8 +28,8 @@ fn bytes_to_mib(bytes: u64) -> u64 {
     bytes / (1024 * 1024)
 }
 
-/// Maximum uncompressed profile folder size in MiB before compression is required
-const MAX_UNCOMPRESSED_PROFILE_SIZE_BYTES: u64 = 1024 * 1024 * 1024 * 5; // 5 GiB
+/// Maximum allowed profile archive size in bytes before upload is rejected
+const MAX_UPLOAD_PROFILE_SIZE_BYTES: u64 = 1024 * 1024 * 1024 * 5; // 5 GiB
 
 /// Calculate the total size of a directory in bytes
 async fn calculate_folder_size(path: &std::path::Path) -> Result<u64> {
@@ -56,7 +56,7 @@ async fn calculate_folder_size(path: &std::path::Path) -> Result<u64> {
 ///
 /// For Valgrind, we create a gzip-compressed tar archive of the entire profile folder.
 /// For WallTime, we check the folder size and create either a compressed or uncompressed tar archive
-/// based on the MAX_UNCOMPRESSED_PROFILE_SIZE_BYTES threshold.
+/// based on the [`MAX_UPLOAD_PROFILE_SIZE_BYTES`] threshold.
 async fn create_profile_archive(
     profile_folder: &std::path::Path,
     executor_name: ExecutorName,
@@ -76,7 +76,7 @@ async fn create_profile_archive(
         ExecutorName::Memory | ExecutorName::WallTime => {
             // Check folder size to decide on compression
             let folder_size_bytes = calculate_folder_size(profile_folder).await?;
-            let should_compress = folder_size_bytes >= MAX_UNCOMPRESSED_PROFILE_SIZE_BYTES;
+            let should_compress = folder_size_bytes >= MAX_UPLOAD_PROFILE_SIZE_BYTES;
 
             let temp_file = tempfile::NamedTempFile::new()?;
             let temp_path = temp_file.path().to_path_buf();
@@ -91,7 +91,7 @@ async fn create_profile_archive(
                 debug!(
                     "Profile folder size ({} MiB) exceeds threshold ({} MiB), creating compressed tar.gz archive on disk",
                     bytes_to_mib(folder_size_bytes),
-                    bytes_to_mib(MAX_UNCOMPRESSED_PROFILE_SIZE_BYTES)
+                    bytes_to_mib(MAX_UPLOAD_PROFILE_SIZE_BYTES)
                 );
                 let enc = GzipEncoder::new(file);
                 let mut tar = Builder::new(enc);
@@ -105,7 +105,7 @@ async fn create_profile_archive(
                 debug!(
                     "Profile folder size ({} MiB) is below threshold ({} MiB), creating uncompressed tar archive on disk",
                     bytes_to_mib(folder_size_bytes),
-                    bytes_to_mib(MAX_UNCOMPRESSED_PROFILE_SIZE_BYTES)
+                    bytes_to_mib(MAX_UPLOAD_PROFILE_SIZE_BYTES)
                 );
                 let mut tar = Builder::new(file);
                 tar.append_dir_all(".", profile_folder).await?;
@@ -116,11 +116,16 @@ async fn create_profile_archive(
         }
     };
 
+    let archive_size = profile_archive.content.size().await?;
     debug!(
         "Created archive ({} bytes) in {:.2?}",
-        profile_archive.content.size().await?,
+        archive_size,
         time_start.elapsed()
     );
+
+    if archive_size > MAX_UPLOAD_PROFILE_SIZE_BYTES {
+        bail!("Profile archive exceeds the maximum allowed size");
+    }
 
     Ok(profile_archive)
 }
