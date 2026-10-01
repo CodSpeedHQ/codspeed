@@ -63,6 +63,13 @@ fn get_valgrind_args(tool: &SimulationTool, config: &ExecutorConfig) -> Vec<Stri
         children_skip_patterns.join(",")
     ));
 
+    // Internal subcommands run through the runner's own executable, which may
+    // carry file capabilities that valgrind refuses to run by default. They
+    // do not need those capabilities.
+    if let Ok(self_exe) = crate::cli::self_exe() {
+        args.push(format!("--allow-file-caps={}", self_exe.display()));
+    }
+
     if config.fair_sched {
         args.push("--fair-sched=yes".to_string());
     }
