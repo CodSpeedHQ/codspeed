@@ -25,15 +25,20 @@ pub fn perform(commands: Vec<BenchmarkCommand>, mode: MeasurementMode) -> Result
         }
 
         hooks.start_benchmark().unwrap();
-        let status = cmd.status();
+        let result = cmd.spawn().and_then(|mut child| {
+            let pid = child.id();
+            child.wait().map(|status| (pid, status))
+        });
         hooks.stop_benchmark().unwrap();
-        let status = status.context("Failed to execute command")?;
+        let (pid, status) = result.context("Failed to execute command")?;
 
         if !status.success() {
             bail!("Command exited with non-zero status: {status}");
         }
 
-        hooks.set_executed_benchmark(&name_and_uri.uri).unwrap();
+        hooks
+            .set_executed_benchmark_for_pid(pid, &name_and_uri.uri)
+            .unwrap();
     }
 
     Ok(())
