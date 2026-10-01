@@ -24,12 +24,15 @@ impl super::ArtifactExt for MemtrackArtifact {
 }
 
 impl MemtrackArtifact {
+    /// The msgpack decoder reads a few bytes per call, so the decompressed
+    /// stream is buffered rather than read straight from the zstd decoder.
+    #[allow(clippy::type_complexity)]
     pub fn decode_streamed<R: std::io::Read>(
         reader: R,
-    ) -> anyhow::Result<MemtrackEventStream<zstd::Decoder<'static, std::io::BufReader<R>>>> {
+    ) -> anyhow::Result<MemtrackEventStream<BufReader<zstd::Decoder<'static, BufReader<R>>>>> {
         let decoder = zstd::Decoder::new(reader)?;
         Ok(MemtrackEventStream {
-            deserializer: rmp_serde::Deserializer::new(decoder),
+            deserializer: rmp_serde::Deserializer::new(BufReader::new(decoder)),
         })
     }
 
