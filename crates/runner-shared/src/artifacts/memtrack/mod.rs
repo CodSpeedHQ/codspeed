@@ -59,13 +59,7 @@ pub enum MemtrackEventKind {
         #[serde(default, skip_serializing_if = "is_zero")]
         stack_hash: u64,
     },
-    Free {
-        /// Deprecated: memtrack no longer captures stacks on free, so this is
-        /// always 0. Kept so artifacts from older memtrack versions still
-        /// decode and the platform's event model stays unchanged.
-        #[serde(default, skip_serializing_if = "is_zero")]
-        stack_hash: u64,
-    },
+    Free,
     Realloc {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         old_addr: Option<u64>,
@@ -185,7 +179,7 @@ mod tests {
                 tid: 12,
                 timestamp: 200,
                 addr: 0x20,
-                kind: MemtrackEventKind::Free { stack_hash: 0 },
+                kind: MemtrackEventKind::Free,
             },
             MemtrackEvent {
                 pid: 1,
@@ -246,8 +240,7 @@ mod tests {
                 size: 7,
                 stack_hash: 0xCAFE_BABE,
             },
-            MemtrackEventKind::Free { stack_hash: 0 },
-            MemtrackEventKind::Free { stack_hash: 0xFEED },
+            MemtrackEventKind::Free,
             MemtrackEventKind::Realloc {
                 old_addr: Some(0x1000),
                 size: 42,

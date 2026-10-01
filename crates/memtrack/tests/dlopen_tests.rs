@@ -78,8 +78,7 @@ fn test_dlopen_allocator() -> Result<(), Box<dyn std::error::Error>> {
             let free_count = events
                 .iter()
                 .filter(|e| {
-                    matches!(e.kind, MemtrackEventKind::Free { .. })
-                        && malloc_addrs.contains(&e.addr)
+                    matches!(e.kind, MemtrackEventKind::Free) && malloc_addrs.contains(&e.addr)
                 })
                 .count();
 

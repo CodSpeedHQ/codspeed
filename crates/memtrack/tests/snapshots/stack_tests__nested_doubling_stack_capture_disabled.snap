@@ -6,7 +6,7 @@ expression: format_events(&events)
     "Malloc { size: 1024, has_stack: false }",
     "Malloc { size: 2048, has_stack: false }",
     "Malloc { size: 4096, has_stack: false }",
-    "Free { has_stack: false }",
-    "Free { has_stack: false }",
-    "Free { has_stack: false }",
+    "Free",
+    "Free",
+    "Free",
 ]

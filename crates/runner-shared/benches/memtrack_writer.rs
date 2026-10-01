@@ -33,7 +33,7 @@ fn generate_events(n: usize) -> Vec<MemtrackEvent> {
                 size,
                 stack_hash: 0,
             },
-            1 => MemtrackEventKind::Free { stack_hash: 0 },
+            1 => MemtrackEventKind::Free,
             2 => MemtrackEventKind::Realloc {
                 old_addr: Some(rng.r#gen()),
                 size,
@@ -133,7 +133,7 @@ fn generate_realistic_events(n: usize) -> Vec<MemtrackEvent> {
             let idx = rng.gen_range(0..live_heap.len());
             let addr = live_heap.swap_remove(idx);
             free_list.push(addr);
-            (addr, MemtrackEventKind::Free { stack_hash: 0 })
+            (addr, MemtrackEventKind::Free)
         } else {
             let idx = rng.gen_range(0..live_heap.len());
             let old_addr = live_heap[idx];

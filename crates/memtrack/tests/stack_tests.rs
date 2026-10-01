@@ -30,9 +30,7 @@ fn describe_allocator_event(kind: &MemtrackEventKind) -> Option<String> {
                 *stack_hash != 0
             )
         }
-        MemtrackEventKind::Free { stack_hash } => {
-            format!("Free {{ has_stack: {} }}", *stack_hash != 0)
-        }
+        MemtrackEventKind::Free => "Free".to_string(),
         _ => return None,
     };
 
@@ -57,7 +55,7 @@ fn format_events(events: &[MemtrackEvent]) -> Vec<String> {
                 matches!(
                     e.kind,
                     MemtrackEventKind::Malloc { .. }
-                        | MemtrackEventKind::Free { .. }
+                        | MemtrackEventKind::Free
                         | MemtrackEventKind::Calloc { .. }
                         | MemtrackEventKind::Realloc { .. }
                         | MemtrackEventKind::AlignedAlloc { .. }

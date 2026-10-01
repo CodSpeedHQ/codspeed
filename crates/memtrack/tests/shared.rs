@@ -34,7 +34,7 @@ macro_rules! assert_events_snapshot {
                 matches!(
                     e.kind,
                     MemtrackEventKind::Malloc { .. }
-                        | MemtrackEventKind::Free { .. }
+                        | MemtrackEventKind::Free
                         | MemtrackEventKind::Calloc { .. }
                         | MemtrackEventKind::Realloc { .. }
                         | MemtrackEventKind::AlignedAlloc { .. }
@@ -97,7 +97,7 @@ macro_rules! assert_events_with_marker_for_each_variant {
 /// differ between runs of the same workload.
 pub fn describe_kind(kind: &MemtrackEventKind) -> String {
     match kind {
-        MemtrackEventKind::Free { .. } => "Free".to_string(),
+        MemtrackEventKind::Free => "Free".to_string(),
         MemtrackEventKind::Malloc { size, .. } => format!("Malloc {{ size: {size} }}"),
         MemtrackEventKind::Calloc { size, .. } => format!("Calloc {{ size: {size} }}"),
         MemtrackEventKind::AlignedAlloc { size, .. } => format!("AlignedAlloc {{ size: {size} }}"),
@@ -280,7 +280,7 @@ fn event_profile(events: &[Event]) -> EventProfile {
         // Only allocator events are comparable across variants: RSS and
         // lifecycle values (sizes, pids) are per-run.
         match event.kind {
-            MemtrackEventKind::Free { .. } => {
+            MemtrackEventKind::Free => {
                 if !live.remove(&event.addr) {
                     continue;
                 }

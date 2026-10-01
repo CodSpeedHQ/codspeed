@@ -39,10 +39,7 @@ pub fn parse_event(data: &[u8]) -> Option<MemtrackEvent> {
                     stack_hash: event.data.alloc.stack_hash,
                 },
             ),
-            EVENT_TYPE_FREE => (
-                event.data.free.addr,
-                MemtrackEventKind::Free { stack_hash: 0 },
-            ),
+            EVENT_TYPE_FREE => (event.data.free.addr, MemtrackEventKind::Free),
             EVENT_TYPE_CALLOC => (
                 event.data.alloc.addr,
                 MemtrackEventKind::Calloc {

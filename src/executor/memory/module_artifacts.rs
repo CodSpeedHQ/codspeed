@@ -449,7 +449,7 @@ mod tests {
                     tid: 1,
                     timestamp: 13,
                     addr: 0x2000,
-                    kind: MemtrackEventKind::Free { stack_hash: 0 },
+                    kind: MemtrackEventKind::Free,
                 },
             ],
         };
