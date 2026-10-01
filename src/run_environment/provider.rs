@@ -100,6 +100,11 @@ pub trait RunEnvironmentProvider {
         Ok(())
     }
 
+    /// Expose the CodSpeed run id to the next steps of the CI job.
+    fn export_run_id(&self, _run_id: &str) -> Result<()> {
+        Ok(())
+    }
+
     /// Returns the metadata necessary for uploading results to CodSpeed.
     ///
     /// `orchestrator_run_part_suffix` is structured data from the orchestrator used to differentiate
