@@ -181,14 +181,13 @@ impl Executor for MemoryExecutor {
         debug!("cmd: {cmd:?}");
 
         let runner_fifo = RunnerFifo::new()?;
-        let integration = Rc::new(RefCell::new(None));
+        let fifo_data = Rc::new(RefCell::new(None));
         let on_process_started = {
-            let integration = integration.clone();
+            let fifo_data_cell = fifo_data.clone();
             |mut child: std::process::Child| async move {
-                let (marker_result, fifo_data, exit_status) =
+                let (marker_result, data, exit_status) =
                     Self::handle_fifo(runner_fifo, ipc, &mut child).await?;
-                *integration.borrow_mut() = fifo_data.integration;
-
+                *fifo_data_cell.borrow_mut() = Some(data);
                 marker_result.save_to(&results_folder).unwrap();
 
                 Ok(exit_status)
@@ -202,16 +201,22 @@ impl Executor for MemoryExecutor {
             bail!("failed to execute memory tracker process: {status}");
         }
 
-        if let Some(integration) = integration.borrow_mut().take() {
-            let results_folder = execution_context.profile_folder.join("results");
-            if let Err(e) = save_module_artifacts(
-                &execution_context.profile_folder,
-                &results_folder,
-                integration,
-            ) {
-                // The memory results are complete without them; only offline
-                // stack attribution is lost.
-                error!("Failed to save memtrack module artifacts: {e:#}");
+        let data = fifo_data.borrow_mut().take();
+        if let Some(data) = data {
+            if let Some(integration) = data.integration {
+                let results_folder = execution_context.profile_folder.join("results");
+                if let Err(e) = save_module_artifacts(
+                    &execution_context.profile_folder,
+                    &results_folder,
+                    integration,
+                    &data.bench_pids,
+                )
+                .await
+                {
+                    // The memory results are complete without them; only offline
+                    // stack attribution is lost.
+                    error!("Failed to save memtrack module artifacts: {e:#}");
+                }
             }
         }
 
