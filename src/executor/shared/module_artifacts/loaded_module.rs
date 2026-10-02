@@ -18,13 +18,25 @@ pub struct LoadedModule {
     pub process_loaded_modules: HashMap<pid_t, ProcessLoadedModule>,
 }
 
-#[derive(Default)]
+/// Every placement of a module in one process. A process can map the same file
+/// more than once at different addresses, and each placement has its own load
+/// bias.
+#[derive(Default, Clone)]
 pub struct ProcessLoadedModule {
-    /// Load bias used to adjust declared elf addresses to their actual runtime addresses
-    /// The bias is the difference between where the segment *actually* is in memory versus where the ELF file *preferred* it to be
-    pub symbols_load_bias: Option<u64>,
-    /// Unwind data specific to the process mounting, derived from both load bias and the actual unwind data
-    pub process_unwind_data: Option<ProcessUnwindData>,
+    /// Load biases used to adjust declared elf addresses to their actual runtime addresses, one
+    /// per distinct placement. A bias is the difference between where the segment *actually* is in
+    /// memory versus where the ELF file *preferred* it to be
+    pub symbols_load_biases: Vec<u64>,
+    /// Unwind data of each executable mapping, derived from both load bias and the actual unwind data
+    pub process_unwind_data: Vec<ProcessUnwindData>,
+}
+
+impl ProcessLoadedModule {
+    pub fn add_load_bias(&mut self, load_bias: u64) {
+        if !self.symbols_load_biases.contains(&load_bias) {
+            self.symbols_load_biases.push(load_bias);
+        }
+    }
 }
 
 impl LoadedModule {
