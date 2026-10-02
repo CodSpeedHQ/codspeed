@@ -10,6 +10,13 @@ pub mod prelude;
 mod uri;
 pub mod walltime;
 
+/// Makes Python and Node.js children emit `/tmp/perf-<pid>.map`, so their
+/// frames can be symbolized. This is usually done by the language integrations.
+pub fn set_perf_map_env(cmd: &mut std::process::Command) {
+    cmd.env("PYTHONPERFSUPPORT", "1");
+    node::set_node_options(cmd);
+}
+
 #[derive(ValueEnum, Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum MeasurementMode {

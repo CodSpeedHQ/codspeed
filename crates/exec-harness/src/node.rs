@@ -1,6 +1,8 @@
 use std::process::Command;
 
-const NODE_OPTIONS_TO_ADD: &[&str] = &["--perf-basic-prof"];
+/// `--interpreted-frames-native-stack`: without it, all interpreted JS frames
+/// share V8's interpreter trampoline, so stacks cannot name the JS function.
+const NODE_OPTIONS_TO_ADD: &[&str] = &["--perf-basic-prof", "--interpreted-frames-native-stack"];
 
 /// Appends CodSpeed-required Node.js options to `NODE_OPTIONS` on a [`Command`],
 /// preserving any existing value from the environment.

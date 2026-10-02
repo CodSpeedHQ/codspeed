@@ -160,11 +160,12 @@ codspeed exec --mode simulation -- ./my-binary
 
 ### Memory
 
-Tracks heap allocations (peak usage, count, allocation size) with eBPF profiling.
+Tracks native heap allocations (peak usage, count, allocation size) with eBPF profiling.
 
 **Best for:** Memory optimization, leak detection, constrained environments
 
-**Supported:** Rust, C/C++ with libc, jemalloc, mimalloc
+**Supported:** Rust, C/C++, Python (3.12+), and Node.js programs that allocate
+through libc, jemalloc, or mimalloc.
 
 ```bash
 codspeed exec --mode memory -- ./my-binary

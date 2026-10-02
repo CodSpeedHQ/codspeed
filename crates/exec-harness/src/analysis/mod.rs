@@ -20,6 +20,7 @@ pub fn perform(commands: Vec<BenchmarkCommand>) -> Result<()> {
 
         let mut cmd = Command::new(&benchmark_cmd.command[0]);
         cmd.args(&benchmark_cmd.command[1..]);
+        crate::set_perf_map_env(&mut cmd);
         hooks.start_benchmark().unwrap();
         let status = cmd.status();
         hooks.stop_benchmark().unwrap();
@@ -54,11 +55,9 @@ pub fn perform_with_valgrind(commands: Vec<BenchmarkCommand>) -> Result<()> {
         cmd.args(&benchmark_cmd.command[1..]);
         // Use LD_PRELOAD to inject instrumentation into the child process
         cmd.env("LD_PRELOAD", preload_lib_path);
-        // Make sure python processes output perf maps. This is usually done by `pytest-codspeed`
-        cmd.env("PYTHONPERFSUPPORT", "1");
         cmd.env(constants::URI_ENV, &name_and_uri.uri);
 
-        crate::node::set_node_options(&mut cmd);
+        crate::set_perf_map_env(&mut cmd);
 
         let mut child = cmd.spawn().context("Failed to spawn command")?;
 
