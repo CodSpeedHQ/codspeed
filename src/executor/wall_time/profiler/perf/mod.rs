@@ -30,7 +30,7 @@ use runner_shared::metadata::WalltimeMetadata;
 use std::path::Path;
 use std::path::PathBuf;
 
-mod jit_dump;
+pub(crate) mod jit_dump;
 mod parse_perf_file;
 pub(crate) mod setup;
 

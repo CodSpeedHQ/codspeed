@@ -1,4 +1,4 @@
-use crate::executor::shared::module_artifacts::loaded_module::{LoadedModule, ProcessLoadedModule};
+use crate::executor::shared::module_artifacts::loaded_module::LoadedModule;
 use crate::executor::shared::module_artifacts::module_symbols::ModuleSymbols;
 use crate::executor::shared::module_artifacts::unwind_data::unwind_data_from_elf;
 use crate::prelude::*;
@@ -182,14 +182,7 @@ fn inherit_parent_mappings(
     use std::collections::hash_map::Entry;
 
     for loaded_module in loaded_modules_by_path.values_mut() {
-        let inherited =
-            loaded_module
-                .process_loaded_modules
-                .get(&ppid)
-                .map(|p| ProcessLoadedModule {
-                    symbols_load_bias: p.symbols_load_bias,
-                    process_unwind_data: p.process_unwind_data.clone(),
-                });
+        let inherited = loaded_module.process_loaded_modules.get(&ppid).cloned();
         let Some(inherited) = inherited else {
             continue;
         };
@@ -277,8 +270,7 @@ fn process_mmap2_record(
         }
     }
 
-    // Store load bias for this process mounting
-    process_loaded_module.symbols_load_bias = Some(load_bias);
+    process_loaded_module.add_load_bias(load_bias);
 
     // Extract unwind_data
     match unwind_data_from_elf(
@@ -290,7 +282,9 @@ fn process_mmap2_record(
     ) {
         Ok((unwind_data, process_unwind_data)) => {
             loaded_module.unwind_data = Some(unwind_data);
-            process_loaded_module.process_unwind_data = Some(process_unwind_data);
+            process_loaded_module
+                .process_unwind_data
+                .push(process_unwind_data);
         }
         Err(error) => {
             debug!("Failed to load unwind data for module {record_path_string}: {error}");
@@ -301,14 +295,15 @@ fn process_mmap2_record(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::executor::shared::module_artifacts::loaded_module::ProcessLoadedModule;
 
     fn make_module_with_parent(ppid: pid_t, load_bias: u64) -> LoadedModule {
         let mut m = LoadedModule::default();
         m.process_loaded_modules.insert(
             ppid,
             ProcessLoadedModule {
-                symbols_load_bias: Some(load_bias),
-                process_unwind_data: None,
+                symbols_load_biases: vec![load_bias],
+                process_unwind_data: vec![],
             },
         );
         m
@@ -326,7 +321,7 @@ mod tests {
 
         let m = &modules[&PathBuf::from("/lib/libpython.so")];
         let child = m.process_loaded_modules.get(&200).unwrap();
-        assert_eq!(child.symbols_load_bias, Some(0xdead));
+        assert_eq!(child.symbols_load_biases, vec![0xdead]);
     }
 
     #[test]
@@ -337,8 +332,8 @@ mod tests {
         m.process_loaded_modules.insert(
             200,
             ProcessLoadedModule {
-                symbols_load_bias: Some(0xcafe),
-                process_unwind_data: None,
+                symbols_load_biases: vec![0xcafe],
+                process_unwind_data: vec![],
             },
         );
         modules.insert(PathBuf::from("/lib/libpython.so"), m);
@@ -349,7 +344,7 @@ mod tests {
             .process_loaded_modules
             .get(&200)
             .unwrap();
-        assert_eq!(child.symbols_load_bias, Some(0xcafe));
+        assert_eq!(child.symbols_load_biases, vec![0xcafe]);
     }
 
     #[test]
@@ -363,8 +358,8 @@ mod tests {
         bash.process_loaded_modules.insert(
             200,
             ProcessLoadedModule {
-                symbols_load_bias: Some(0xaaaaaaaa0000),
-                process_unwind_data: None,
+                symbols_load_biases: vec![0xaaaaaaaa0000],
+                process_unwind_data: vec![],
             },
         );
         modules.insert(PathBuf::from("/usr/bin/bash"), bash);
@@ -394,8 +389,8 @@ mod tests {
                 .process_loaded_modules
                 .get(&100)
                 .unwrap()
-                .symbols_load_bias,
-            Some(0xaaaaaaaa0000)
+                .symbols_load_biases,
+            vec![0xaaaaaaaa0000]
         );
     }
 }

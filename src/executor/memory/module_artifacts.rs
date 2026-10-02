@@ -1,13 +1,15 @@
+use crate::executor::helpers::harvest_perf_maps_for_pids::harvest_perf_maps_for_pids;
 use crate::executor::shared::module_artifacts::loaded_module::LoadedModule;
 use crate::executor::shared::module_artifacts::module_symbols::ModuleSymbols;
 use crate::executor::shared::module_artifacts::save_artifacts::save_artifacts;
 use crate::executor::shared::module_artifacts::unwind_data::unwind_data_from_elf;
+use crate::executor::wall_time::profiler::perf::jit_dump::save_symbols_and_harvest_unwind_data_for_pids;
 use crate::prelude::*;
 use libc::pid_t;
 use runner_shared::artifacts::{ArtifactExt, MemtrackArtifact, MemtrackEventKind};
 use runner_shared::metadata::MemtrackMetadata;
 use runner_shared::unwind_data::ProcessUnwindData;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
@@ -33,22 +35,32 @@ struct ProcessMapping {
     timestamp: u64,
 }
 
-/// Turn the mappings memtrack recorded into the artifacts an offline unwinder
-/// needs: the deduplicated `unwind_data`/`symbols.map` files, plus the
-/// `memtrack.metadata` referencing them per pid.
-///
-/// `results_folder` is where memtrack wrote its artifacts; the keyed files and
-/// the metadata land in `profile_folder`, next to walltime's equivalents.
-pub fn save_module_artifacts(
+/// Save the native modules memtrack mapped, per-process perf maps, and JIT
+/// unwind data needed for offline stack attribution. The keyed native and JIT
+/// files and their `memtrack.metadata` land in `profile_folder`; memtrack's
+/// event streams are read from `results_folder`.
+pub async fn save_module_artifacts(
     profile_folder: &Path,
     results_folder: &Path,
     integration: (String, String),
+    bench_pids: &HashSet<pid_t>,
 ) -> Result<()> {
     let mappings = read_mappings(results_folder)?;
-    if mappings.is_empty() {
-        debug!("No module mappings recorded, skipping memtrack module artifacts");
+    let pids = mappings
+        .iter()
+        .map(|mapping| mapping.pid)
+        .chain(bench_pids.iter().copied())
+        .collect::<HashSet<_>>();
+    if pids.is_empty() {
+        debug!("No processes recorded, skipping memtrack module artifacts");
         return Ok(());
     }
+
+    // Python and Node emit perf maps in /tmp; Python JIT dumps also contain
+    // unwind data needed to walk through interpreter trampolines.
+    harvest_perf_maps_for_pids(profile_folder, &pids).await?;
+    let jit_unwind_data =
+        save_symbols_and_harvest_unwind_data_for_pids(profile_folder, &pids).await?;
 
     let loaded_modules = loaded_modules_from_mappings(&mappings);
     debug!(
@@ -57,7 +69,7 @@ pub fn save_module_artifacts(
         mappings.len()
     );
 
-    let saved = save_artifacts(profile_folder, &loaded_modules, &HashMap::new());
+    let saved = save_artifacts(profile_folder, &loaded_modules, &jit_unwind_data);
     MemtrackMetadata::new(integration, saved.artifacts).save_to(profile_folder)
 }
 
@@ -218,17 +230,16 @@ fn loaded_modules_from_mappings(mappings: &[ProcessMapping]) -> HashMap<PathBuf,
             }
         };
 
-        // TODO(COD-1377): Preserve timestamp-aware placements; retaining only the
-        // last placement per (path, pid) can invalidate stacks from earlier loads.
+        // TODO(COD-1377): Symbol placements carry no timestamp, so an address range
+        // reused by a later load still resolves against the earlier placement too.
         let process_loaded_module = loaded_module
             .process_loaded_modules
             .entry(mapping.pid)
             .or_default();
-        process_loaded_module.symbols_load_bias = Some(load_bias);
-
-        if let Some(process_unwind_data) = process_unwind_data {
-            process_loaded_module.process_unwind_data = Some(process_unwind_data);
-        }
+        process_loaded_module.add_load_bias(load_bias);
+        process_loaded_module
+            .process_unwind_data
+            .extend(process_unwind_data);
     }
 
     loaded_modules
@@ -481,8 +492,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn writes_keyed_artifacts_and_metadata_for_a_streamed_mapping() {
+    #[tokio::test]
+    async fn writes_keyed_artifacts_and_metadata_for_a_streamed_mapping() {
         const MODULE: &str = "testdata/perf_map/the_algorithms.bin";
 
         let profile = tempfile::tempdir().unwrap();
@@ -512,7 +523,9 @@ mod tests {
             profile.path(),
             &results,
             ("codspeed-rust".to_string(), "4.2.0".to_string()),
+            &HashSet::new(),
         )
+        .await
         .unwrap();
 
         let metadata = MemtrackMetadata::from_reader(
@@ -538,6 +551,128 @@ mod tests {
             metadata.artifacts.path_key_to_path[&unwind.unwind_data_key],
             PathBuf::from(MODULE)
         );
+    }
+
+    /// Turns a `/proc/<pid>/maps` line into the mapping event memtrack records
+    /// for it.
+    fn mapping_event_from_maps_line(pid: pid_t, timestamp: u64, line: &str) -> MemtrackEvent {
+        let fields = line.split_whitespace().collect::<Vec<_>>();
+        let (start, end) = fields[0].split_once('-').unwrap();
+        let (start, end) = (
+            u64::from_str_radix(start, 16).unwrap(),
+            u64::from_str_radix(end, 16).unwrap(),
+        );
+        let (major, minor) = fields[3].split_once(':').unwrap();
+        let dev =
+            u64::from_str_radix(major, 16).unwrap() << 20 | u64::from_str_radix(minor, 16).unwrap();
+
+        MemtrackEvent {
+            pid,
+            tid: pid,
+            timestamp,
+            addr: start,
+            kind: MemtrackEventKind::Mapping {
+                path: fields[5].to_string(),
+                dev,
+                ino: fields[4].parse().unwrap(),
+                file_offset: u64::from_str_radix(fields[2], 16).unwrap(),
+                len: end - start,
+            },
+        }
+    }
+
+    /// A process can map its own binary a second time, as V8 does with its
+    /// embedded builtins. Each placement has its own load bias, and frames in
+    /// either copy must resolve.
+    #[tokio::test]
+    async fn keeps_every_placement_of_a_module_mapped_twice() {
+        let build = tempfile::tempdir().unwrap();
+        let binary = build.path().join("remapped_text");
+        let status = std::process::Command::new("gcc")
+            .args(["-O0", "-o"])
+            .arg(&binary)
+            .arg("testdata/memory/remapped_text.c")
+            .status()
+            .unwrap();
+        assert!(status.success(), "failed to compile remapped_text.c");
+
+        let output = std::process::Command::new(&binary).output().unwrap();
+        assert!(output.status.success(), "remapped_text failed");
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        let (maps_lines, allocate_line) = stdout.trim_end().rsplit_once('\n').unwrap();
+        let runtime_addrs = allocate_line
+            .strip_prefix("allocate ")
+            .unwrap()
+            .split(' ')
+            .map(|addr| u64::from_str_radix(addr, 16).unwrap())
+            .collect::<Vec<_>>();
+
+        const PID: pid_t = 4321;
+        let profile = tempfile::tempdir().unwrap();
+        let results = profile.path().join("results");
+        std::fs::create_dir_all(&results).unwrap();
+        MemtrackArtifact {
+            events: maps_lines
+                .lines()
+                .zip(1..)
+                .map(|(line, timestamp)| mapping_event_from_maps_line(PID, timestamp, line))
+                .collect(),
+        }
+        .save_with_pid_to(&results, PID)
+        .unwrap();
+
+        save_module_artifacts(
+            profile.path(),
+            &results,
+            ("exec-harness".to_string(), "1.0.0".to_string()),
+            &HashSet::new(),
+        )
+        .await
+        .unwrap();
+
+        let metadata = MemtrackMetadata::from_reader(
+            std::fs::File::open(profile.path().join("memtrack.metadata")).unwrap(),
+        )
+        .unwrap();
+        let artifacts = &metadata.artifacts;
+        let key = artifacts
+            .path_key_to_path
+            .iter()
+            .find_map(|(key, path)| (path == &binary).then_some(key))
+            .unwrap();
+
+        let symbols =
+            std::fs::read_to_string(profile.path().join(format!("{key}.symbols.map"))).unwrap();
+        let allocate_svma = symbols
+            .lines()
+            .find_map(|line| {
+                let fields = line.split(' ').collect::<Vec<_>>();
+                (fields[2] == "allocate").then(|| u64::from_str_radix(fields[0], 16).unwrap())
+            })
+            .unwrap();
+        let load_biases = artifacts.mapped_process_module_symbols[&PID]
+            .iter()
+            .filter(|mapped| &mapped.perf_map_key == key)
+            .map(|mapped| mapped.load_bias)
+            .collect::<Vec<_>>();
+        let unwind_ranges = artifacts.mapped_process_unwind_data_by_pid[&PID]
+            .iter()
+            .filter(|mapped| &mapped.unwind_data_key == key)
+            .map(|mapped| mapped.inner.avma_range.clone())
+            .collect::<Vec<_>>();
+
+        for addr in runtime_addrs {
+            assert!(
+                load_biases
+                    .iter()
+                    .any(|bias| addr.wrapping_sub(*bias) == allocate_svma),
+                "no load bias resolves {addr:#x} to `allocate`, got {load_biases:x?}"
+            );
+            assert!(
+                unwind_ranges.iter().any(|range| range.contains(&addr)),
+                "no unwind data covers {addr:#x}, got {unwind_ranges:x?}"
+            );
+        }
     }
 
     fn mapping_event(pid: pid_t, timestamp: u64, addr: u64, path: &str) -> MemtrackEvent {

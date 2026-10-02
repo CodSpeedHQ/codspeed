@@ -20,6 +20,9 @@ pub fn perform(commands: Vec<BenchmarkCommand>) -> Result<()> {
 
         let mut cmd = Command::new(&benchmark_cmd.command[0]);
         cmd.args(&benchmark_cmd.command[1..]);
+        // Python and Node frames are only symbolized from runtime perf maps.
+        cmd.env("PYTHONPERFSUPPORT", "1");
+        crate::node::set_node_options(&mut cmd, crate::node::MEMORY_NODE_OPTIONS);
         hooks.start_benchmark().unwrap();
         let status = cmd.status();
         hooks.stop_benchmark().unwrap();
@@ -58,7 +61,7 @@ pub fn perform_with_valgrind(commands: Vec<BenchmarkCommand>) -> Result<()> {
         cmd.env("PYTHONPERFSUPPORT", "1");
         cmd.env(constants::URI_ENV, &name_and_uri.uri);
 
-        crate::node::set_node_options(&mut cmd);
+        crate::node::set_node_options(&mut cmd, &[]);
 
         let mut child = cmd.spawn().context("Failed to spawn command")?;
 
