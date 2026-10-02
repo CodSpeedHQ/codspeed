@@ -122,6 +122,7 @@ jobs:
             dlopen_tests,
             rss_tests,
             stack_tests,
+            interpreter_tests,
           ]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -135,6 +136,13 @@ jobs:
 
       - name: Install additional allocators
         run: sudo apt-get install -y libmimalloc-dev libjemalloc-dev
+
+      # The perf trampoline needs Python 3.12+.
+      - name: Install Python with perf trampoline support
+        if: matrix.test == 'interpreter_tests'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
 
       - name: Run tests
         env:
