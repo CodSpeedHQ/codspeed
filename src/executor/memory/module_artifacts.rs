@@ -1,13 +1,15 @@
+use crate::executor::helpers::harvest_perf_maps_for_pids::harvest_perf_maps_for_pids;
 use crate::executor::shared::module_artifacts::loaded_module::LoadedModule;
 use crate::executor::shared::module_artifacts::module_symbols::ModuleSymbols;
 use crate::executor::shared::module_artifacts::save_artifacts::save_artifacts;
 use crate::executor::shared::module_artifacts::unwind_data::unwind_data_from_elf;
+use crate::executor::wall_time::profiler::perf::jit_dump::save_symbols_and_harvest_unwind_data_for_pids;
 use crate::prelude::*;
 use libc::pid_t;
 use runner_shared::artifacts::{ArtifactExt, MemtrackArtifact, MemtrackEventKind};
 use runner_shared::metadata::MemtrackMetadata;
 use runner_shared::unwind_data::ProcessUnwindData;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
@@ -33,22 +35,32 @@ struct ProcessMapping {
     timestamp: u64,
 }
 
-/// Turn the mappings memtrack recorded into the artifacts an offline unwinder
-/// needs: the deduplicated `unwind_data`/`symbols.map` files, plus the
-/// `memtrack.metadata` referencing them per pid.
-///
-/// `results_folder` is where memtrack wrote its artifacts; the keyed files and
-/// the metadata land in `profile_folder`, next to walltime's equivalents.
-pub fn save_module_artifacts(
+/// Save the native modules memtrack mapped, per-process perf maps, and JIT
+/// unwind data needed for offline stack attribution. The keyed native and JIT
+/// files and their `memtrack.metadata` land in `profile_folder`; memtrack's
+/// event streams are read from `results_folder`.
+pub async fn save_module_artifacts(
     profile_folder: &Path,
     results_folder: &Path,
     integration: (String, String),
+    bench_pids: &HashSet<pid_t>,
 ) -> Result<()> {
     let mappings = read_mappings(results_folder)?;
-    if mappings.is_empty() {
-        debug!("No module mappings recorded, skipping memtrack module artifacts");
+    let pids = mappings
+        .iter()
+        .map(|mapping| mapping.pid)
+        .chain(bench_pids.iter().copied())
+        .collect::<HashSet<_>>();
+    if pids.is_empty() {
+        debug!("No processes recorded, skipping memtrack module artifacts");
         return Ok(());
     }
+
+    // Python and Node emit perf maps in /tmp; Python JIT dumps also contain
+    // unwind data needed to walk through interpreter trampolines.
+    harvest_perf_maps_for_pids(profile_folder, &pids).await?;
+    let jit_unwind_data =
+        save_symbols_and_harvest_unwind_data_for_pids(profile_folder, &pids).await?;
 
     let loaded_modules = loaded_modules_from_mappings(&mappings);
     debug!(
@@ -57,7 +69,7 @@ pub fn save_module_artifacts(
         mappings.len()
     );
 
-    let saved = save_artifacts(profile_folder, &loaded_modules, &HashMap::new());
+    let saved = save_artifacts(profile_folder, &loaded_modules, &jit_unwind_data);
     MemtrackMetadata::new(integration, saved.artifacts).save_to(profile_folder)
 }
 
@@ -481,8 +493,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn writes_keyed_artifacts_and_metadata_for_a_streamed_mapping() {
+    #[tokio::test]
+    async fn writes_keyed_artifacts_and_metadata_for_a_streamed_mapping() {
         const MODULE: &str = "testdata/perf_map/the_algorithms.bin";
 
         let profile = tempfile::tempdir().unwrap();
@@ -512,7 +524,9 @@ mod tests {
             profile.path(),
             &results,
             ("codspeed-rust".to_string(), "4.2.0".to_string()),
+            &HashSet::new(),
         )
+        .await
         .unwrap();
 
         let metadata = MemtrackMetadata::from_reader(
