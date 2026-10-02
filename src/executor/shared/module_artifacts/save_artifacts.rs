@@ -108,7 +108,7 @@ fn save_symbols(
         }
         let key = &path_to_key[path];
         for (&pid, pm) in &loaded_module.process_loaded_modules {
-            if let Some(load_bias) = pm.symbols_load_bias {
+            for &load_bias in &pm.symbols_load_biases {
                 mappings_by_pid
                     .entry(pid)
                     .or_default()
@@ -158,7 +158,7 @@ fn save_debug_info(
             continue;
         };
         for (&pid, pm) in &loaded_module.process_loaded_modules {
-            if let Some(load_bias) = pm.symbols_load_bias {
+            for &load_bias in &pm.symbols_load_biases {
                 mappings_by_pid
                     .entry(pid)
                     .or_default()
@@ -204,7 +204,7 @@ fn save_unwind_data(
         }
         let key = &path_to_key[path];
         for (&pid, pm) in &loaded_module.process_loaded_modules {
-            if let Some(ref pud) = pm.process_unwind_data {
+            for pud in &pm.process_unwind_data {
                 mappings_by_pid
                     .entry(pid)
                     .or_default()
@@ -281,7 +281,7 @@ fn collect_ignored_modules(
         };
 
         for (&pid, pm) in &loaded_module.process_loaded_modules {
-            if let Some(load_bias) = pm.symbols_load_bias {
+            for &load_bias in &pm.symbols_load_biases {
                 by_pid.entry(pid).or_default().push((
                     path_str.to_string(),
                     elf_start + load_bias,
