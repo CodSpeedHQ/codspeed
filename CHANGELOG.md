@@ -5,6 +5,76 @@
 
 
 
+## [5.4.0] - 2026-10-02
+
+### <!-- 0 -->🚀 Features
+- Expose the run id as a GitHub Actions step output (#551) by @moha-bekh in [#551](https://github.com/CodSpeedHQ/runner/pull/551)
+- Enable rss tracking and memory flamegraphs by default by @not-matthias
+- Log process stops and count them per reason by @not-matthias in [#543](https://github.com/CodSpeedHQ/runner/pull/543)
+- Pause producers under ring pressure by @not-matthias
+- Add experimental flag to capture allocation stacks by @not-matthias in [#522](https://github.com/CodSpeedHQ/runner/pull/522)
+- Write memtrack module artifacts and metadata by @not-matthias
+- Record mapped modules for offline stack attribution by @not-matthias
+- Add MemtrackMetadata sharing ModuleArtifacts with walltime by @not-matthias
+- Enable stack capture through the tracker by @not-matthias
+- Add userspace stack-capture module by @not-matthias
+- Capture allocation stacks in eBPF by @not-matthias
+- Add agent-plugins manifest and MCP config by @art049
+- Add Python allocator opt-out by @not-matthias in [#539](https://github.com/CodSpeedHQ/runner/pull/539)
+
+### <!-- 1 -->🐛 Bug Fixes
+- Error out when profile archive exceeds upload size limit (#557) by @lvaroqui in [#557](https://github.com/CodSpeedHQ/runner/pull/557)
+- Honor falsey values of the deprecated memory flags by @not-matthias in [#553](https://github.com/CodSpeedHQ/runner/pull/553)
+- Never resume a reused pid by @not-matthias
+- Keep stack hashing scratch inside the ring record by @not-matthias
+- Count stack-ring overflow as dropped events by @not-matthias
+- Detach BPF links through forked fd holders by @not-matthias
+- Read tracking_enabled from a global instead of an array map by @not-matthias
+- Skip allocator symbols aliased at an attached offset by @not-matthias
+- Honor deprecated experimental flags instead of ignoring them by @not-matthias in [#532](https://github.com/CodSpeedHQ/runner/pull/532)
+- Detect free-threaded Python from venv and uv before setting PYTHONMALLOC by @not-matthias
+- Support distributions CodSpeed publishes no valgrind package for (Arch, rolling releases) (#525) by @moha-bekh in [#525](https://github.com/CodSpeedHQ/runner/pull/525)
+
+### <!-- 2 -->🏗️ Refactor
+- Drop stack_hash from Free events by @not-matthias in [#558](https://github.com/CodSpeedHQ/runner/pull/558)
+- Inline pid-key deserializer into metadata by @not-matthias
+- Capture module mappings with perf by @not-matthias
+- Move ELF artifact pipeline to executor/shared by @not-matthias
+- Share the yes/no confirmation between the setup steps (#542) by @moha-bekh in [#542](https://github.com/CodSpeedHQ/runner/pull/542)
+
+### <!-- 3 -->📚 Documentation
+- Describe the mapping recorder by @not-matthias
+- Link the readme logo to codspeed.io by @adriencaccia
+
+### <!-- 4 -->⚡ Performance
+- Buffer the decompressed memtrack event stream by @not-matthias in [#560](https://github.com/CodSpeedHQ/runner/pull/560)
+- Warm up tar for several complete rounds by @not-matthias in [#555](https://github.com/CodSpeedHQ/runner/pull/555)
+- Drop the teardown-dominated ls benchmark by @not-matthias
+- Stop capturing stacks on free by @not-matthias
+- Serialize memtrack frames into a buffer and compress in one shot by @codspeedbot
+- Stream memtrack encoder frames instead of windows by @not-matthias
+- Poll ring buffers every 1ms by @not-matthias
+- Resolve stack fp chains off the ring poll thread by @not-matthias
+- Switch to mimalloc to reduce memory usage and fragmentation by @not-matthias
+- Pre-size the frame output buffer by @not-matthias
+- Batch ring-buffer events over the channel by @not-matthias
+
+### <!-- 6 -->🧪 Testing
+- Ignore duplicate frees in cross-variant comparison by @not-matthias
+- Measure ring-pressure pause under an allocation storm by @not-matthias
+- Assert nested stack identities by @not-matthias
+- Add nested allocation fixtures by @not-matthias
+- Cover allocation stack capture by @not-matthias
+
+### <!-- 7 -->⚙️ Internals
+- Pin memtrack 1.6.0 (#561) by @adriencaccia in [#561](https://github.com/CodSpeedHQ/runner/pull/561)
+- Run the clang-format hook serially by @codspeedbot in [#548](https://github.com/CodSpeedHQ/runner/pull/548)
+- Benchmark runner-shared in memory mode by @not-matthias
+- Bump samply-codspeed by @not-matthias in [#550](https://github.com/CodSpeedHQ/runner/pull/550)
+- Cache runner builds across memtrack benchmark shards by @not-matthias in [#537](https://github.com/CodSpeedHQ/runner/pull/537)
+- Add memtrack walltime benchmarks to CI by @not-matthias
+
+
 ## [5.3.1] - 2026-09-16
 
 ### <!-- 1 -->🐛 Bug Fixes
@@ -1531,6 +1601,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[5.4.0]: https://github.com/CodSpeedHQ/runner/compare/v5.3.1..v5.4.0
 [5.3.1]: https://github.com/CodSpeedHQ/runner/compare/v5.3.0..v5.3.1
 [5.3.0]: https://github.com/CodSpeedHQ/runner/compare/v5.2.1..v5.3.0
 [5.2.1]: https://github.com/CodSpeedHQ/runner/compare/v5.2.0..v5.2.1
