@@ -2400,7 +2400,7 @@ dependencies = [
 
 [[package]]
 name = "memtrack"
-version = "1.5.1"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "bindgen",
