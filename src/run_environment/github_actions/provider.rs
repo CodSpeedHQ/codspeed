@@ -70,9 +70,21 @@ struct OIDCResponse {
 static PR_REF_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^refs/pull/(?P<pr_number>\d+)/merge$").unwrap());
 
+/// Depot CI sets `GITHUB_ACTIONS=true` and the usual `GITHUB_*` variables, but its run ids do not
+/// exist on GitHub Actions. `DEPOT_JOB_URL` is only set on Depot CI, not on Depot's GitHub Actions
+/// runners. https://depot.dev/docs/environment-variables#depot-ci
+const DEPOT_CI_JOB_URL_ENV_VAR: &str = "DEPOT_JOB_URL";
+
 impl TryFrom<&OrchestratorConfig> for GitHubActionsProvider {
     type Error = Error;
     fn try_from(config: &OrchestratorConfig) -> Result<Self> {
+        if env::var_os(DEPOT_CI_JOB_URL_ENV_VAR).is_some() {
+            bail!(
+                "Depot CI is not supported yet by CodSpeed.\n\
+                Reach out at support@codspeed.io or on Discord (https://codspeed.io/discord) \
+                to request support for it."
+            );
+        }
         if config.repository_override.is_some() {
             bail!("Specifying owner and repository from CLI is not supported for Github Actions");
         }
@@ -467,6 +479,30 @@ mod tests {
                 );
                 assert!(!github_actions_provider.is_head_repo_fork);
                 assert!(!github_actions_provider.is_repository_private);
+            },
+        )
+    }
+
+    #[test]
+    fn test_try_from_depot_ci_is_rejected() {
+        with_vars(
+            [
+                ("GITHUB_ACTIONS", Some("true")),
+                (
+                    "DEPOT_JOB_URL",
+                    Some("https://depot.dev/orgs/org/workflows/workflow?job=job&attempt=1"),
+                ),
+                ("GITHUB_REPOSITORY", Some("owner/repository")),
+                ("GITHUB_RUN_ID", Some("271476942194171")),
+            ],
+            || {
+                let error = GitHubActionsProvider::try_from(&OrchestratorConfig::test())
+                    .err()
+                    .expect("Depot CI must be rejected");
+                assert!(
+                    error.to_string().contains("Depot CI is not supported"),
+                    "unexpected error: {error}"
+                );
             },
         )
     }
