@@ -12,6 +12,7 @@ use crate::executor::memory::module_artifacts::save_module_artifacts;
 use crate::executor::memory::tunables::MemoryTunables;
 use crate::executor::shared::fifo::RunnerFifo;
 use crate::executor::{ExecutionContext, Executor};
+use crate::exit_code::benchmark_failed;
 use crate::instruments::mongo_tracer::MongoTracer;
 use crate::prelude::*;
 use crate::runner_mode::RunnerMode;
@@ -199,7 +200,9 @@ impl Executor for MemoryExecutor {
         debug!("cmd exit status: {status:?}");
 
         if !status.success() {
-            bail!("failed to execute memory tracker process: {status}");
+            return Err(benchmark_failed(anyhow!(
+                "failed to execute memory tracker process: {status}"
+            )));
         }
 
         if let Some(integration) = integration.borrow_mut().take() {
