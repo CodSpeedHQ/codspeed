@@ -17,7 +17,7 @@ pub fn run_rounds(
     let do_one_round = || -> Result<(u64, u64)> {
         let mut cmd = Command::new(&command[0]);
         cmd.args(&command[1..]);
-        crate::node::set_node_options(&mut cmd);
+        crate::node::set_node_options(&mut cmd, crate::MeasurementMode::Walltime);
         let mut child = cmd.spawn().context("Failed to execute command")?;
         let bench_round_start_ts_ns = InstrumentHooks::current_timestamp();
         let status = child
