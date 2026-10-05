@@ -122,23 +122,11 @@ pub(crate) enum InternalCommands {
     Memtrack(memtrack::MemtrackArgs),
 }
 
-/// Test-only override for the executable internal subcommands re-exec: under
-/// `cargo test` [`std::env::current_exe`] is the test harness.
-///
-/// `cfg(test)` because this path goes to `sudo setcap <caps>+ep`.
-#[cfg(test)]
-pub(crate) const SELF_EXE_ENV_VAR: &str = "CODSPEED_SELF_EXE";
-
 /// The executable that internal subcommands are re-invoked through.
 ///
 /// The memory executor `setcap`s this exact path before running it, and `setcap`
 /// on a path that is not the one later exec'd succeeds while changing nothing.
 pub(crate) fn self_exe() -> Result<PathBuf> {
-    #[cfg(test)]
-    if let Some(path) = std::env::var_os(SELF_EXE_ENV_VAR) {
-        return Ok(PathBuf::from(path));
-    }
-
     std::env::current_exe().context("failed to resolve current executable for internal subcommand")
 }
 

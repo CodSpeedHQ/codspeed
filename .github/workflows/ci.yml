@@ -43,6 +43,9 @@ jobs:
 
       - run: cargo test --all --exclude memtrack --exclude exec-harness
 
+      # Natively rather than in tests/docker: the runner has systemd, so this covers systemd-run isolation.
+      - run: cargo test -p codspeed-runner --test executors -- --ignored
+
   exec-harness-tests:
     runs-on: ubuntu-latest
     steps:

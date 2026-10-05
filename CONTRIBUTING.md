@@ -106,3 +106,4 @@ This ensures only stable runner releases are marked as "latest" in GitHub.
 ## Testing
 
 - Some tests require `sudo` access. They are skipped by default unless the `GITHUB_ACTIONS` env var is set.
+- The executor tests in `tests/executors.rs` install tools, `setcap` the binary and load eBPF/perf, so they are `#[ignore]`d. Run them in a container with `tests/docker/run.sh [filter]` (needs Docker only), or on a host with passwordless sudo with `cargo test --test executors -- --ignored`.
