@@ -43,6 +43,51 @@ static __always_inline void bump_stack_counter(__u32 index) {
     }
 }
 
+/* Matches the kernel's MAX_URETPROBE_DEPTH: deeper calls get no uretprobe. */
+#define MAX_PENDING_URETPROBES 64
+
+/* A pending uretprobe replaces its function's return address with the
+ * [uprobes] trampoline. When a hooked allocator calls another one
+ * (operator new -> malloc), the nested capture copies that trampoline, and
+ * offline unwinding cannot get past it. Write the original return addresses
+ * back from the task's pending return_instances, innermost first.
+ *
+ * Since v6.11 the kernel repairs perf and bpf_get_stackid callchains the same
+ * way (fixup_uretprobe_trampoline_entries), but not raw bpf_probe_read_user
+ * copies. It can match trampoline values because it works on an unwound
+ * callchain. Raw stack bytes also hold stale trampoline words, so here only
+ * the hijacked slot is patched: on x86, the entry sp recorded as ri->stack.
+ * See https://github.com/torvalds/linux/commit/4a365eb8a6d9940e838739935f1ce21f1ec8e33f
+ *
+ * arm64 hijacks the link register, and the kernel does not track where the
+ * callee spills it, so there is no exact slot to patch. */
+static __always_inline void restore_uretprobe_return_addresses(__u8* bytes, __u32 len, __u64 sp) {
+#if defined(__TARGET_ARCH_x86)
+    struct task_struct* task = bpf_get_current_task_btf();
+    struct return_instance* ri = BPF_CORE_READ(task, utask, return_instances);
+    if (!ri) {
+        return;
+    }
+
+    __u64 trampoline = BPF_CORE_READ(task, mm, uprobes_state.xol_area, vaddr);
+
+#pragma clang loop unroll(disable)
+    for (__u32 i = 0; i < MAX_PENDING_URETPROBES && ri; i++) {
+        /* Slots below sp wrap to huge offsets and fail the budget check, which
+         * also bounds the access for the verifier. */
+        __u64 off = BPF_CORE_READ(ri, stack) - sp;
+        if (off <= stack_copy_budget - sizeof(__u64) && off + sizeof(__u64) <= len) {
+            /* An instance left behind by longjmp can point at a reused slot. */
+            __u64* word = (__u64*)(bytes + off);
+            if (*word == trampoline) {
+                *word = BPF_CORE_READ(ri, orig_ret_vaddr);
+            }
+        }
+        ri = BPF_CORE_READ(ri, next);
+    }
+#endif
+}
+
 /* 4-lane FNV-1a over one STACK_COPY_CHUNK worth of 8-byte words. Fixed-size,
  * unrolled so the verifier sees a bounded loop. */
 static __always_inline void fnv64_hash_chunk(__u64 lanes[4], const __u64* words) {
@@ -107,17 +152,17 @@ static __always_inline __u64 capture_stack_inner(struct pt_regs* ctx, struct tas
     lanes[3] = FNV64_OFFSET ^ 3;
     __u32 got = 0;
 
+    __u8* bytes = (__u8*)slot + sizeof(struct stack_header);
+
     /* Chunked reads stop at the first unreadable stack region.
      * Loop bound is checked against stack_copy_budget (a frozen rodata constant)
      * so every slot access is provably in range. */
 #pragma clang loop unroll(disable)
     for (__u32 off = 0; off + STACK_COPY_CHUNK <= stack_copy_budget; off += STACK_COPY_CHUNK) {
-        if (bpf_probe_read_user((__u8*)slot + sizeof(struct stack_header) + off, STACK_COPY_CHUNK,
-                                (void*)(PT_REGS_SP(ctx) + off)) != 0) {
+        if (bpf_probe_read_user(bytes + off, STACK_COPY_CHUNK, (void*)(PT_REGS_SP(ctx) + off)) !=
+            0) {
             break;
         }
-
-        fnv64_hash_chunk(lanes, (const __u64*)((__u8*)slot + sizeof(struct stack_header) + off));
         got = off + STACK_COPY_CHUNK;
     }
 
@@ -126,6 +171,17 @@ static __always_inline __u64 capture_stack_inner(struct pt_regs* ctx, struct tas
         bump_stack_counter(MEMTRACK_STACK_COUNTER_COPY_FAILED);
         memtrack_check_ring_pressure(&stacks, ids.tgid);
         return 0;
+    }
+
+    /* Hash the restored bytes so the hash identifies the real call path. */
+    restore_uretprobe_return_addresses(bytes, got, PT_REGS_SP(ctx));
+
+#pragma clang loop unroll(disable)
+    for (__u32 off = 0; off + STACK_COPY_CHUNK <= stack_copy_budget; off += STACK_COPY_CHUNK) {
+        if (off >= got) {
+            break;
+        }
+        fnv64_hash_chunk(lanes, (const __u64*)(bytes + off));
     }
 
     __u8 truncated = got >= stack_copy_budget;
