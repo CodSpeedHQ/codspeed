@@ -93,16 +93,17 @@ impl ModuleSymbols {
     pub fn from_elf<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
         let content = std::fs::read(path.as_ref())?;
         let object = object::File::parse(&*content)?;
+        Self::from_object(&object, path.as_ref())
+    }
 
-        let mut symbols = Self::extract_symbols_from_object(&object);
+    /// Like [`Self::from_elf`], but on an already parsed `object`. `path` is
+    /// only used to locate a separate debug file.
+    pub fn from_object(object: &object::File, path: &Path) -> anyhow::Result<Self> {
+        let mut symbols = Self::extract_symbols_from_object(object);
 
         // Merge symbols from a separate debug file if available
-        if let Some(debug_path) = debug_file::find_debug_file(&object, path.as_ref()) {
-            trace!(
-                "Merging symbols from debug file {:?} for {:?}",
-                debug_path,
-                path.as_ref()
-            );
+        if let Some(debug_path) = debug_file::find_debug_file(object, path) {
+            trace!("Merging symbols from debug file {debug_path:?} for {path:?}");
             let debug_symbols = std::fs::read(&debug_path).ok().and_then(|c| {
                 object::File::parse(&*c)
                     .ok()
@@ -181,10 +182,10 @@ impl ModuleSymbols {
         let content = std::fs::read(path.as_ref())?;
         let object = object::File::parse(&*content)?;
         elf_helper::compute_load_bias(
+            &object,
             runtime_start_addr,
             runtime_end_addr,
             runtime_offset,
-            &object,
         )
     }
 

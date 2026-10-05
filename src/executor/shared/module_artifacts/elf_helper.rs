@@ -39,10 +39,10 @@ impl SvmaFileRange {
 }
 
 pub fn compute_load_bias(
+    object: &object::File,
     runtime_start_addr: u64,
     runtime_end_addr: u64,
     runtime_file_offset: u64,
-    object: &object::File,
 ) -> anyhow::Result<u64> {
     // The addresses of symbols read from an ELF file on disk are not their final runtime addresses.
     // This is due to Address Space Layout Randomization (ASLR) and the way the OS loader maps

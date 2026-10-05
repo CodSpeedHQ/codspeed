@@ -17,8 +17,6 @@ pub fn unwind_data_from_elf(
     build_id: Option<&[u8]>,
     load_bias: u64,
 ) -> anyhow::Result<(UnwindData, ProcessUnwindData)> {
-    let avma_range = runtime_start_addr..runtime_end_addr;
-
     let path = String::from_utf8_lossy(path_slice).to_string();
     let Some(file) = std::fs::File::open(&path).ok() else {
         bail!("Could not open file {path}");
@@ -26,6 +24,27 @@ pub fn unwind_data_from_elf(
 
     let mmap = unsafe { memmap2::MmapOptions::new().map(&file)? };
     let file = object::File::parse(&mmap[..])?;
+    unwind_data_from_object(
+        &file,
+        path,
+        runtime_start_addr,
+        runtime_end_addr,
+        build_id,
+        load_bias,
+    )
+}
+
+/// Like [`unwind_data_from_elf`], but on an already parsed `file`, so callers
+/// can bind the data to the exact bytes they verified. `path` is only recorded.
+pub fn unwind_data_from_object(
+    file: &object::File,
+    path: String,
+    runtime_start_addr: u64,
+    runtime_end_addr: u64,
+    build_id: Option<&[u8]>,
+    load_bias: u64,
+) -> anyhow::Result<(UnwindData, ProcessUnwindData)> {
+    let avma_range = runtime_start_addr..runtime_end_addr;
 
     // Verify the build id (if we have one)
     match (build_id, file.build_id()) {
@@ -46,7 +65,7 @@ pub fn unwind_data_from_elf(
         }
     };
 
-    let base_svma = elf_helper::relative_address_base(&file);
+    let base_svma = elf_helper::relative_address_base(file);
     let base_avma = elf_helper::compute_base_avma(base_svma, load_bias);
     let eh_frame = file.section_by_name(".eh_frame");
     let eh_frame_hdr = file.section_by_name(".eh_frame_hdr");
@@ -102,7 +121,7 @@ mod tests {
         let file_data = std::fs::read(module_path).expect("Failed to read test binary");
         let object = object::File::parse(&file_data[..]).expect("Failed to parse test binary");
         let load_bias =
-            elf_helper::compute_load_bias(start_addr, end_addr, file_offset, &object).unwrap();
+            elf_helper::compute_load_bias(&object, start_addr, end_addr, file_offset).unwrap();
         println!("Load bias for {module_path}: 0x{load_bias:x}");
         assert_eq!(
             load_bias, expected_load_bias,

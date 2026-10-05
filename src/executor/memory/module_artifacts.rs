@@ -1,7 +1,8 @@
+use crate::executor::shared::module_artifacts::elf_helper;
 use crate::executor::shared::module_artifacts::loaded_module::LoadedModule;
 use crate::executor::shared::module_artifacts::module_symbols::ModuleSymbols;
 use crate::executor::shared::module_artifacts::save_artifacts::save_artifacts;
-use crate::executor::shared::module_artifacts::unwind_data::unwind_data_from_elf;
+use crate::executor::shared::module_artifacts::unwind_data::unwind_data_from_object;
 use crate::prelude::*;
 use libc::pid_t;
 use runner_shared::artifacts::{ArtifactExt, MemtrackArtifact, MemtrackEventKind};
@@ -9,7 +10,6 @@ use runner_shared::metadata::MemtrackMetadata;
 use runner_shared::unwind_data::ProcessUnwindData;
 use std::collections::HashMap;
 use std::ops::Range;
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 /// One executable mapping of one file into one process, as `PERF_RECORD_MMAP2`
@@ -163,15 +163,34 @@ fn read_mappings_from_artifact<R: std::io::Read>(reader: R) -> Result<Vec<Proces
 
 fn loaded_modules_from_mappings(mappings: &[ProcessMapping]) -> HashMap<PathBuf, LoadedModule> {
     let mut loaded_modules = HashMap::<PathBuf, LoadedModule>::new();
+    // Open each path once and parse every artifact from that one mapping, so
+    // the identity check and the parsed bytes always refer to the same inode,
+    // even if the path is replaced during extraction.
+    let mut mapped_modules = HashMap::<PathBuf, Option<MappedModule>>::new();
 
     for mapping in mappings {
         let path = PathBuf::from(&mapping.path);
-        if !names_mapped_file(mapping, &path) {
+        let module = mapped_modules.entry(path.clone()).or_insert_with(|| {
+            MappedModule::open(&path)
+                .inspect_err(|e| debug!("{} is no longer mappable: {e}", mapping.path))
+                .ok()
+        });
+        let Some(module) = module else {
+            continue;
+        };
+        if !names_mapped_file(mapping, module.identity) {
             continue;
         }
+        let object = match object::File::parse(&module.mmap[..]) {
+            Ok(object) => object,
+            Err(e) => {
+                debug!("Failed to parse {}: {e}", mapping.path);
+                continue;
+            }
+        };
 
-        let load_bias = match ModuleSymbols::compute_load_bias(
-            &path,
+        let load_bias = match elf_helper::compute_load_bias(
+            &object,
             mapping.avma_range.start,
             mapping.avma_range.end,
             mapping.file_offset,
@@ -186,7 +205,7 @@ fn loaded_modules_from_mappings(mappings: &[ProcessMapping]) -> HashMap<PathBuf,
         let loaded_module = loaded_modules.entry(path.clone()).or_default();
 
         if loaded_module.module_symbols.is_none() {
-            match ModuleSymbols::from_elf(&path) {
+            match ModuleSymbols::from_object(&object, &path) {
                 Ok(symbols) => loaded_module.module_symbols = Some(symbols),
                 Err(e) => debug!("Failed to load symbols for {}: {e}", mapping.path),
             }
@@ -199,8 +218,9 @@ fn loaded_modules_from_mappings(mappings: &[ProcessMapping]) -> HashMap<PathBuf,
                 base_avma: unwind_data.base_svma.wrapping_add(load_bias),
             })
         } else {
-            match unwind_data_from_elf(
-                mapping.path.as_bytes(),
+            match unwind_data_from_object(
+                &object,
+                mapping.path.clone(),
                 mapping.avma_range.start,
                 mapping.avma_range.end,
                 None,
@@ -239,21 +259,13 @@ fn loaded_modules_from_mappings(mappings: &[ProcessMapping]) -> HashMap<PathBuf,
 /// The mapping records the inode the kernel resolved the path from; a file
 /// rebuilt or replaced since then is a different inode, and reading unwind data
 /// out of it would bind eh_frame from the wrong binary to those addresses.
-fn names_mapped_file(mapping: &ProcessMapping, path: &Path) -> bool {
-    let Ok(metadata) = std::fs::metadata(path) else {
-        debug!("{} is no longer readable", mapping.path);
-        return false;
-    };
-
-    // The recorded `dev` is the kernel's s_dev encoding, `st_dev` glibc's, so
-    // only the decomposed major/minor pair is comparable.
-    let recorded = (mapping.dev >> 20, mapping.dev & 0xF_FFFF, mapping.ino);
-    let current = (
-        u64::from(libc::major(metadata.dev())),
-        u64::from(libc::minor(metadata.dev())),
-        metadata.ino(),
-    );
-
+///
+/// The current identity is read from a fresh mapping of the path rather than
+/// `stat`: overlayfs can report a per-layer pseudo device through `stat` while
+/// mappings carry the overlay's own device, so an unchanged file in a nested
+/// overlay would never match.
+fn names_mapped_file(mapping: &ProcessMapping, current: (u64, u64)) -> bool {
+    let recorded = (mapping.dev, mapping.ino);
     if recorded != current {
         debug!(
             "{} changed since it was mapped (recorded {recorded:?}, now {current:?})",
@@ -262,6 +274,49 @@ fn names_mapped_file(mapping: &ProcessMapping, path: &Path) -> bool {
         return false;
     }
     true
+}
+
+/// A whole-file mapping of a module, with the `(dev, ino)` the kernel reports
+/// for that mapping, in the `(major << 20) | minor` encoding
+/// `PERF_RECORD_MMAP2` carries.
+struct MappedModule {
+    mmap: memmap2::Mmap,
+    identity: (u64, u64),
+}
+
+impl MappedModule {
+    fn open(path: &Path) -> Result<Self> {
+        let file = std::fs::File::open(path)?;
+        // SAFETY: read-only mapping. Replacing the path (the case checked
+        // here) creates a new inode and leaves these bytes untouched. Assumes
+        // modules are not modified or truncated in place while the runner
+        // post-processes, as the walltime unwind data extraction already does.
+        let mmap = unsafe { memmap2::Mmap::map(&file)? };
+        let identity = Self::mapped_identity(&mmap)?;
+        Ok(Self { mmap, identity })
+    }
+
+    fn mapped_identity(mmap: &memmap2::Mmap) -> Result<(u64, u64)> {
+        let start = format!("{:x}-", mmap.as_ptr() as usize);
+
+        let maps = std::fs::read_to_string("/proc/self/maps")?;
+        let line = maps
+            .lines()
+            .find(|line| line.starts_with(&start))
+            .ok_or_else(|| anyhow!("own mapping not found in /proc/self/maps"))?;
+
+        // Fields: range, perms, offset, "major:minor" in hex, inode.
+        let mut fields = line.split_ascii_whitespace().skip(3);
+        let (dev, ino) = fields
+            .next()
+            .zip(fields.next())
+            .ok_or_else(|| anyhow!("malformed maps line: {line}"))?;
+        let (major, minor) = dev
+            .split_once(':')
+            .ok_or_else(|| anyhow!("malformed device: {dev}"))?;
+        let dev = (u64::from_str_radix(major, 16)? << 20) | u64::from_str_radix(minor, 16)?;
+        Ok((dev, ino.parse()?))
+    }
 }
 
 #[cfg(all(test, target_os = "linux"))]
@@ -281,45 +336,135 @@ mod tests {
         }
     }
 
-    fn s_dev_of(path: &str) -> (u64, u64) {
-        let metadata = std::fs::metadata(path).unwrap();
+    /// Identity of the test binary as the kernel reports it for the mapping
+    /// that loaded it, which is what `PERF_RECORD_MMAP2` records.
+    fn recorded_identity_of_own_exe() -> (u64, u64) {
+        let exe = std::fs::read_link("/proc/self/exe").unwrap();
+        let maps = std::fs::read_to_string("/proc/self/maps").unwrap();
+        let line = maps
+            .lines()
+            .find(|line| line.ends_with(exe.to_str().unwrap()))
+            .unwrap();
+        let fields: Vec<&str> = line.split_ascii_whitespace().collect();
+        let (major, minor) = fields[3].split_once(':').unwrap();
         let dev =
-            u64::from(libc::major(metadata.dev())) << 20 | u64::from(libc::minor(metadata.dev()));
-        (dev, metadata.ino())
+            u64::from_str_radix(major, 16).unwrap() << 20 | u64::from_str_radix(minor, 16).unwrap();
+        (dev, fields[4].parse().unwrap())
     }
 
-    /// The recorded s_dev encoding and `st_dev` differ, so the check has to
-    /// decompose both or it rejects every module that did not change.
+    /// Must hold on overlayfs too, where `stat` can report a different device
+    /// than mappings do for the same unchanged file.
     #[test]
     fn accepts_a_file_that_still_has_the_recorded_inode() {
         let path = "/proc/self/exe";
-        let (dev, ino) = s_dev_of(path);
+        let (dev, ino) = recorded_identity_of_own_exe();
 
         assert!(names_mapped_file(
             &mapping_for(path, dev, ino),
-            Path::new(path)
+            MappedModule::open(Path::new(path)).unwrap().identity
         ));
     }
 
     #[test]
     fn rejects_a_file_whose_inode_changed() {
         let path = "/proc/self/exe";
-        let (dev, _) = s_dev_of(path);
+        let (dev, _) = recorded_identity_of_own_exe();
 
         assert!(!names_mapped_file(
             &mapping_for(path, dev, 0),
-            Path::new(path)
+            MappedModule::open(Path::new(path)).unwrap().identity
         ));
+    }
+
+    /// Nested overlays, as in sandboxed CI runners, make `stat` report a
+    /// per-layer device that differs from the one mappings carry.
+    #[test_with::env(GITHUB_ACTIONS)]
+    #[test]
+    fn accepts_an_unchanged_file_in_a_nested_overlay() {
+        use crate::executor::helpers::run_with_sudo::run_with_sudo;
+        use std::os::unix::fs::MetadataExt;
+
+        /// Unmounts in reverse order on drop, so a failing assertion does not
+        /// leave mounts behind on the host.
+        #[derive(Default)]
+        struct Mounts(Vec<PathBuf>);
+        impl Mounts {
+            fn mount(&mut self, fstype: &str, target: &Path, options: &str) {
+                run_with_sudo(
+                    "mount",
+                    [
+                        "-t".as_ref(),
+                        fstype.as_ref(),
+                        "-o".as_ref(),
+                        options.as_ref(),
+                        fstype.as_ref(),
+                        target.as_os_str(),
+                    ],
+                )
+                .unwrap_or_else(|e| panic!("mount {fstype} on {target:?}: {e}"));
+                self.0.push(target.to_path_buf());
+            }
+        }
+        impl Drop for Mounts {
+            fn drop(&mut self) {
+                for target in self.0.iter().rev() {
+                    let _ = run_with_sudo("umount", [target]);
+                }
+            }
+        }
+
+        let root = tempfile::tempdir().unwrap();
+        let dir = |name: &str| {
+            let path = root.path().join(name);
+            std::fs::create_dir(&path).unwrap();
+            path
+        };
+        let (lower, layers, base, merged) =
+            (dir("lower"), dir("layers"), dir("base"), dir("merged"));
+        let mut mounts = Mounts::default();
+        // Owned by the test user so the module can be written without sudo.
+        let uid = nix::unistd::Uid::current();
+        mounts.mount("tmpfs", &lower, &format!("uid={uid}"));
+        mounts.mount("tmpfs", &layers, "");
+        std::fs::write(lower.join("module.so"), b"\x7fELF").unwrap();
+        let layer = |name: &str| {
+            let path = layers.join(name);
+            run_with_sudo("mkdir", [&path]).unwrap();
+            path.display().to_string()
+        };
+        let mut overlay = |name: &str, lower: &Path, target: &Path, extra: &str| {
+            let options = format!(
+                "lowerdir={},upperdir={},workdir={},userxattr{extra}",
+                lower.display(),
+                layer(&format!("{name}-upper")),
+                layer(&format!("{name}-work")),
+            );
+            mounts.mount("overlay", target, &options);
+        };
+        // The inner overlay already sets the high inode bits xino uses, so the
+        // outer one cannot encode its layer and falls back to a pseudo device.
+        overlay("base", &lower, &base, ",xino=on");
+        overlay("merged", &base, &merged, "");
+
+        let path = merged.join("module.so");
+        let stat = std::fs::metadata(&path).unwrap();
+        let stat_dev =
+            u64::from(libc::major(stat.dev())) << 20 | u64::from(libc::minor(stat.dev()));
+        let (dev, ino) = MappedModule::open(&path).unwrap().identity;
+        assert_ne!(
+            stat_dev, dev,
+            "stat agrees with the mapping, nothing to test"
+        );
+
+        let mapping = mapping_for(path.to_str().unwrap(), dev, ino);
+        assert!(names_mapped_file(&mapping, (dev, ino)));
     }
 
     #[test]
     fn rejects_a_path_that_no_longer_exists() {
-        let path = "/nonexistent/module.so";
+        let mapping = mapping_for("/nonexistent/module.so", 1, 2);
 
-        assert!(!names_mapped_file(
-            &mapping_for(path, 1, 2),
-            Path::new(path)
-        ));
+        assert!(loaded_modules_from_mappings(&[mapping]).is_empty());
     }
 
     #[test]
@@ -489,7 +634,7 @@ mod tests {
         let results = profile.path().join("results");
         std::fs::create_dir_all(&results).unwrap();
 
-        let (dev, ino) = s_dev_of(MODULE);
+        let (dev, ino) = MappedModule::open(Path::new(MODULE)).unwrap().identity;
         MemtrackArtifact {
             events: vec![MemtrackEvent {
                 pid: 1234,

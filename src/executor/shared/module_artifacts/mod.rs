@@ -3,7 +3,7 @@
 //! The input is a set of [`loaded_module::LoadedModule`] values. The output is
 //! keyed `unwind_data`/`symbols.map` files and per-process metadata references.
 
-mod elf_helper;
+pub mod elf_helper;
 mod naming;
 
 pub mod debug_info;
