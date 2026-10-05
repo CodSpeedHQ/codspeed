@@ -4,10 +4,19 @@ expression: upload_metadata
 ---
 {
   "repositoryProvider": "GITHUB",
-  "version": 11,
+  "version": 12,
   "tokenless": true,
   "profileMd5": "jp/k05RKuqP3ERQuIIvx4Q==",
   "profileEncoding": "gzip",
+  "profileMultipart": {
+    "size": 629145600,
+    "partSize": 268435456,
+    "partMd5s": [
+      "eEKfdGLWNqhNnJIvSVWZxQ==",
+      "vKfHJAI2Hyo68jWwUc6H9A==",
+      "bQY//BUrm3jASNTyWj/3Aw=="
+    ]
+  },
   "runner": {
     "name": "codspeed-runner",
     "version": "2.1.0",

@@ -3,6 +3,7 @@ mod interfaces;
 pub mod poll_results;
 mod profile_archive;
 mod run_index_state;
+mod s3;
 mod upload_metadata;
 mod uploader;
 

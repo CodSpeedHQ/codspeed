@@ -22,7 +22,7 @@ mod tests {
         Sender,
     };
     use crate::system::SystemInfo;
-    use crate::upload::{LATEST_UPLOAD_METADATA_VERSION, Runner, UploadMetadata};
+    use crate::upload::{LATEST_UPLOAD_METADATA_VERSION, ProfileMultipart, Runner, UploadMetadata};
 
     #[test]
     fn test_get_metadata_hash() {
@@ -32,6 +32,15 @@ mod tests {
             tokenless: true,
             profile_md5: "jp/k05RKuqP3ERQuIIvx4Q==".into(),
             profile_encoding: Some("gzip".into()),
+            profile_multipart: ProfileMultipart {
+                size: 629145600,
+                part_size: 268435456,
+                part_md5s: vec![
+                    "eEKfdGLWNqhNnJIvSVWZxQ==".into(),
+                    "vKfHJAI2Hyo68jWwUc6H9A==".into(),
+                    "bQY//BUrm3jASNTyWj/3Aw==".into(),
+                ],
+            },
             runner: Runner {
                 name: "codspeed-runner".into(),
                 version: "2.1.0".into(),
@@ -73,7 +82,7 @@ mod tests {
             hash,
             // Caution: when changing this value, we need to ensure that
             // the related backend snapshot remains the same
-            @"b6e221583869b0a49498d71538432a5396b08fec7783081dcdf23c9e037a9365"
+            @"307ed5a2218e04b1befe21d355e19a2a3adb7a617b19d1b6e8406c23355a2664"
         );
         assert_json_snapshot!(upload_metadata);
     }
@@ -86,6 +95,11 @@ mod tests {
             tokenless: false,
             profile_md5: "tfC4VxYiYdJcTWpHpv4Ouw==".into(),
             profile_encoding: Some("gzip".into()),
+            profile_multipart: ProfileMultipart {
+                size: 20480,
+                part_size: 16777216,
+                part_md5s: vec!["tfC4VxYiYdJcTWpHpv4Ouw==".into()],
+            },
             runner: Runner {
                 name: "codspeed-runner".into(),
                 version: "4.11.1".into(),
@@ -144,7 +158,7 @@ mod tests {
             hash,
             // Caution: when changing this value, we need to ensure that
             // the related backend snapshot remains the same
-            @"5c960260ea5b5ceaafa20ea220e566743e20b65106d0fd672a844a63bba3835a"
+            @"dcbb07dc8bf0c97cc88566ef78acec873f452420ce004807f3cdd6218544a458"
         );
         assert_json_snapshot!(upload_metadata);
     }

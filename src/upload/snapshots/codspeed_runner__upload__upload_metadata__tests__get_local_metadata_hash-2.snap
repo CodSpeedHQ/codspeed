@@ -4,10 +4,17 @@ expression: upload_metadata
 ---
 {
   "repositoryProvider": "PROJECT",
-  "version": 11,
+  "version": 12,
   "tokenless": false,
   "profileMd5": "tfC4VxYiYdJcTWpHpv4Ouw==",
   "profileEncoding": "gzip",
+  "profileMultipart": {
+    "size": 20480,
+    "partSize": 16777216,
+    "partMd5s": [
+      "tfC4VxYiYdJcTWpHpv4Ouw=="
+    ]
+  },
   "runner": {
     "name": "codspeed-runner",
     "version": "4.11.1",

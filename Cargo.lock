@@ -708,6 +708,7 @@ dependencies = [
  "axoupdater",
  "base64",
  "bincode",
+ "bytes",
  "caps",
  "clap",
  "console",
