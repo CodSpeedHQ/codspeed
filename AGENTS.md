@@ -104,3 +104,4 @@ Test files include snapshots in `snapshots/` directories for various run environ
 **Important**:
 
 - Some tests require `sudo` access. They are skipped by default unless the `GITHUB_ACTIONS` env var is set.
+- The executor tests in `tests/executors.rs` only build with the `executor-tests` feature; run them with `just test-integ [filter]`.

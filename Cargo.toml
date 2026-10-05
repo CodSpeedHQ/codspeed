@@ -10,6 +10,14 @@ default-run = "codspeed"
 name = "codspeed"
 path = "src/main.rs"
 
+[[test]]
+name = "executors"
+required-features = ["executor-tests"]
+
+[features]
+# Builds tests/executors.rs, which needs privileges: see tests/docker/run.sh.
+executor-tests = []
+
 [dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true, features = ["env", "color"] }
@@ -80,15 +88,12 @@ ipc-channel = { workspace = true }
 [dev-dependencies]
 temp-env = { version = "0.3.6", features = ["async_closure"] }
 insta = { workspace = true, features = ["json", "redactions"] }
-test-log = { workspace = true }
 test-with = { workspace = true }
 rstest = { workspace = true }
-rstest_reuse = "0.7.0"
 shell-quote = "0.7.2"
 assert_cmd = "2.2"
 predicates = "3.1.4"
 strum = { version = "0.28.0", features = ["derive"] }
-escargot = "0.5.15"
 
 [workspace]
 members = [

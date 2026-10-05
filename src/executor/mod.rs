@@ -8,8 +8,6 @@ mod interfaces;
 mod memory;
 pub mod orchestrator;
 mod shared;
-#[cfg(test)]
-mod tests;
 mod valgrind;
 mod wall_time;
 

@@ -136,3 +136,4 @@ This ensures only stable runner releases are marked as "latest" in GitHub.
 ## Testing
 
 - Some tests require `sudo` access. They are skipped by default unless the `GITHUB_ACTIONS` env var is set.
+- The executor tests in `tests/executors.rs` install tools, `setcap` memtrack and load eBPF/perf, so they only build with the `executor-tests` feature. Run them in containers with `just test-integ [filter]` (needs Docker and [just](https://github.com/casey/just)), or on a host with passwordless sudo with `cargo test --features executor-tests --test executors`.

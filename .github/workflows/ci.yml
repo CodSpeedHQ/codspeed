@@ -36,16 +36,21 @@ jobs:
 
       - uses: ./.github/actions/install-rust
 
-      # Install memtrack for the memory integration tests
       - uses: ./.github/actions/install-bpf-deps
-      - name: Install memtrack
-        run: |
-          cargo install --path crates/memtrack --locked
-
-      - name: Grant memtrack file capabilities
-        run: cargo r -- setup --mode memory
 
       - run: cargo test --all --exclude memtrack --exclude exec-harness
+
+  executor-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: true
+      - uses: taiki-e/install-action@e0eafa9a0d485c37f97c0f7beb930a58a2facbac # v2
+        with:
+          tool: just
+      # No cache for now here, but we could cache either docker volumes or mounted host directories to cache build artifacts
+      - run: just test-integ
 
   exec-harness-tests:
     runs-on: ubuntu-latest
@@ -89,11 +94,27 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, ubuntu-latest, ubuntu-24.04-arm, ubuntu-26.04, ubuntu-26.04-arm]
+        os:
+          [
+            ubuntu-22.04,
+            ubuntu-24.04,
+            ubuntu-24.04-arm,
+            ubuntu-26.04,
+            ubuntu-26.04-arm,
+          ]
         # Each memtrack integration test binary runs its cases serially
         # (eBPF tracker can't overlap with itself in one process), so we
         # shard at the test-binary level to parallelize across jobs.
-        test: [c_tests, cpp_tests, rust_tests, spawn_tests, dlopen_tests, rss_tests, stack_tests]
+        test:
+          [
+            c_tests,
+            cpp_tests,
+            rust_tests,
+            spawn_tests,
+            dlopen_tests,
+            rss_tests,
+            stack_tests,
+          ]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -225,6 +246,7 @@ jobs:
     needs:
       - lint
       - tests
+      - executor-tests
       - exec-harness-tests
       - basic-run-test
       - macos-basic-run-test
