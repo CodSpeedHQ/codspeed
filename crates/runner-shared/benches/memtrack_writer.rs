@@ -200,7 +200,7 @@ fn write_stack_events(bencher: Bencher) {
 
 fn encode(events: &[MemtrackEvent], n_workers: usize) -> Vec<u8> {
     let mut output = Vec::new();
-    encode_events(events.iter().cloned(), &mut output, n_workers).unwrap();
+    encode_events(events.iter().cloned(), &mut output, n_workers, |_| {}).unwrap();
     output
 }
 
