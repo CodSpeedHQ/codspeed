@@ -100,6 +100,34 @@ static __always_inline void fnv64_hash_chunk(__u64 lanes[4], const __u64* words)
     }
 }
 
+/* Copy the user stack at sp in STACK_COPY_CHUNK reads, stopping at the first
+ * unreadable chunk. Returns the bytes copied, a multiple of STACK_COPY_CHUNK.
+ * The loop is bounded by stack_copy_budget (a frozen rodata constant) so every
+ * write into the reservation is provably in range. */
+static __always_inline __u32 copy_user_stack(__u8* bytes, __u64 sp) {
+    __u32 got = 0;
+#pragma clang loop unroll(disable)
+    for (__u32 off = 0; off + STACK_COPY_CHUNK <= stack_copy_budget; off += STACK_COPY_CHUNK) {
+        if (bpf_probe_read_user(bytes + off, STACK_COPY_CHUNK, (void*)(sp + off)) != 0) {
+            break;
+        }
+        got = off + STACK_COPY_CHUNK;
+    }
+    return got;
+}
+
+/* Hash the first len bytes, one chunk at a time. The loop has the same budget
+ * bound as the copy so the verifier accepts the reads; len ends it early. */
+static __always_inline void hash_stack_bytes(__u64 lanes[4], const __u8* bytes, __u32 len) {
+#pragma clang loop unroll(disable)
+    for (__u32 off = 0; off + STACK_COPY_CHUNK <= stack_copy_budget; off += STACK_COPY_CHUNK) {
+        if (off >= len) {
+            break;
+        }
+        fnv64_hash_chunk(lanes, (const __u64*)(bytes + off));
+    }
+}
+
 #if defined(__TARGET_ARCH_x86)
 static __always_inline void fill_stack_regs(struct stack_regs* out, struct pt_regs* ctx) {
     out->reg[0] = ctx->ax;
@@ -150,21 +178,9 @@ static __always_inline __u64 capture_stack_inner(struct pt_regs* ctx, struct tas
     lanes[1] = FNV64_OFFSET ^ 1;
     lanes[2] = FNV64_OFFSET ^ 2;
     lanes[3] = FNV64_OFFSET ^ 3;
-    __u32 got = 0;
 
     __u8* bytes = (__u8*)slot + sizeof(struct stack_header);
-
-    /* Chunked reads stop at the first unreadable stack region.
-     * Loop bound is checked against stack_copy_budget (a frozen rodata constant)
-     * so every slot access is provably in range. */
-#pragma clang loop unroll(disable)
-    for (__u32 off = 0; off + STACK_COPY_CHUNK <= stack_copy_budget; off += STACK_COPY_CHUNK) {
-        if (bpf_probe_read_user(bytes + off, STACK_COPY_CHUNK, (void*)(PT_REGS_SP(ctx) + off)) !=
-            0) {
-            break;
-        }
-        got = off + STACK_COPY_CHUNK;
-    }
+    __u32 got = copy_user_stack(bytes, PT_REGS_SP(ctx));
 
     if (got == 0) {
         bpf_ringbuf_discard(slot, 0);
@@ -173,16 +189,12 @@ static __always_inline __u64 capture_stack_inner(struct pt_regs* ctx, struct tas
         return 0;
     }
 
-    /* Hash the restored bytes so the hash identifies the real call path. */
+    /* Copy, patch, then hash. The patch can rewrite a word in any copied chunk,
+     * so hashing waits for the whole copy. The hash must cover the
+     * patched bytes: stacks that differ only in the hijacked return slot would
+     * otherwise share a hash, and dedup would drop the second one. */
     restore_uretprobe_return_addresses(bytes, got, PT_REGS_SP(ctx));
-
-#pragma clang loop unroll(disable)
-    for (__u32 off = 0; off + STACK_COPY_CHUNK <= stack_copy_budget; off += STACK_COPY_CHUNK) {
-        if (off >= got) {
-            break;
-        }
-        fnv64_hash_chunk(lanes, (const __u64*)(bytes + off));
-    }
+    hash_stack_bytes(lanes, bytes, got);
 
     __u8 truncated = got >= stack_copy_budget;
     if (truncated) {
