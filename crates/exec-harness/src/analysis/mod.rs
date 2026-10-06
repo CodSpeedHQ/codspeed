@@ -20,7 +20,6 @@ pub fn perform(commands: Vec<BenchmarkCommand>) -> Result<()> {
 
         let mut cmd = Command::new(&benchmark_cmd.command[0]);
         cmd.args(&benchmark_cmd.command[1..]);
-        crate::set_perf_map_env(&mut cmd, crate::MeasurementMode::Memory);
         hooks.start_benchmark().unwrap();
         let status = cmd.status();
         hooks.stop_benchmark().unwrap();
@@ -56,8 +55,6 @@ pub fn perform_with_valgrind(commands: Vec<BenchmarkCommand>) -> Result<()> {
         // Use LD_PRELOAD to inject instrumentation into the child process
         cmd.env("LD_PRELOAD", preload_lib_path);
         cmd.env(constants::URI_ENV, &name_and_uri.uri);
-
-        crate::set_perf_map_env(&mut cmd, crate::MeasurementMode::Simulation);
 
         let mut child = cmd.spawn().context("Failed to spawn command")?;
 

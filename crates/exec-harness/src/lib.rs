@@ -1,31 +1,15 @@
-use clap::ValueEnum;
 use prelude::*;
 use serde::{Deserialize, Serialize};
 use std::io::{self, BufRead};
 
 pub mod analysis;
 pub mod constants;
-pub mod node;
 pub mod prelude;
 mod runtime_env;
 mod uri;
 pub mod walltime;
 
-/// Makes Python and Node.js children emit `/tmp/perf-<pid>.map`, so their
-/// frames can be symbolized. This is usually done by the language integrations.
-pub fn set_perf_map_env(cmd: &mut std::process::Command, mode: MeasurementMode) {
-    cmd.env("PYTHONPERFSUPPORT", "1");
-    node::set_node_options(cmd, mode);
-}
-
-#[derive(ValueEnum, Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum MeasurementMode {
-    Walltime,
-    Memory,
-    #[value(alias = "instrumentation")]
-    Simulation,
-}
+pub use runner_shared::measurement_mode::MeasurementMode;
 
 /// A single benchmark command for stdin mode input.
 ///
@@ -78,17 +62,14 @@ pub fn execute_benchmarks(
     commands: Vec<BenchmarkCommand>,
     measurement_mode: Option<MeasurementMode>,
 ) -> Result<()> {
-    match measurement_mode {
-        Some(MeasurementMode::Walltime) | None => {
-            walltime::perform(commands)?;
-        }
-        Some(MeasurementMode::Memory) => {
-            analysis::perform(commands)?;
-        }
-        Some(MeasurementMode::Simulation) => {
-            analysis::perform_with_valgrind(commands)?;
-        }
-    }
+    let measurement_mode = measurement_mode.unwrap_or(MeasurementMode::Walltime);
+    // SAFETY: exec-harness is single-threaded here. No thread has been spawned
+    // yet and InstrumentHooks is only created later, inside `perform`.
+    unsafe { runtime_env::apply(measurement_mode)? };
 
-    Ok(())
+    match measurement_mode {
+        MeasurementMode::Walltime => walltime::perform(commands),
+        MeasurementMode::Memory => analysis::perform(commands),
+        MeasurementMode::Simulation => analysis::perform_with_valgrind(commands),
+    }
 }
