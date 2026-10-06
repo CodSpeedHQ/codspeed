@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+use crate::config::ProfileLocation;
 use crate::executor::ExecutorName;
 use crate::prelude::*;
 use crate::run_environment::{RepositoryProvider, RunEnvironment};
@@ -31,10 +32,16 @@ pub enum Authentication {
     Oidc(String),
     /// The token the run was given through `--token` / `CODSPEED_TOKEN`.
     RunToken(String),
-    /// A token obtained through `codspeed auth login`: either the one persisted
-    /// for the selected profile, or one passed through `--oauth-token` /
-    /// `CODSPEED_OAUTH_TOKEN`.
+    /// A token obtained through `codspeed auth login` and passed through
+    /// `--oauth-token` / `CODSPEED_OAUTH_TOKEN`.
     CliLogin(String),
+    /// The token `codspeed auth login` persisted for the selected profile. Read
+    /// again before every upload, because a login that ran during the
+    /// benchmarks may have stored a newer token.
+    PersistedCliLogin {
+        token: String,
+        profile: ProfileLocation,
+    },
     /// No token at all. CodSpeed matches the upload to the job by looking for the
     /// run hash the runner prints, which only works for public repositories.
     Tokenless,
@@ -45,7 +52,8 @@ impl Authentication {
         match self {
             Authentication::Oidc(token)
             | Authentication::RunToken(token)
-            | Authentication::CliLogin(token) => Some(token),
+            | Authentication::CliLogin(token)
+            | Authentication::PersistedCliLogin { token, .. } => Some(token),
             Authentication::Tokenless => None,
         }
     }
@@ -55,7 +63,9 @@ impl Authentication {
         match self {
             Authentication::Oidc(_) => format!("OIDC token minted by {run_environment}"),
             Authentication::RunToken(_) => "token from `CODSPEED_TOKEN`".to_owned(),
-            Authentication::CliLogin(_) => "token from `codspeed auth login`".to_owned(),
+            Authentication::CliLogin(_) | Authentication::PersistedCliLogin { .. } => {
+                "token from `codspeed auth login`".to_owned()
+            }
             Authentication::Tokenless => {
                 "tokenless, supported for public repositories only".to_owned()
             }
@@ -93,6 +103,40 @@ impl CodSpeedAPIClient {
     pub fn set_authentication(&mut self, authentication: Authentication) {
         self.gql_client = build_gql_api_client(authentication.token(), self.api_url.clone());
         self.authentication = authentication;
+    }
+
+    /// Read the persisted profile token again and authenticate with it if
+    /// `codspeed auth login` replaced it since the client was built. A no-op
+    /// for the other kinds of authentication.
+    ///
+    /// Never fails: if the profile cannot be read or has no token anymore, the
+    /// token in memory is kept, since it is still the best one we have.
+    pub fn reload_persisted_token(&mut self) {
+        let Authentication::PersistedCliLogin { token, profile } = &self.authentication else {
+            return;
+        };
+        match profile.load_token() {
+            Ok(Some(new_token)) if &new_token != token => {
+                debug!(
+                    "Using the token persisted for profile `{}` since this run started",
+                    profile.profile_name
+                );
+                let profile = profile.clone();
+                self.set_authentication(Authentication::PersistedCliLogin {
+                    token: new_token,
+                    profile,
+                });
+            }
+            Ok(Some(_)) => {}
+            Ok(None) => warn!(
+                "Profile `{}` has no token anymore, keeping the one this run started with",
+                profile.profile_name
+            ),
+            Err(err) => warn!(
+                "Failed to read the token of profile `{}` again, keeping the one this run started with: {err}",
+                profile.profile_name
+            ),
+        }
     }
 }
 
@@ -598,5 +642,85 @@ impl CodSpeedAPIClient {
     #[cfg(test)]
     pub fn create_test_client_with_url(api_url: String) -> Self {
         Self::new(Authentication::Tokenless, api_url)
+    }
+}
+
+#[cfg(test)]
+mod reload_persisted_token_tests {
+    use super::*;
+    use crate::config::{CodSpeedConfig, ConfigOverrides, DEFAULT_PROFILE_NAME};
+    use tempfile::TempDir;
+
+    /// What `codspeed auth login --with-token` does: store `token` in the
+    /// default profile of the config under `XDG_CONFIG_HOME`.
+    fn login(token: Option<&str>) {
+        let mut config =
+            CodSpeedConfig::load_with_profile(None, None, ConfigOverrides::default(), true)
+                .unwrap();
+        config.profile_mut(DEFAULT_PROFILE_NAME).auth.token = token.map(ToOwned::to_owned);
+        config.persist(None).unwrap();
+    }
+
+    fn client_started_with(authentication: Authentication) -> CodSpeedAPIClient {
+        CodSpeedAPIClient::new(authentication, "http://localhost:8000/graphql".to_owned())
+    }
+
+    fn persisted(token: &str) -> Authentication {
+        Authentication::PersistedCliLogin {
+            token: token.to_owned(),
+            profile: ProfileLocation {
+                config_name: None,
+                profile_name: DEFAULT_PROFILE_NAME.to_owned(),
+            },
+        }
+    }
+
+    fn with_isolated_config(test: impl FnOnce()) {
+        let tmp = TempDir::new().unwrap();
+        temp_env::with_var("XDG_CONFIG_HOME", Some(tmp.path()), test);
+    }
+
+    #[test]
+    fn uses_the_token_of_a_login_that_ran_since_the_start() {
+        with_isolated_config(|| {
+            login(Some("token-at-start"));
+            let mut client = client_started_with(persisted("token-at-start"));
+
+            login(Some("token-refreshed-during-the-run"));
+            client.reload_persisted_token();
+
+            assert_eq!(client.token(), Some("token-refreshed-during-the-run"));
+        });
+    }
+
+    #[test]
+    fn keeps_the_token_when_the_profile_has_none_anymore() {
+        with_isolated_config(|| {
+            login(Some("token-at-start"));
+            let mut client = client_started_with(persisted("token-at-start"));
+
+            login(None);
+            client.reload_persisted_token();
+
+            assert_eq!(client.token(), Some("token-at-start"));
+        });
+    }
+
+    #[test]
+    fn leaves_tokens_given_on_the_command_line_alone() {
+        with_isolated_config(|| {
+            login(Some("token-refreshed-during-the-run"));
+            for authentication in [
+                Authentication::CliLogin("oauth-token-flag".to_owned()),
+                Authentication::RunToken("token-flag".to_owned()),
+            ] {
+                let token_at_start = authentication.token().map(ToOwned::to_owned);
+                let mut client = client_started_with(authentication);
+
+                client.reload_persisted_token();
+
+                assert_eq!(client.token(), token_at_start.as_deref());
+            }
+        });
     }
 }

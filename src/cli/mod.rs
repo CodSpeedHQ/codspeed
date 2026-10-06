@@ -17,7 +17,7 @@ use std::path::PathBuf;
 
 use crate::{
     api_client::{Authentication, CodSpeedAPIClient},
-    config::{CodSpeedConfig, ConfigOverrides},
+    config::{CodSpeedConfig, ConfigOverrides, ProfileLocation},
     executor::helpers::command::CommandBuilder,
     local_logger::{CODSPEED_U8_COLOR_CODE, init_local_logger},
     prelude::*,
@@ -251,21 +251,30 @@ fn load_config(cli: &Cli) -> Result<CodSpeedConfig> {
 ///
 /// Priority (most specific first):
 ///   1. `--token` / `CODSPEED_TOKEN`           — run/exec-level override
-///   2. `--oauth-token` / `CODSPEED_OAUTH_TOKEN` and the persisted CLI
-///      token from the selected profile.
+///   2. `--oauth-token` / `CODSPEED_OAUTH_TOKEN`
+///   3. the persisted CLI token from the selected profile, which the
+///      client reads again before every upload
 fn build_api_client(cli: &Cli, config: &CodSpeedConfig) -> CodSpeedAPIClient {
     let run_token = match &cli.command {
         Commands::Run(args) => args.shared.token.clone(),
         Commands::Exec(args) => args.shared.token.clone(),
         _ => None,
     };
-    let authentication = match run_token {
-        Some(token) => Authentication::RunToken(token),
-        None => config
-            .auth
-            .token
-            .clone()
-            .map_or(Authentication::Tokenless, Authentication::CliLogin),
+    let authentication = match (run_token, config.auth.token.clone()) {
+        (Some(token), _) => Authentication::RunToken(token),
+        (None, None) => Authentication::Tokenless,
+        (None, Some(token)) if cli.oauth_token.is_some() => Authentication::CliLogin(token),
+        (None, Some(token)) => {
+            #[allow(deprecated)]
+            let config_name = cli.config_name.clone();
+            Authentication::PersistedCliLogin {
+                token,
+                profile: ProfileLocation {
+                    config_name,
+                    profile_name: config.selected_profile_name().to_owned(),
+                },
+            }
+        }
     };
     CodSpeedAPIClient::new(authentication, config.api_url.clone())
 }
