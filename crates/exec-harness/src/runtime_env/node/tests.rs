@@ -19,7 +19,8 @@ fn write_fake_node(dir: &Path, major: u32) {
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(EXECUTABLE_MODE)).unwrap();
 }
 
-/// Expected flags, following codspeed-node `getV8Flags()`.
+/// Expected flags, following codspeed-node `getV8Flags()`, plus the perf map
+/// in memory mode.
 fn expected_flags(mode: &str, major: u32, v8_log: Option<&str>) -> Vec<String> {
     let mut flags = vec![
         "--interpreted-frames-native-stack".to_owned(),
@@ -64,6 +65,9 @@ fn expected_flags(mode: &str, major: u32, v8_log: Option<&str>) -> Vec<String> {
     );
     if major >= 24 {
         flags.push("--no-maglev".to_owned());
+    }
+    if mode == "memory" {
+        flags.push("--perf-basic-prof".to_owned());
     }
     flags
 }

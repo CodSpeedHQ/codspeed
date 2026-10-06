@@ -12,9 +12,10 @@ const PYTHONPERFSUPPORT: &str = "PYTHONPERFSUPPORT";
 /// - `PYTHONPERFSUPPORT=1`: `/tmp/perf-<pid>.map` so memory flamegraphs can name Python frames.
 pub(super) fn env(mode: MeasurementMode) -> Vec<(&'static str, String)> {
     let perf_jit = mode == MeasurementMode::Walltime && !cfg!(target_os = "macos");
+    let perf_jit_value = if perf_jit { "1" } else { "0" };
     let mut env = vec![
         (PYTHONHASHSEED, "0".to_owned()),
-        (PYTHON_PERF_JIT_SUPPORT, u8::from(perf_jit).to_string()),
+        (PYTHON_PERF_JIT_SUPPORT, perf_jit_value.to_owned()),
     ];
     if mode == MeasurementMode::Memory {
         env.push((PYTHONPERFSUPPORT, "1".to_owned()));

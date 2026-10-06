@@ -98,7 +98,12 @@ flags=(
     --allow-natives-syntax
 )
 case "${CODSPEED_RUNNER_MODE:-walltime}" in
-    instrumentation | simulation | memory) add_analysis_flags ;;
+    instrumentation | simulation) add_analysis_flags ;;
+    memory)
+        add_analysis_flags
+        # Memory flamegraphs name JS frames through /tmp/perf-<pid>.map.
+        flags+=(--perf-basic-prof)
+        ;;
     walltime) add_walltime_flags ;;
     *)
         echo "codspeed: unknown CODSPEED_RUNNER_MODE '${CODSPEED_RUNNER_MODE}'" >&2
