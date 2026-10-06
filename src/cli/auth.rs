@@ -112,8 +112,10 @@ async fn login(
     };
 
     // Validate the token before persisting
-    let api_client_with_token =
-        api_client.with_authentication(Authentication::CliLogin(token.clone()));
+    let api_client_with_token = api_client.with_authentication(Authentication::CliLogin {
+        token: token.clone(),
+        profile: None,
+    });
     api_client_with_token
         .session()
         .await

@@ -32,15 +32,15 @@ pub enum Authentication {
     Oidc(String),
     /// The token the run was given through `--token` / `CODSPEED_TOKEN`.
     RunToken(String),
-    /// A token obtained through `codspeed auth login` and passed through
-    /// `--oauth-token` / `CODSPEED_OAUTH_TOKEN`.
-    CliLogin(String),
-    /// The token `codspeed auth login` persisted for the selected profile. Read
-    /// again before every upload, because a login that ran during the
-    /// benchmarks may have stored a newer token.
-    PersistedCliLogin {
+    /// A token obtained through `codspeed auth login`: either the one persisted
+    /// for the selected profile, or one passed through `--oauth-token` /
+    /// `CODSPEED_OAUTH_TOKEN`.
+    CliLogin {
         token: String,
-        profile: ProfileLocation,
+        /// The profile the token was read from, if any. That token is read
+        /// again before every upload, because a login that ran during the
+        /// benchmarks may have stored a newer one.
+        profile: Option<ProfileLocation>,
     },
     /// No token at all. CodSpeed matches the upload to the job by looking for the
     /// run hash the runner prints, which only works for public repositories.
@@ -52,8 +52,7 @@ impl Authentication {
         match self {
             Authentication::Oidc(token)
             | Authentication::RunToken(token)
-            | Authentication::CliLogin(token)
-            | Authentication::PersistedCliLogin { token, .. } => Some(token),
+            | Authentication::CliLogin { token, .. } => Some(token),
             Authentication::Tokenless => None,
         }
     }
@@ -63,9 +62,7 @@ impl Authentication {
         match self {
             Authentication::Oidc(_) => format!("OIDC token minted by {run_environment}"),
             Authentication::RunToken(_) => "token from `CODSPEED_TOKEN`".to_owned(),
-            Authentication::CliLogin(_) | Authentication::PersistedCliLogin { .. } => {
-                "token from `codspeed auth login`".to_owned()
-            }
+            Authentication::CliLogin { .. } => "token from `codspeed auth login`".to_owned(),
             Authentication::Tokenless => {
                 "tokenless, supported for public repositories only".to_owned()
             }
@@ -112,7 +109,11 @@ impl CodSpeedAPIClient {
     /// Never fails: if the profile cannot be read or has no token anymore, the
     /// token in memory is kept, since it is still the best one we have.
     pub fn reload_persisted_token(&mut self) {
-        let Authentication::PersistedCliLogin { token, profile } = &self.authentication else {
+        let Authentication::CliLogin {
+            token,
+            profile: Some(profile),
+        } = &self.authentication
+        else {
             return;
         };
         match profile.load_token() {
@@ -122,9 +123,9 @@ impl CodSpeedAPIClient {
                     profile.profile_name
                 );
                 let profile = profile.clone();
-                self.set_authentication(Authentication::PersistedCliLogin {
+                self.set_authentication(Authentication::CliLogin {
                     token: new_token,
-                    profile,
+                    profile: Some(profile),
                 });
             }
             Ok(Some(_)) => {}
@@ -666,12 +667,12 @@ mod reload_persisted_token_tests {
     }
 
     fn persisted(token: &str) -> Authentication {
-        Authentication::PersistedCliLogin {
+        Authentication::CliLogin {
             token: token.to_owned(),
-            profile: ProfileLocation {
+            profile: Some(ProfileLocation {
                 config_name: None,
                 profile_name: DEFAULT_PROFILE_NAME.to_owned(),
-            },
+            }),
         }
     }
 
@@ -711,7 +712,10 @@ mod reload_persisted_token_tests {
         with_isolated_config(|| {
             login(Some("token-refreshed-during-the-run"));
             for authentication in [
-                Authentication::CliLogin("oauth-token-flag".to_owned()),
+                Authentication::CliLogin {
+                    token: "oauth-token-flag".to_owned(),
+                    profile: None,
+                },
                 Authentication::RunToken("token-flag".to_owned()),
             ] {
                 let token_at_start = authentication.token().map(ToOwned::to_owned);

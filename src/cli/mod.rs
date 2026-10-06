@@ -263,17 +263,14 @@ fn build_api_client(cli: &Cli, config: &CodSpeedConfig) -> CodSpeedAPIClient {
     let authentication = match (run_token, config.auth.token.clone()) {
         (Some(token), _) => Authentication::RunToken(token),
         (None, None) => Authentication::Tokenless,
-        (None, Some(token)) if cli.oauth_token.is_some() => Authentication::CliLogin(token),
         (None, Some(token)) => {
             #[allow(deprecated)]
             let config_name = cli.config_name.clone();
-            Authentication::PersistedCliLogin {
-                token,
-                profile: ProfileLocation {
-                    config_name,
-                    profile_name: config.selected_profile_name().to_owned(),
-                },
-            }
+            let profile = cli.oauth_token.is_none().then(|| ProfileLocation {
+                config_name,
+                profile_name: config.selected_profile_name().to_owned(),
+            });
+            Authentication::CliLogin { token, profile }
         }
     };
     CodSpeedAPIClient::new(authentication, config.api_url.clone())
