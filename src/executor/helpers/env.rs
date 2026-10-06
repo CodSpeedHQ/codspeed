@@ -2,6 +2,7 @@ use crate::executor::ExecutorConfig;
 use crate::executor::helpers::{introspected_golang, introspected_nodejs};
 use crate::prelude::*;
 use crate::runner_mode::RunnerMode;
+use runner_shared::measurement_mode::MeasurementMode;
 use std::{collections::HashMap, env::consts::ARCH, path::Path};
 
 pub fn get_base_injected_env(
@@ -9,56 +10,19 @@ pub fn get_base_injected_env(
     profile_folder: &Path,
     config: &ExecutorConfig,
 ) -> HashMap<String, String> {
-    let runner_mode_internal_env_value = match mode {
-        // While the runner now deprecates the usage of instrumentation with a message, we
-        // internally still use instrumentation temporarily to give time to users to upgrade their
-        // integrations to a version that accepts both instrumentation and simulation.
-        // TODO: Remove Instrumentation mode completely in the next major release, and set this
-        // value to simulation instead.
-        #[allow(deprecated)]
-        RunnerMode::Instrumentation | RunnerMode::Simulation => "instrumentation",
-        RunnerMode::Walltime => "walltime",
-        #[cfg(target_os = "linux")]
-        RunnerMode::Memory => "memory",
-    };
     let mut env = HashMap::from([
-        ("PYTHONHASHSEED".into(), "0".into()),
-        (
-            "PYTHON_PERF_JIT_SUPPORT".into(),
-            // FIXME(COD-2645): Keep this disabled on macOS. Enabling it causes
-            // many unresolved addresses on the stack when profiling with samply.
-            if mode == RunnerMode::Walltime && !cfg!(target_os = "macos") {
-                "1".into()
-            } else {
-                "0".into()
-            },
-        ),
         ("ARCH".into(), ARCH.into()),
         ("CODSPEED_ENV".into(), "runner".into()),
-        (
-            "CODSPEED_RUNNER_MODE".into(),
-            runner_mode_internal_env_value.into(),
-        ),
         (
             "CODSPEED_PROFILE_FOLDER".into(),
             profile_folder.to_string_lossy().to_string(),
         ),
     ]);
-
-    // Java: Enable frame pointers and perf map generation for flamegraph profiling.
-    // - UnlockDiagnosticVMOptions must come before DumpPerfMapAtExit (diagnostic option).
-    // - PreserveFramePointer: Preserves frame pointers for profiling.
-    // - DumpPerfMapAtExit: Writes /tmp/perf-<pid>.map on JVM exit for symbol resolution.
-    // - DebugNonSafepoints: Enables debug info for JIT-compiled non-safepoint code.
-    // - EnableDynamicAgentLoading: Suppresses warning when loading JVMTI agents at runtime.
-    // - jdk.attach.allowAttachSelf: Allows the JVM to attach a JVMTI agent to itself
-    //   (used by codspeed-jvm's perf-map agent for @Fork(0) benchmarks).
-    if mode == RunnerMode::Walltime {
-        env.insert(
-            "JAVA_TOOL_OPTIONS".into(),
-            "-XX:+PreserveFramePointer -XX:+UnlockDiagnosticVMOptions -XX:+DebugNonSafepoints -XX:+EnableDynamicAgentLoading -Djdk.attach.allowAttachSelf=true".into(),
-        );
-    }
+    env.extend(
+        runner_shared::runtime_env::env(MeasurementMode::from(&mode))
+            .into_iter()
+            .map(|(key, value)| (key.to_owned(), value)),
+    );
 
     if let Some(version) = &config.go_runner_version {
         env.insert("CODSPEED_GO_RUNNER_VERSION".into(), version.to_string());

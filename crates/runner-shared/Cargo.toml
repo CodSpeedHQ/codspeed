@@ -10,6 +10,7 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(codspeed)'] }
 
 [dependencies]
 anyhow = { workspace = true }
+clap = { workspace = true }
 serde = { workspace = true }
 serde_bytes = "0.11"
 serde_json = { workspace = true }

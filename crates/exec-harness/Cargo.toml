@@ -22,6 +22,9 @@ runner-shared = { path = "../runner-shared" }
 tempfile = { workspace = true }
 object = { workspace = true }
 
+[dev-dependencies]
+rstest = { workspace = true }
+
 [build-dependencies]
 cc = "1"
 

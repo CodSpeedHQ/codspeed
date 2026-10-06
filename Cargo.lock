@@ -1178,6 +1178,7 @@ dependencies = [
  "instrument-hooks-bindings",
  "log",
  "object",
+ "rstest",
  "runner-shared",
  "serde",
  "serde_json",
@@ -3644,6 +3645,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bincode",
+ "clap",
  "codspeed-divan-compat",
  "itertools 0.14.0",
  "libc",

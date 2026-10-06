@@ -15,6 +15,18 @@ pub enum RunnerMode {
     Memory,
 }
 
+impl From<&RunnerMode> for runner_shared::measurement_mode::MeasurementMode {
+    fn from(mode: &RunnerMode) -> Self {
+        match mode {
+            #[allow(deprecated)]
+            RunnerMode::Instrumentation | RunnerMode::Simulation => Self::Simulation,
+            RunnerMode::Walltime => Self::Walltime,
+            #[cfg(target_os = "linux")]
+            RunnerMode::Memory => Self::Memory,
+        }
+    }
+}
+
 /// Register the active runner mode(s) for the current shell session.
 pub(crate) fn register_shell_session_mode(modes: &[RunnerMode]) -> Result<()> {
     shell_session_store::register(SessionKind::Mode, &modes.to_vec())
