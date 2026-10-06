@@ -729,6 +729,7 @@ dependencies = [
  "md5",
  "memmap2",
  "memtrack",
+ "mimalloc",
  "nestify",
  "nix 0.31.3",
  "object",
