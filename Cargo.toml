@@ -77,6 +77,7 @@ uuid = { version = "1.23.1", features = ["v4"] }
 which = "8.0.2"
 crc32fast = "1.5.0"
 samply = { path = "crates/samply-codspeed/samply" }
+mimalloc = "0.1"
 
 # Memory profiling (memtrack) and the capability handling around it are Linux-only.
 [target.'cfg(target_os = "linux")'.dependencies]

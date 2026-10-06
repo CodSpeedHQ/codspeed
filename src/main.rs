@@ -1,3 +1,6 @@
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use codspeed_runner::{clean_logger, cli};
 use console::style;
 use log::log_enabled;
