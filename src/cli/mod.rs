@@ -125,14 +125,11 @@ pub(crate) enum InternalCommands {
 /// Test-only override for the executable internal subcommands re-exec: under
 /// `cargo test` [`std::env::current_exe`] is the test harness.
 ///
-/// `cfg(test)` because this path goes to `sudo setcap <caps>+ep`.
+/// `cfg(test)` because a copy of this path gets `sudo setcap <caps>+ep`.
 #[cfg(test)]
 pub(crate) const SELF_EXE_ENV_VAR: &str = "CODSPEED_SELF_EXE";
 
 /// The executable that internal subcommands are re-invoked through.
-///
-/// The memory executor `setcap`s this exact path before running it, and `setcap`
-/// on a path that is not the one later exec'd succeeds while changing nothing.
 pub(crate) fn self_exe() -> Result<PathBuf> {
     #[cfg(test)]
     if let Some(path) = std::env::var_os(SELF_EXE_ENV_VAR) {
@@ -146,7 +143,12 @@ impl InternalCommands {
     /// Build a [`CommandBuilder`] that re-execs the current binary into this
     /// internal subcommand. Each variant owns its own arg layout.
     pub fn get_command_builder(&self) -> Result<CommandBuilder> {
-        let mut builder = CommandBuilder::new(self_exe()?);
+        Ok(self.command_builder_for(self_exe()?))
+    }
+
+    /// Same as [`Self::get_command_builder`], re-executing `program` instead.
+    pub fn command_builder_for(&self, program: PathBuf) -> CommandBuilder {
+        let mut builder = CommandBuilder::new(program);
         match self {
             InternalCommands::Samply(args) => {
                 builder.arg("samply");
@@ -162,7 +164,7 @@ impl InternalCommands {
                 builder.args(args.args.iter().cloned());
             }
         }
-        Ok(builder)
+        builder
     }
 
     pub fn get_shell_command(&self) -> Result<String> {

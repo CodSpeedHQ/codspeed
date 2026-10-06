@@ -229,9 +229,12 @@ jobs:
 
       # The benchmarked command is memtrack, a subcommand of the runner binary,
       # which needs file capabilities to load its eBPF programs even though the
-      # runner measures walltime.
+      # runner measures walltime. The capabilities land on a copy of the runner,
+      # which the benchmarks call as `codspeed-memtrack`.
       - name: Grant memtrack file capabilities
-        run: codspeed setup --mode memory
+        run: |
+          codspeed setup --mode memory
+          sudo ln -s "$(codspeed setup memtrack-path)" /usr/local/bin/codspeed-memtrack
 
       # The write benchmarks overwrite these files every round; creating them
       # inside a measured round would time one-off disk allocation.
