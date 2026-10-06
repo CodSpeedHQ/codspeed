@@ -270,8 +270,11 @@ impl Orchestrator {
 
         let total_runs = completed_runs.len();
         for (run_part_index, (ctx, executor_name)) in completed_runs.iter_mut().enumerate() {
-            // OIDC tokens can expire quickly, so refresh just before each upload
+            // Tokens can expire during a long run, so refresh just before each upload:
+            // mint a new OIDC token, or pick up the one `codspeed auth login` persisted
+            // since the run started
             self.provider.set_oidc_token(api_client).await?;
+            api_client.reload_persisted_token();
 
             if run_part_index == 0 {
                 // After the mint, so this names the token the upload actually uses

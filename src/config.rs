@@ -92,6 +92,25 @@ pub struct ConfigOverrides<'a> {
     pub upload_url: Option<&'a str>,
 }
 
+/// Where a profile lives on disk: enough to read its token again later.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProfileLocation {
+    pub config_name: Option<String>,
+    pub profile_name: String,
+}
+
+impl ProfileLocation {
+    pub fn load_token(&self) -> Result<Option<String>> {
+        let config = CodSpeedConfig::load_with_profile(
+            self.config_name.as_deref(),
+            Some(&self.profile_name),
+            ConfigOverrides::default(),
+            false,
+        )?;
+        Ok(config.auth.token)
+    }
+}
+
 /// Configuration as seen at runtime: the persisted state plus the
 /// resolved auth/URLs/profile selected for this invocation.
 ///
@@ -459,48 +478,53 @@ profiles:
     #[test]
     fn load_rewrites_legacy_file_in_canonical_form() {
         let tmp = TempDir::new().unwrap();
-        // SAFETY: tests run single-threaded by default but env mutations
-        // affect the whole process; this test does not parallelise with
-        // others that mutate XDG_CONFIG_HOME.
-        unsafe {
-            env::set_var("XDG_CONFIG_HOME", tmp.path());
-        }
-
-        let config_dir = tmp.path().join("codspeed");
-        fs::create_dir_all(&config_dir).unwrap();
-        let config_path = config_dir.join("config.yaml");
-        fs::write(
-            &config_path,
-            "auth:\n  token: legacy-token\nprofiles:\n  staging: {}\n",
-        )
-        .unwrap();
-
-        CodSpeedConfig::load_with_profile(None, Some("staging"), ConfigOverrides::default(), false)
+        temp_env::with_var("XDG_CONFIG_HOME", Some(tmp.path()), || {
+            let config_dir = tmp.path().join("codspeed");
+            fs::create_dir_all(&config_dir).unwrap();
+            let config_path = config_dir.join("config.yaml");
+            fs::write(
+                &config_path,
+                "auth:\n  token: legacy-token\nprofiles:\n  staging: {}\n",
+            )
             .unwrap();
 
-        let on_disk = fs::read_to_string(&config_path).unwrap();
-        assert!(
-            on_disk.starts_with("version: 1\n"),
-            "expected version preamble, got:\n{on_disk}"
-        );
-        // top-level legacy auth: gone (only profile-level auth: remains)
-        assert!(
-            !on_disk.contains("\nauth:\n"),
-            "legacy top-level auth should be gone, got:\n{on_disk}"
-        );
-        assert!(
-            on_disk.contains("legacy-token"),
-            "token should be migrated into profiles.default, got:\n{on_disk}"
-        );
-
-        // second load is a no-op on disk
-        let mtime_before = fs::metadata(&config_path).unwrap().modified().unwrap();
-        CodSpeedConfig::load_with_profile(None, Some("staging"), ConfigOverrides::default(), false)
+            CodSpeedConfig::load_with_profile(
+                None,
+                Some("staging"),
+                ConfigOverrides::default(),
+                false,
+            )
             .unwrap();
-        let mtime_after = fs::metadata(&config_path).unwrap().modified().unwrap();
-        assert_eq!(
-            mtime_before, mtime_after,
-            "canonical file should not be rewritten"
-        );
+
+            let on_disk = fs::read_to_string(&config_path).unwrap();
+            assert!(
+                on_disk.starts_with("version: 1\n"),
+                "expected version preamble, got:\n{on_disk}"
+            );
+            // top-level legacy auth: gone (only profile-level auth: remains)
+            assert!(
+                !on_disk.contains("\nauth:\n"),
+                "legacy top-level auth should be gone, got:\n{on_disk}"
+            );
+            assert!(
+                on_disk.contains("legacy-token"),
+                "token should be migrated into profiles.default, got:\n{on_disk}"
+            );
+
+            // second load is a no-op on disk
+            let mtime_before = fs::metadata(&config_path).unwrap().modified().unwrap();
+            CodSpeedConfig::load_with_profile(
+                None,
+                Some("staging"),
+                ConfigOverrides::default(),
+                false,
+            )
+            .unwrap();
+            let mtime_after = fs::metadata(&config_path).unwrap().modified().unwrap();
+            assert_eq!(
+                mtime_before, mtime_after,
+                "canonical file should not be rewritten"
+            );
+        });
     }
 }
