@@ -31,11 +31,20 @@ pub struct SetupArgs {
 enum SetupCommands {
     /// Show the installation status of CodSpeed tools
     Status,
+    /// Print the path of the binary that holds memtrack's capabilities
+    #[cfg(target_os = "linux")]
+    #[command(hide = true)]
+    MemtrackPath,
 }
 
 pub async fn run(args: SetupArgs, setup_cache_dir: Option<&Path>) -> Result<()> {
     match args.command {
         Some(SetupCommands::Status) => status(&args.mode),
+        #[cfg(target_os = "linux")]
+        Some(SetupCommands::MemtrackPath) => {
+            println!("{}", crate::executor::memtrack_path()?.display());
+            Ok(())
+        }
         None => setup(&args.mode, setup_cache_dir).await,
     }
 }
