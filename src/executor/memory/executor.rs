@@ -33,7 +33,7 @@ use std::rc::Rc;
 use tempfile::NamedTempFile;
 use tokio::time::{Duration, timeout};
 
-use super::setup::{ensure_memtrack_capabilities, has_memtrack_capabilities};
+use super::setup::{ensure_memtrack_capabilities, has_memtrack_capabilities, memtrack_program};
 
 pub struct MemoryExecutor;
 
@@ -61,8 +61,8 @@ impl MemoryExecutor {
         let bench_command = get_bench_command(&execution_context.config)?;
         let (bench_command, env_file) = prefix_command_with_env(&bench_command, &extra_env)?;
 
-        let mut cmd_builder =
-            InternalCommands::Memtrack(MemtrackArgs { args: vec![] }).get_command_builder()?;
+        let mut cmd_builder = InternalCommands::Memtrack(MemtrackArgs { args: vec![] })
+            .command_builder_for(memtrack_program()?);
         if execution_context.config.memory_track_physical {
             cmd_builder.env("CODSPEED_MEMTRACK_TRACK_PHYSICAL", "1");
         }

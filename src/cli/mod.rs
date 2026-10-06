@@ -146,7 +146,12 @@ impl InternalCommands {
     /// Build a [`CommandBuilder`] that re-execs the current binary into this
     /// internal subcommand. Each variant owns its own arg layout.
     pub fn get_command_builder(&self) -> Result<CommandBuilder> {
-        let mut builder = CommandBuilder::new(self_exe()?);
+        Ok(self.command_builder_for(self_exe()?))
+    }
+
+    /// Same as [`Self::get_command_builder`], re-executing `program` instead.
+    pub fn command_builder_for(&self, program: PathBuf) -> CommandBuilder {
+        let mut builder = CommandBuilder::new(program);
         match self {
             InternalCommands::Samply(args) => {
                 builder.arg("samply");
@@ -162,7 +167,7 @@ impl InternalCommands {
                 builder.args(args.args.iter().cloned());
             }
         }
-        Ok(builder)
+        builder
     }
 
     pub fn get_shell_command(&self) -> Result<String> {

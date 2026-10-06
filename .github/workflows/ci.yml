@@ -229,9 +229,10 @@ jobs:
 
       # The benchmarked command is memtrack, a subcommand of the runner binary,
       # which needs file capabilities to load its eBPF programs even though the
-      # runner measures walltime.
+      # runner measures walltime. `setup --mode memory` would grant them to a
+      # private copy, not to the binary the benchmarks call.
       - name: Grant memtrack file capabilities
-        run: codspeed setup --mode memory
+        run: sudo setcap cap_dac_read_search,cap_sys_admin,cap_perfmon,cap_bpf,cap_sys_resource+ep "$(which codspeed)"
 
       # The write benchmarks overwrite these files every round; creating them
       # inside a measured round would time one-off disk allocation.
