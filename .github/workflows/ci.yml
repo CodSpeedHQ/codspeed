@@ -5,6 +5,11 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Cancel in progress runs if a new one is queued everywhere but on pushes and workflow dispatch events
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
+
 jobs:
   lint:
     runs-on: ${{ matrix.os }}
