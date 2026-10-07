@@ -15,12 +15,14 @@ fn extract_pid_from_profile_file(path: &Path) -> Option<libc::pid_t> {
     }
 }
 
-pub async fn harvest_perf_maps(profile_folder: &Path) -> Result<()> {
+pub async fn harvest_perf_maps(profile_folder: &Path) -> Result<HashSet<libc::pid_t>> {
     let pids = fs::read_dir(profile_folder)?
         .filter_map(|entry| entry.ok())
         .map(|entry| entry.path())
         .filter_map(|path| extract_pid_from_profile_file(&path))
         .collect::<HashSet<_>>();
 
-    harvest_perf_maps_for_pids(profile_folder, &pids).await
+    harvest_perf_maps_for_pids(profile_folder, &pids).await?;
+
+    Ok(pids)
 }
