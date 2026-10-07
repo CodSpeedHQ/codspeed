@@ -51,6 +51,9 @@ jobs:
           tool: just
       # No cache for now here, but we could cache either docker volumes or mounted host directories to cache build artifacts
       - run: just test-integ
+        # Runs against an unreleased valgrind-codspeed branch, tag or full commit SHA
+        # env:
+        #   CODSPEED_VALGRIND_REF: my-valgrind-branch
 
   exec-harness-tests:
     runs-on: ubuntu-latest
