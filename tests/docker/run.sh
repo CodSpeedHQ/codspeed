@@ -5,12 +5,39 @@
 # Without arguments the suite is sharded over containers, CODSPEED_TEST_SHARDS (default 4)
 # each for walltime and memory; each container has its own /tmp for the runner FIFO.
 # memtrack's uprobes are system-wide and break Valgrind, so memory starts after simulation.
+#
+# CODSPEED_VALGRIND_REF=<branch, tag or full commit sha> runs the suite against that
+# valgrind-codspeed instead of the pinned release.
 set -euo pipefail
 
 repo=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 image=codspeed-executor-tests
 rust_version=$(sed -n 's/.*channel = "\(.*\)".*/\1/p' "$repo/rust-toolchain.toml")
 rust_components=$(sed -n 's/.*components = \[\(.*\)\].*/\1/p' "$repo/rust-toolchain.toml" | tr -d '" ')
+
+resolve_valgrind_ref() {
+  local ref=$1 refs name commit
+  if [[ $ref =~ ^[0-9a-f]{40}$ ]]; then
+    echo "$ref"
+    return
+  fi
+  refs=$(git ls-remote https://github.com/CodSpeedHQ/valgrind-codspeed.git \
+    "refs/heads/$ref" "refs/tags/$ref" "refs/tags/$ref^{}")
+  # A branch wins over a tag, and an annotated tag resolves to the commit it peels to.
+  for name in "refs/heads/$ref" "refs/tags/$ref^{}" "refs/tags/$ref"; do
+    if commit=$(awk -v name="$name" '$2 == name { print $1; found = 1 } END { exit !found }' <<<"$refs"); then
+      echo "$commit"
+      return
+    fi
+  done
+  echo "No valgrind-codspeed branch or tag named '$ref' (commits need their full sha)" >&2
+  exit 1
+}
+
+valgrind_commit=
+if [ -n "${CODSPEED_VALGRIND_REF:-}" ]; then
+  valgrind_commit=$(resolve_valgrind_ref "$CODSPEED_VALGRIND_REF")
+fi
 
 docker build -q -t "$image" --build-arg RUST_VERSION="$rust_version" \
   --build-arg RUST_COMPONENTS="$rust_components" \
@@ -42,14 +69,17 @@ in_container "${cargo_test[@]}" --no-run
 # Bakes what `codspeed setup` installs (Valgrind, memtrack) into an image, so test containers
 # don't reinstall it. The tag hashes the build inputs because the base image id changes on
 # every build. A stale image only costs time: tests still run setup, a no-op once the pins match.
-inputs_hash=$(cat "$repo/tests/docker/Dockerfile" "$repo/rust-toolchain.toml" \
-  "$repo/src/binary_pins.rs" | sha256sum | cut -c1-12)
+inputs_hash=$({
+  cat "$repo/tests/docker/Dockerfile" "$repo/tests/docker/setup.sh" "$repo/rust-toolchain.toml" \
+    "$repo/src/binary_pins.rs"
+  printf %s "$valgrind_commit"
+} | sha256sum | cut -c1-12)
 run_image=$image:setup-$inputs_hash
 if ! docker image inspect "$run_image" >/dev/null 2>&1; then
   setup_container=$image-setup
   docker rm -f "$setup_container" >/dev/null 2>&1 || true
   docker run --name "$setup_container" "${docker_flags[@]}" "$image" \
-    /home/tester/target/debug/codspeed setup
+    tests/docker/setup.sh /home/tester/target/debug/codspeed $valgrind_commit
   docker commit "$setup_container" "$run_image" >/dev/null
   docker rm "$setup_container" >/dev/null
   docker images --filter "reference=$image:setup-*" --format '{{.Repository}}:{{.Tag}}' \
