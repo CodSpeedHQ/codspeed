@@ -1,5 +1,6 @@
 use crate::api_client::{
-    CompareRunsBenchmarkResult, FetchLocalRunBenchmarkResult, ResultComparisonCategory,
+    BenchmarkReportStatus, CompareRunsBenchmarkResult, FetchLocalRunBenchmarkResult,
+    ResultComparisonCategory,
 };
 use crate::cli::run::helpers;
 use crate::executor::ExecutorName;
@@ -391,6 +392,9 @@ pub fn build_comparison_table(results: &[CompareRunsBenchmarkResult]) -> String 
                     };
 
                     let status_str = match &result.category {
+                        _ if result.status == BenchmarkReportStatus::Missing => {
+                            format!("{}", style("Dropped").yellow().bold())
+                        }
                         ResultComparisonCategory::New => {
                             format!("{}", style("New").cyan().bold())
                         }
@@ -431,7 +435,8 @@ pub fn build_comparison_table(results: &[CompareRunsBenchmarkResult]) -> String 
 mod tests {
     use super::*;
     use crate::api_client::{
-        FetchLocalRunBenchmark, MemoryResult, TimeDistribution, ValgrindResult, WallTimeResult,
+        CompareRunsBenchmark, FetchLocalRunBenchmark, MemoryResult, TimeDistribution,
+        ValgrindResult, WallTimeResult,
     };
 
     #[test]
@@ -541,6 +546,41 @@ mod tests {
         let table = build_benchmark_table(&results);
 
         // Strip ANSI codes for readable snapshot
+        let table = console::strip_ansi_codes(&table).to_string();
+        insta::assert_snapshot!(table);
+    }
+
+    #[test]
+    fn test_comparison_table_shows_dropped_benchmarks() {
+        let results = vec![
+            CompareRunsBenchmarkResult {
+                value: Some(0.0015),
+                base_value: Some(0.001),
+                change: Some(-0.333),
+                category: ResultComparisonCategory::Regression,
+                status: BenchmarkReportStatus::Regression,
+                benchmark: CompareRunsBenchmark {
+                    name: "bench_parse".to_string(),
+                    executor: ExecutorName::Valgrind,
+                },
+                result: None,
+            },
+            CompareRunsBenchmarkResult {
+                value: None,
+                base_value: Some(0.002),
+                change: None,
+                category: ResultComparisonCategory::Regression,
+                status: BenchmarkReportStatus::Missing,
+                benchmark: CompareRunsBenchmark {
+                    name: "bench_serialize".to_string(),
+                    executor: ExecutorName::Valgrind,
+                },
+                result: None,
+            },
+        ];
+
+        let table = build_comparison_table(&results);
+
         let table = console::strip_ansi_codes(&table).to_string();
         insta::assert_snapshot!(table);
     }
