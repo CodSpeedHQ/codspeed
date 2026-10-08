@@ -9,6 +9,9 @@
 # CODSPEED_VALGRIND_REF=<branch, tag or full commit sha> runs the suite against that
 # valgrind-codspeed instead of the pinned release.
 #
+# CODSPEED_VALGRIND_DEB=<path to a valgrind-codspeed .deb> runs the suite against that
+# package instead of the pinned release.
+#
 # CODSPEED_TEST_BASE_IMAGE=<image> (default ubuntu:24.04) runs the suite on that base image.
 # Each base image gets its own images and target volume: binaries built against one glibc
 # don't run on an older one.
@@ -42,9 +45,21 @@ resolve_valgrind_ref() {
   exit 1
 }
 
-valgrind_commit=
+if [ -n "${CODSPEED_VALGRIND_REF:-}" ] && [ -n "${CODSPEED_VALGRIND_DEB:-}" ]; then
+  echo "Set CODSPEED_VALGRIND_REF or CODSPEED_VALGRIND_DEB, not both" >&2
+  exit 1
+fi
+
+# Arguments of setup.sh selecting the valgrind-codspeed to install, and the docker flags
+# that setup needs for it.
+valgrind_source=()
+setup_flags=()
 if [ -n "${CODSPEED_VALGRIND_REF:-}" ]; then
-  valgrind_commit=$(resolve_valgrind_ref "$CODSPEED_VALGRIND_REF")
+  valgrind_source=(commit "$(resolve_valgrind_ref "$CODSPEED_VALGRIND_REF")")
+elif [ -n "${CODSPEED_VALGRIND_DEB:-}" ]; then
+  deb=$(realpath -e "$CODSPEED_VALGRIND_DEB")
+  valgrind_source=(deb /tmp/valgrind-codspeed.deb)
+  setup_flags=(-v "$deb":/tmp/valgrind-codspeed.deb:ro)
 fi
 
 docker build -q -t "$image:$flavor" --build-arg BASE_IMAGE="$base_image" \
@@ -82,14 +97,17 @@ in_container "${cargo_test[@]}" --no-run
 inputs_hash=$({
   cat "$repo/tests/docker/Dockerfile" "$repo/tests/docker/setup.sh" "$repo/rust-toolchain.toml" \
     "$repo/src/binary_pins.rs"
-  printf %s "$base_image $valgrind_commit"
+  printf %s "$base_image ${valgrind_source[*]}"
+  if [ -n "${deb:-}" ]; then
+    cat "$deb"
+  fi
 } | sha256sum | cut -c1-12)
 run_image=$image:$flavor-setup-$inputs_hash
 if ! docker image inspect "$run_image" >/dev/null 2>&1; then
   setup_container=$image-setup-$flavor
   docker rm -f "$setup_container" >/dev/null 2>&1 || true
-  docker run --name "$setup_container" "${docker_flags[@]}" "$image:$flavor" \
-    tests/docker/setup.sh /home/tester/target/debug/codspeed $valgrind_commit
+  docker run --name "$setup_container" "${docker_flags[@]}" "${setup_flags[@]}" "$image:$flavor" \
+    tests/docker/setup.sh /home/tester/target/debug/codspeed "${valgrind_source[@]}"
   docker commit "$setup_container" "$run_image" >/dev/null
   docker rm "$setup_container" >/dev/null
   docker images --filter "reference=$image:$flavor-setup-*" --format '{{.Repository}}:{{.Tag}}' \
