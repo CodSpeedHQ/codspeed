@@ -344,7 +344,7 @@ mod tests {
         };
         assert_snapshot!(
             get_codspeed_valgrind_binary(&system_info).unwrap().url(),
-            @"https://github.com/CodSpeedHQ/valgrind-codspeed/releases/download/3.26.0-0codspeed7/valgrind_3.26.0-0codspeed7_ubuntu-22.04_amd64.deb"
+            @"https://github.com/CodSpeedHQ/valgrind-codspeed/releases/download/3.26.0-0codspeed8/valgrind_3.26.0-0codspeed8_ubuntu-22.04_amd64.deb"
         );
     }
 
@@ -359,7 +359,7 @@ mod tests {
         };
         assert_snapshot!(
             get_codspeed_valgrind_binary(&system_info).unwrap().url(),
-            @"https://github.com/CodSpeedHQ/valgrind-codspeed/releases/download/3.26.0-0codspeed7/valgrind_3.26.0-0codspeed7_ubuntu-24.04_amd64.deb"
+            @"https://github.com/CodSpeedHQ/valgrind-codspeed/releases/download/3.26.0-0codspeed8/valgrind_3.26.0-0codspeed8_ubuntu-24.04_amd64.deb"
         );
     }
 
@@ -374,7 +374,7 @@ mod tests {
         };
         assert_snapshot!(
             get_codspeed_valgrind_binary(&system_info).unwrap().url(),
-            @"https://github.com/CodSpeedHQ/valgrind-codspeed/releases/download/3.26.0-0codspeed7/valgrind_3.26.0-0codspeed7_ubuntu-22.04_amd64.deb"
+            @"https://github.com/CodSpeedHQ/valgrind-codspeed/releases/download/3.26.0-0codspeed8/valgrind_3.26.0-0codspeed8_ubuntu-22.04_amd64.deb"
         );
     }
 
@@ -389,7 +389,7 @@ mod tests {
         };
         assert_snapshot!(
             get_codspeed_valgrind_binary(&system_info).unwrap().url(),
-            @"https://github.com/CodSpeedHQ/valgrind-codspeed/releases/download/3.26.0-0codspeed7/valgrind_3.26.0-0codspeed7_ubuntu-22.04_arm64.deb"
+            @"https://github.com/CodSpeedHQ/valgrind-codspeed/releases/download/3.26.0-0codspeed8/valgrind_3.26.0-0codspeed8_ubuntu-22.04_arm64.deb"
         );
     }
 
