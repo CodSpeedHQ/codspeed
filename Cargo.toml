@@ -1,6 +1,6 @@
 [package]
 name = "codspeed-runner"
-version = "5.4.0"
+version.workspace = true
 edition = "2024"
 repository = "https://github.com/CodSpeedHQ/codspeed"
 publish = false
@@ -95,6 +95,9 @@ shell-quote = "0.7.2"
 assert_cmd = "2.2"
 predicates = "3.1.4"
 strum = { version = "0.28.0", features = ["derive"] }
+
+[workspace.package]
+version = "5.4.0"
 
 [workspace]
 members = [

@@ -1,6 +1,6 @@
 [package]
 name = "memtrack"
-version = "1.6.0"
+version.workspace = true
 edition = "2024"
 repository = "https://github.com/CodSpeedHQ/codspeed"
 publish = false
@@ -53,3 +53,7 @@ rstest = { workspace = true }
 test-log = { workspace = true }
 insta = { workspace = true, features = ["json", "redactions"] }
 test-with = { workspace = true }
+
+# Bundled in the runner binary, not released on its own.
+[package.metadata.dist]
+dist = false
