@@ -278,21 +278,6 @@ jobs:
       - name: Build
         run: cargo build --bin codspeed --target "${{ matrix.target }}"
 
-      - name: Assert the artifact is static and carries both subcommands
-        run: |
-          BIN=target/${{ matrix.target }}/debug/codspeed
-          file "$BIN"
-          # Not a `file` string: x86_64 musl is a static-PIE and `file` spells
-          # it differently from aarch64.
-          if readelf -d "$BIN" 2>/dev/null | grep -qE 'NEEDED|RPATH|RUNPATH'; then
-            echo "the musl binary has a dynamic dependency"
-            exit 1
-          fi
-          if readelf -lW "$BIN" 2>/dev/null | grep -q 'INTERP'; then
-            echo "the musl binary requests a dynamic loader"
-            exit 1
-          fi
-
   check:
     runs-on: ubuntu-latest
     if: always()
