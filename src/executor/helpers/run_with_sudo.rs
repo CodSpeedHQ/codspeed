@@ -1,7 +1,7 @@
 use crate::executor::helpers::command::CommandBuilder;
 use crate::{local_logger::suspend_progress_bar, prelude::*};
 use std::{
-    ffi::OsStr,
+    ffi::{OsStr, OsString},
     io::IsTerminal,
     process::{Command, Stdio},
 };
@@ -81,6 +81,23 @@ fn validate_sudo_access() -> Result<()> {
     Ok(())
 }
 
+/// Build a `--preserve-env=<names>` argument forwarding both this process's environment
+/// and the variables set on `cmd_builder`. The names are listed explicitly because
+/// sudo-rs ignores a bare `--preserve-env`.
+fn preserve_env_arg(cmd_builder: &CommandBuilder) -> OsString {
+    let process_env_names = std::env::vars_os().map(|(name, _value)| name);
+    let builder_env_names = cmd_builder.env_names().map(OsStr::to_owned);
+
+    let mut arg = OsString::from("--preserve-env=");
+    for (index, name) in process_env_names.chain(builder_env_names).enumerate() {
+        if index > 0 {
+            arg.push(",");
+        }
+        arg.push(name);
+    }
+    arg
+}
+
 /// Wrap with sudo if not running as root
 pub fn wrap_with_sudo(mut cmd_builder: CommandBuilder) -> Result<CommandBuilder> {
     if is_root_user() {
@@ -88,13 +105,13 @@ pub fn wrap_with_sudo(mut cmd_builder: CommandBuilder) -> Result<CommandBuilder>
     } else if is_sudo_available() {
         debug!("Wrapping with sudo: {}", cmd_builder.as_command_line());
         validate_sudo_access()?;
+
         cmd_builder.wrap(
             "sudo",
             [
                 // Password prompt should not appear here since it has already been validated
-                "--non-interactive",
-                // Forward all environment variables to the command
-                "--preserve-env",
+                OsStr::new("--non-interactive"),
+                &preserve_env_arg(&cmd_builder),
             ],
         );
         Ok(cmd_builder)
@@ -129,4 +146,26 @@ where
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preserve_env_arg_lists_process_and_builder_env_names() {
+        let mut cmd_builder = CommandBuilder::new("true");
+        cmd_builder.env("CODSPEED_TEST_BUILDER_ONLY_VAR", "1");
+
+        let arg = preserve_env_arg(&cmd_builder);
+        let arg = arg.to_str().unwrap();
+        let names = arg
+            .strip_prefix("--preserve-env=")
+            .unwrap()
+            .split(',')
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"PATH"));
+        assert!(names.contains(&"CODSPEED_TEST_BUILDER_ONLY_VAR"));
+    }
 }

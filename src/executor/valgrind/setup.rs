@@ -31,6 +31,9 @@ fn get_codspeed_valgrind_target(system_info: &SystemInfo) -> Result<ValgrindTarg
         (LinuxDistribution::Ubuntu { version }, "x86_64") if version == "24.04" => {
             (DistroVersion::Ubuntu2404, Arch::Amd64)
         }
+        (LinuxDistribution::Ubuntu { version }, "x86_64") if version == "26.04" => {
+            (DistroVersion::Ubuntu2604, Arch::Amd64)
+        }
         (LinuxDistribution::Ubuntu { version }, "aarch64")
         | (LinuxDistribution::Debian { version }, "aarch64")
             if version == "22.04" || version == "12" =>
@@ -39,6 +42,9 @@ fn get_codspeed_valgrind_target(system_info: &SystemInfo) -> Result<ValgrindTarg
         }
         (LinuxDistribution::Ubuntu { version }, "aarch64") if version == "24.04" => {
             (DistroVersion::Ubuntu2404, Arch::Arm64)
+        }
+        (LinuxDistribution::Ubuntu { version }, "aarch64") if version == "26.04" => {
+            (DistroVersion::Ubuntu2604, Arch::Arm64)
         }
         _ => bail!("Unsupported system"),
     };
@@ -334,7 +340,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_system_info_to_codspeed_valgrind_url_ubuntu() {
+    fn test_system_info_to_codspeed_valgrind_url_ubuntu_22() {
         let system_info = SystemInfo {
             os: SupportedOs::Linux(LinuxDistribution::Ubuntu {
                 version: "22.04".into(),
@@ -344,7 +350,7 @@ mod tests {
         };
         assert_snapshot!(
             get_codspeed_valgrind_binary(&system_info).unwrap().url(),
-            @"https://github.com/CodSpeedHQ/valgrind-codspeed/releases/download/3.26.0-0codspeed7/valgrind_3.26.0-0codspeed7_ubuntu-22.04_amd64.deb"
+            @"https://github.com/CodSpeedHQ/valgrind-codspeed/releases/download/3.26.0-0codspeed9/valgrind_3.26.0-0codspeed9_ubuntu-22.04_amd64.deb"
         );
     }
 
@@ -359,7 +365,22 @@ mod tests {
         };
         assert_snapshot!(
             get_codspeed_valgrind_binary(&system_info).unwrap().url(),
-            @"https://github.com/CodSpeedHQ/valgrind-codspeed/releases/download/3.26.0-0codspeed7/valgrind_3.26.0-0codspeed7_ubuntu-24.04_amd64.deb"
+            @"https://github.com/CodSpeedHQ/valgrind-codspeed/releases/download/3.26.0-0codspeed9/valgrind_3.26.0-0codspeed9_ubuntu-24.04_amd64.deb"
+        );
+    }
+
+    #[test]
+    fn test_system_info_to_codspeed_valgrind_url_ubuntu_26() {
+        let system_info = SystemInfo {
+            os: SupportedOs::Linux(LinuxDistribution::Ubuntu {
+                version: "26.04".into(),
+            }),
+            arch: "x86_64".to_string(),
+            ..SystemInfo::test()
+        };
+        assert_snapshot!(
+            get_codspeed_valgrind_binary(&system_info).unwrap().url(),
+            @"https://github.com/CodSpeedHQ/valgrind-codspeed/releases/download/3.26.0-0codspeed9/valgrind_3.26.0-0codspeed9_ubuntu-26.04_amd64.deb"
         );
     }
 
@@ -374,12 +395,12 @@ mod tests {
         };
         assert_snapshot!(
             get_codspeed_valgrind_binary(&system_info).unwrap().url(),
-            @"https://github.com/CodSpeedHQ/valgrind-codspeed/releases/download/3.26.0-0codspeed7/valgrind_3.26.0-0codspeed7_ubuntu-22.04_amd64.deb"
+            @"https://github.com/CodSpeedHQ/valgrind-codspeed/releases/download/3.26.0-0codspeed9/valgrind_3.26.0-0codspeed9_ubuntu-22.04_amd64.deb"
         );
     }
 
     #[test]
-    fn test_system_info_to_codspeed_valgrind_url_ubuntu_arm() {
+    fn test_system_info_to_codspeed_valgrind_url_ubuntu_22_arm() {
         let system_info = SystemInfo {
             os: SupportedOs::Linux(LinuxDistribution::Ubuntu {
                 version: "22.04".into(),
@@ -389,7 +410,37 @@ mod tests {
         };
         assert_snapshot!(
             get_codspeed_valgrind_binary(&system_info).unwrap().url(),
-            @"https://github.com/CodSpeedHQ/valgrind-codspeed/releases/download/3.26.0-0codspeed7/valgrind_3.26.0-0codspeed7_ubuntu-22.04_arm64.deb"
+            @"https://github.com/CodSpeedHQ/valgrind-codspeed/releases/download/3.26.0-0codspeed9/valgrind_3.26.0-0codspeed9_ubuntu-22.04_arm64.deb"
+        );
+    }
+
+    #[test]
+    fn test_system_info_to_codspeed_valgrind_url_ubuntu_24_arm() {
+        let system_info = SystemInfo {
+            os: SupportedOs::Linux(LinuxDistribution::Ubuntu {
+                version: "24.04".into(),
+            }),
+            arch: "aarch64".to_string(),
+            ..SystemInfo::test()
+        };
+        assert_snapshot!(
+            get_codspeed_valgrind_binary(&system_info).unwrap().url(),
+            @"https://github.com/CodSpeedHQ/valgrind-codspeed/releases/download/3.26.0-0codspeed9/valgrind_3.26.0-0codspeed9_ubuntu-24.04_arm64.deb"
+        );
+    }
+
+    #[test]
+    fn test_system_info_to_codspeed_valgrind_url_ubuntu_26_arm() {
+        let system_info = SystemInfo {
+            os: SupportedOs::Linux(LinuxDistribution::Ubuntu {
+                version: "26.04".into(),
+            }),
+            arch: "aarch64".to_string(),
+            ..SystemInfo::test()
+        };
+        assert_snapshot!(
+            get_codspeed_valgrind_binary(&system_info).unwrap().url(),
+            @"https://github.com/CodSpeedHQ/valgrind-codspeed/releases/download/3.26.0-0codspeed9/valgrind_3.26.0-0codspeed9_ubuntu-26.04_arm64.deb"
         );
     }
 

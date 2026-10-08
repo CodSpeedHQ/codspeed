@@ -81,6 +81,10 @@ impl CommandBuilder {
         self.cwd.as_deref()
     }
 
+    pub fn env_names(&self) -> impl Iterator<Item = &OsStr> {
+        self.envs.keys().map(OsString::as_os_str)
+    }
+
     pub fn wrap<S, I, T>(&mut self, wrapper: S, wrapper_args: I) -> &mut Self
     where
         S: AsRef<OsStr>,

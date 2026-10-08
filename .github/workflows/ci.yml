@@ -10,6 +10,10 @@ concurrency:
   # Cancel in progress runs if a new one is queued everywhere but on pushes and workflow dispatch events
   cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
 
+env:
+  # Fail instead of building valgrind from source on systems we publish no package for
+  CODSPEED_VALGRIND_BUILD_FROM_SOURCE: "false"
+
 jobs:
   lint:
     runs-on: ${{ matrix.os }}
@@ -32,7 +36,7 @@ jobs:
         run: cargo run --bin generate_config_schema && git diff --exit-code schemas/codspeed.schema.json
 
   tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -46,7 +50,17 @@ jobs:
       - run: cargo test --all --exclude memtrack --exclude exec-harness
 
   executor-tests:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, arm64]
+        base-image: ["ubuntu:24.04", "ubuntu:26.04"]
+        include:
+          - arch: x86_64
+            runner: ubuntu-26.04
+          - arch: arm64
+            runner: ubuntu-26.04-arm
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -56,9 +70,10 @@ jobs:
           tool: just
       # No cache for now here, but we could cache either docker volumes or mounted host directories to cache build artifacts
       - run: just test-integ
-        # Runs against an unreleased valgrind-codspeed branch, tag or full commit SHA
-        # env:
-        #   CODSPEED_VALGRIND_REF: my-valgrind-branch
+        env:
+          CODSPEED_TEST_BASE_IMAGE: ${{ matrix.base-image }}
+          # Runs against an unreleased valgrind-codspeed branch, tag or full commit SHA
+          # CODSPEED_VALGRIND_REF: my-valgrind-branch
 
   exec-harness-tests:
     runs-on: ubuntu-latest
@@ -71,14 +86,24 @@ jobs:
         run: cargo test -p exec-harness
 
   basic-run-test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            extra-args: --skip-upload
+          - os: ubuntu-26.04
+            extra-args: ""
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           submodules: true
       - uses: ./.github/actions/install-rust
+        with:
+          cache-key: ${{ matrix.os }}
       - name: Run tests
-        run: cargo run -- exec -m simulation,walltime,memory --warmup-time 0s --max-rounds 5 -- sleep 1
+        run: cargo run -- exec ${{ matrix.extra-args }} -m simulation,walltime,memory --warmup-time 0s --max-rounds 5 -- sleep 1
 
   macos-basic-run-test:
     runs-on: macos-latest

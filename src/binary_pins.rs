@@ -13,7 +13,7 @@ pub const VALGRIND_CODSPEED_VERSION: Version = Version::new(3, 26, 0);
 /// the .deb is repackaged without a new upstream valgrind release. Appears in
 /// the .deb package version (`3.26.0-0codspeed3`) and in `valgrind --version`
 /// output (`valgrind-3.26.0.codspeed3`).
-pub const VALGRIND_CODSPEED_ITERATION: u32 = 7;
+pub const VALGRIND_CODSPEED_ITERATION: u32 = 9;
 /// Suffix appended to `VALGRIND_CODSPEED_VERSION` to form the .deb package version.
 static VALGRIND_DEB_REV: LazyLock<String> =
     LazyLock::new(|| format!("0codspeed{VALGRIND_CODSPEED_ITERATION}"));
@@ -43,6 +43,7 @@ impl BinaryPin {
 pub enum DistroVersion {
     Ubuntu2204,
     Ubuntu2404,
+    Ubuntu2604,
 }
 
 impl DistroVersion {
@@ -50,6 +51,7 @@ impl DistroVersion {
         match self {
             DistroVersion::Ubuntu2204 => "22.04",
             DistroVersion::Ubuntu2404 => "24.04",
+            DistroVersion::Ubuntu2604 => "26.04",
         }
     }
 }
@@ -93,16 +95,22 @@ impl ValgrindTarget {
     fn sha256(self) -> &'static str {
         match (self.distro_version, self.arch) {
             (DistroVersion::Ubuntu2204, Arch::Amd64) => {
-                "658a64049b6a1f5bec9c038b8036f9a61fee83011a909b649e32a82edab4ba99"
-            }
-            (DistroVersion::Ubuntu2404, Arch::Amd64) => {
-                "ea1788e43cfd75b8af84dd496eb265307c6ab6d048cb7bc8ba4bc564dbbd5aba"
+                "5fcd79e4dc86a71e1a86690373234f8a478814b3500491d39f6086bb8b022046"
             }
             (DistroVersion::Ubuntu2204, Arch::Arm64) => {
-                "6db07f15ce23e3cfda00bda85aac0ea3b8a2261c00d529ed856ceb7f3ba207f6"
+                "57acba3eae6b433da0e8a6b7307b573980c87382856981ae271a7c532fdd2afb"
+            }
+            (DistroVersion::Ubuntu2404, Arch::Amd64) => {
+                "d53f3fc29e8b107057fb28e484917d36b57ba50948a8ef07fae633a584ae387f"
             }
             (DistroVersion::Ubuntu2404, Arch::Arm64) => {
-                "0bccdaf2da7202ff4fe15e8301641c3a0abd46879c03713150cb5f21d6c9baaf"
+                "dfe4c6443c03d166705acad711136c321f9ab4f56baa7f0a878ce59b1050c779"
+            }
+            (DistroVersion::Ubuntu2604, Arch::Amd64) => {
+                "119af13cc0ad39250b9a91df7cf66bbc0c2a8875b2c5df8cc0f7c7361cf5a3d3"
+            }
+            (DistroVersion::Ubuntu2604, Arch::Arm64) => {
+                "6c835ad09a73c753c130425a0912c82e19fc4258a62866a6116d08dbde446e48"
             }
         }
     }
@@ -180,15 +188,23 @@ mod tests {
             arch: Arch::Amd64,
         },
         ValgrindTarget {
-            distro_version: DistroVersion::Ubuntu2404,
-            arch: Arch::Amd64,
-        },
-        ValgrindTarget {
             distro_version: DistroVersion::Ubuntu2204,
             arch: Arch::Arm64,
         },
         ValgrindTarget {
             distro_version: DistroVersion::Ubuntu2404,
+            arch: Arch::Amd64,
+        },
+        ValgrindTarget {
+            distro_version: DistroVersion::Ubuntu2404,
+            arch: Arch::Arm64,
+        },
+        ValgrindTarget {
+            distro_version: DistroVersion::Ubuntu2604,
+            arch: Arch::Amd64,
+        },
+        ValgrindTarget {
+            distro_version: DistroVersion::Ubuntu2604,
             arch: Arch::Arm64,
         },
     ];
