@@ -8,9 +8,17 @@
 #
 # CODSPEED_VALGRIND_REF=<branch, tag or full commit sha> runs the suite against that
 # valgrind-codspeed instead of the pinned release.
+#
+# CODSPEED_TEST_BASE_IMAGE=<image> (default ubuntu:24.04) runs the suite on that base image.
+# Each base image gets its own images and target volume: binaries built against one glibc
+# don't run on an older one.
+#
+# CODSPEED_VALGRIND_BUILD_FROM_SOURCE is forwarded to the containers when set.
 set -euo pipefail
 
 repo=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
+base_image=${CODSPEED_TEST_BASE_IMAGE:-ubuntu:24.04}
+flavor=${base_image//[^A-Za-z0-9_.-]/-}
 image=codspeed-executor-tests
 rust_version=$(sed -n 's/.*channel = "\(.*\)".*/\1/p' "$repo/rust-toolchain.toml")
 rust_components=$(sed -n 's/.*components = \[\(.*\)\].*/\1/p' "$repo/rust-toolchain.toml" | tr -d '" ')
@@ -39,7 +47,8 @@ if [ -n "${CODSPEED_VALGRIND_REF:-}" ]; then
   valgrind_commit=$(resolve_valgrind_ref "$CODSPEED_VALGRIND_REF")
 fi
 
-docker build -q -t "$image" --build-arg RUST_VERSION="$rust_version" \
+docker build -q -t "$image:$flavor" --build-arg BASE_IMAGE="$base_image" \
+  --build-arg RUST_VERSION="$rust_version" \
   --build-arg RUST_COMPONENTS="$rust_components" \
   -f "$repo/tests/docker/Dockerfile" "$repo/tests/docker" >/dev/null
 
@@ -53,9 +62,10 @@ docker_flags=(
   --cap-add DAC_READ_SEARCH --cap-add SYS_PTRACE --ulimit memlock=-1:-1
   --security-opt seccomp=unconfined --security-opt apparmor=unconfined
   -v "$repo":/workspace
-  -v codspeed-tests-target:/home/tester/target
+  -v "codspeed-tests-target-$flavor":/home/tester/target
   -v codspeed-tests-cargo:/home/tester/.cargo/registry
   -v codspeed-tests-cargo-git:/home/tester/.cargo/git
+  -e CODSPEED_VALGRIND_BUILD_FROM_SOURCE
 )
 in_container() {
   docker run --rm "${tty[@]}" "${docker_flags[@]}" "$run_image" "$@"
@@ -63,7 +73,7 @@ in_container() {
 cargo_test=(cargo test -p codspeed-runner --features executor-tests --test executors)
 
 tty=()
-run_image=$image
+run_image=$image:$flavor
 in_container "${cargo_test[@]}" --no-run
 
 # Bakes what `codspeed setup` installs (Valgrind, memtrack) into an image, so test containers
@@ -72,17 +82,17 @@ in_container "${cargo_test[@]}" --no-run
 inputs_hash=$({
   cat "$repo/tests/docker/Dockerfile" "$repo/tests/docker/setup.sh" "$repo/rust-toolchain.toml" \
     "$repo/src/binary_pins.rs"
-  printf %s "$valgrind_commit"
+  printf %s "$base_image $valgrind_commit"
 } | sha256sum | cut -c1-12)
-run_image=$image:setup-$inputs_hash
+run_image=$image:$flavor-setup-$inputs_hash
 if ! docker image inspect "$run_image" >/dev/null 2>&1; then
-  setup_container=$image-setup
+  setup_container=$image-setup-$flavor
   docker rm -f "$setup_container" >/dev/null 2>&1 || true
-  docker run --name "$setup_container" "${docker_flags[@]}" "$image" \
+  docker run --name "$setup_container" "${docker_flags[@]}" "$image:$flavor" \
     tests/docker/setup.sh /home/tester/target/debug/codspeed $valgrind_commit
   docker commit "$setup_container" "$run_image" >/dev/null
   docker rm "$setup_container" >/dev/null
-  docker images --filter "reference=$image:setup-*" --format '{{.Repository}}:{{.Tag}}' \
+  docker images --filter "reference=$image:$flavor-setup-*" --format '{{.Repository}}:{{.Tag}}' \
     | { grep -vxF "$run_image" || true; } | xargs -r docker rmi >/dev/null
 fi
 
