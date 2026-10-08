@@ -22,7 +22,7 @@ use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio_tar::Builder;
 
-use super::interfaces::{MultipartUploadUrls, ProfileMultipart, UploadData, UploadMetadata};
+use super::interfaces::{MultipartUpload, ProfileMetadata, UploadData, UploadMetadata};
 use super::profile_archive::{ProfileArchive, concurrent_part_uploads};
 use super::s3;
 
@@ -47,7 +47,7 @@ fn human_bytes_per_second(bytes: u64, elapsed: std::time::Duration) -> String {
     format!("{}/s", human_bytes(bytes_per_second as u64))
 }
 
-/// Create a profile archive from the profile folder and return its md5 hash encoded in base64
+/// Create a profile archive from the profile folder, along with its description
 ///
 /// For Valgrind, we create a gzip-compressed tar archive of the entire profile folder.
 /// For WallTime and Memory, we create an uncompressed tar archive on disk: their
@@ -265,23 +265,21 @@ async fn send_upload_request(
 /// Upload the parts concurrently, then assemble them with the S3 complete request.
 /// Parts of a failed upload are cleaned up by the bucket lifecycle rules.
 async fn upload_multipart_profile_archive(
-    multipart_upload_urls: &MultipartUploadUrls,
-    multipart: &ProfileMultipart,
+    multipart_upload: &MultipartUpload,
+    profile: &ProfileMetadata,
     content: &ProfileArchiveContent,
 ) -> Result<()> {
     debug!("Starting multipart upload for profile archive");
+    let part_count = profile.part_crc64nvmes.len();
     debug!(
         "Multipart upload details: part_count={}, part_size={}, total_size={}",
-        multipart.part_md5s.len(),
-        multipart.part_size,
-        multipart.size
+        part_count, profile.part_size, profile.size
     );
 
-    let part_count = multipart.part_md5s.len();
-    if multipart_upload_urls.part_urls.len() != part_count {
+    if multipart_upload.parts.len() != part_count {
         bail!(
-            "Received {} part upload URLs for {} parts",
-            multipart_upload_urls.part_urls.len(),
+            "Received {} part upload requests for {} parts",
+            multipart_upload.parts.len(),
             part_count
         );
     }
@@ -290,46 +288,41 @@ async fn upload_multipart_profile_archive(
     let upload_start = Instant::now();
     // Unordered, so that a part finishing frees its slot even while an earlier part is still
     // uploading
-    let mut indexed_etags: Vec<_> = futures::stream::iter(
-        multipart_upload_urls
-            .part_urls
-            .iter()
-            .zip(&multipart.part_md5s)
-            .enumerate(),
-    )
-    .map(|(index, (part_url, part_md5))| async move {
-        let offset = index as u64 * multipart.part_size;
-        let range = ContentRange {
-            content,
-            offset,
-            length: multipart.part_size.min(multipart.size - offset),
-        };
-        debug!(
-            "Uploading part {}/{} ({} bytes)",
-            index + 1,
-            part_count,
-            range.length
-        );
-        let part_start = Instant::now();
-        let etag = with_upload_retry(|| async {
-            let request = s3::upload_part(&STREAMING_CLIENT, part_url, part_md5);
-            let response = send_upload_request(range.attach(request).await?).await?;
-            Ok(s3::part_etag(&response)?)
+    let part_requests = multipart_upload.parts.iter().enumerate();
+    let mut indexed_etags: Vec<_> = futures::stream::iter(part_requests)
+        .map(|(index, part_request)| async move {
+            let offset = index as u64 * profile.part_size;
+            let range = ContentRange {
+                content,
+                offset,
+                length: profile.part_size.min(profile.size - offset),
+            };
+            debug!(
+                "Uploading part {}/{} ({} bytes)",
+                index + 1,
+                part_count,
+                range.length
+            );
+            let part_start = Instant::now();
+            let etag = with_upload_retry(|| async {
+                let request = s3::upload_part(&STREAMING_CLIENT, part_request);
+                let response = send_upload_request(range.attach(request).await?).await?;
+                Ok(s3::part_etag(&response)?)
+            })
+            .await?;
+            let part_elapsed = part_start.elapsed();
+            debug!(
+                "Uploaded part {}/{} in {:.1?} ({})",
+                index + 1,
+                part_count,
+                part_elapsed,
+                human_bytes_per_second(range.length, part_elapsed)
+            );
+            Ok::<_, anyhow::Error>((index, etag))
         })
+        .buffer_unordered(concurrency)
+        .try_collect()
         .await?;
-        let part_elapsed = part_start.elapsed();
-        debug!(
-            "Uploaded part {}/{} in {:.1?} ({})",
-            index + 1,
-            part_count,
-            part_elapsed,
-            human_bytes_per_second(range.length, part_elapsed)
-        );
-        Ok::<_, anyhow::Error>((index, etag))
-    })
-    .buffer_unordered(concurrency)
-    .try_collect()
-    .await?;
 
     indexed_etags.sort_unstable_by_key(|(index, _)| *index);
     let etags: Vec<_> = indexed_etags.into_iter().map(|(_, etag)| etag).collect();
@@ -339,18 +332,14 @@ async fn upload_multipart_profile_archive(
         "Uploaded {} part{} ({}) in {:.1?} with {} concurrent uploads ({})",
         part_count,
         if part_count > 1 { "s" } else { "" },
-        human_bytes(multipart.size),
+        human_bytes(profile.size),
         upload_elapsed,
         concurrency,
-        human_bytes_per_second(multipart.size, upload_elapsed)
+        human_bytes_per_second(profile.size, upload_elapsed)
     );
 
     with_upload_retry(|| async {
-        let request = s3::complete_upload(
-            &STREAMING_CLIENT,
-            &multipart_upload_urls.complete_url,
-            &etags,
-        );
+        let request = s3::complete_upload(&STREAMING_CLIENT, &multipart_upload.complete, &etags);
         let response = send_upload_request(request).await?;
         match s3::check_complete_upload_response(response).await {
             Ok(Ok(())) => Ok(()),
@@ -368,8 +357,8 @@ async fn upload_profile_archive(
     profile_archive: ProfileArchive,
 ) -> Result<()> {
     upload_multipart_profile_archive(
-        &upload_data.multipart_upload_urls,
-        &profile_archive.multipart,
+        &upload_data.multipart_upload,
+        &profile_archive.metadata,
         &profile_archive.content,
     )
     .await
@@ -438,6 +427,7 @@ mod tests {
     use url::Url;
 
     use super::*;
+    use crate::upload::interfaces::PresignedRequest;
     use std::path::PathBuf;
 
     // TODO: remove the ignore when implementing network mocking
@@ -676,11 +666,10 @@ mod tests {
         )
     }
 
+    /// Archive split in `part_size` parts. The checksums are placeholders: the uploader
+    /// sends the headers the API presigned, not checksums of its own.
     fn multipart_archive(content: &[u8], part_size: u64, in_memory: bool) -> ProfileArchive {
-        let encode = |data: &[u8]| {
-            use base64::Engine;
-            base64::engine::general_purpose::STANDARD.encode(md5::compute(data).0)
-        };
+        let part_count = content.len().div_ceil(part_size as usize);
         let archive_content = if in_memory {
             ProfileArchiveContent::CompressedInMemory {
                 data: content.to_vec().into(),
@@ -694,25 +683,39 @@ mod tests {
             std::fs::write(&path, content).unwrap();
             ProfileArchiveContent::UncompressedOnDisk { path }
         };
+        let encoding = archive_content.encoding();
         ProfileArchive {
-            md5: encode(content),
             content: archive_content,
-            multipart: ProfileMultipart {
+            metadata: ProfileMetadata {
+                encoding,
                 size: content.len() as u64,
+                crc64nvme: "crc".to_string(),
                 part_size,
-                part_md5s: content.chunks(part_size as usize).map(encode).collect(),
+                part_crc64nvmes: (1..=part_count).map(|part| format!("crc-{part}")).collect(),
             },
         }
     }
 
     fn multipart_upload_data_for(base_url: &str, part_count: usize) -> UploadData {
+        let presigned = |path: String, header: (&str, String)| PresignedRequest {
+            url: format!("{base_url}{path}"),
+            headers: BTreeMap::from([(header.0.to_string(), header.1)]),
+        };
         UploadData {
             status: "success".to_string(),
-            multipart_upload_urls: MultipartUploadUrls {
-                part_urls: (1..=part_count)
-                    .map(|part| format!("{base_url}/part/{part}"))
+            multipart_upload: MultipartUpload {
+                parts: (1..=part_count)
+                    .map(|part| {
+                        presigned(
+                            format!("/part/{part}"),
+                            ("x-amz-checksum-crc64nvme", format!("signed-crc-{part}")),
+                        )
+                    })
                     .collect(),
-                complete_url: format!("{base_url}/complete"),
+                complete: presigned(
+                    "/complete".to_string(),
+                    ("x-amz-mp-object-size", "signed-size".to_string()),
+                ),
             },
             run_id: "test-run".to_string(),
         }
@@ -731,7 +734,6 @@ mod tests {
     async fn assert_multipart_upload_sends_each_part_then_completes(in_memory: bool) {
         let content = b"0123456789";
         let archive = multipart_archive(content, 4, in_memory);
-        let part_md5s = archive.multipart.part_md5s.clone();
 
         let (base_url, server) = spawn_recording_mock(4, |request| {
             if request.method == "PUT" {
@@ -757,12 +759,16 @@ mod tests {
                 .unwrap();
             assert_eq!(request.method, "PUT");
             assert_eq!(request.body, *expected_body);
-            assert_eq!(request.headers["content-md5"], part_md5s[index]);
+            assert_eq!(
+                request.headers["x-amz-checksum-crc64nvme"],
+                format!("signed-crc-{}", index + 1)
+            );
         }
 
         let complete = &requests[3];
         assert_eq!(complete.method, "POST");
         assert_eq!(complete.path, "/complete");
+        assert_eq!(complete.headers["x-amz-mp-object-size"], "signed-size");
         assert_eq!(
             String::from_utf8(complete.body.clone()).unwrap(),
             "<CompleteMultipartUpload>\

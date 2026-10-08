@@ -6,20 +6,33 @@
 //! [CompleteMultipartUpload](https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html)
 //! request. This module handles the S3-specific parts of these requests.
 //!
-//! The part URLs are signed with the `Content-MD5` and `Content-Length` headers, so S3
-//! rejects a part that does not send them with the signed values. The content type and
-//! encoding of the archive are set when the multipart upload is created.
+//! Each request is presigned with headers, such as the checksums S3 checks the upload
+//! against, which have to be sent with their signed values or S3 rejects the request.
+//! The content type and encoding of the archive are set when the multipart upload is
+//! created.
 
 use crate::prelude::*;
+use crate::upload::interfaces::PresignedRequest;
 use console::style;
+
+/// Request to the presigned URL, with its signed headers
+fn presigned(
+    client: &reqwest::Client,
+    method: reqwest::Method,
+    request: &PresignedRequest,
+) -> reqwest::RequestBuilder {
+    request.headers.iter().fold(
+        client.request(method, &request.url),
+        |builder, (name, value)| builder.header(name, value),
+    )
+}
 
 /// `UploadPart` request uploading one part of a multipart upload.
 pub(super) fn upload_part(
     client: &reqwest::Client,
-    url: &str,
-    content_md5: &str,
+    request: &PresignedRequest,
 ) -> reqwest::RequestBuilder {
-    client.put(url).header("Content-MD5", content_md5)
+    presigned(client, reqwest::Method::PUT, request)
 }
 
 /// ETag S3 assigned to an uploaded part, only obtainable from a part upload response
@@ -42,11 +55,10 @@ pub(super) fn part_etag(response: &reqwest::Response) -> Result<PartETag> {
 /// object. `etags` are in part order.
 pub(super) fn complete_upload(
     client: &reqwest::Client,
-    url: &str,
+    request: &PresignedRequest,
     etags: &[PartETag],
 ) -> reqwest::RequestBuilder {
-    client
-        .post(url)
+    presigned(client, reqwest::Method::POST, request)
         .header("Content-Type", "application/xml")
         .body(build_complete_body(etags))
 }

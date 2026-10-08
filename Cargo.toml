@@ -29,7 +29,7 @@ sha256 = "1.6"
 tokio = { version = "1", features = ["macros", "rt"] }
 tokio-tar = { package = "astral-tokio-tar", version = "0.6.2" }
 tokio-util = "0.7.18"
-md5 = "0.8"
+crc-fast = { version = "1.9.0", default-features = false, features = ["std"] }
 base64 = "0.22.1"
 async-compression = { version = "0.4.42", features = ["tokio", "gzip"] }
 schemars = "1.2.1"

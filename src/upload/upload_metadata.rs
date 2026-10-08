@@ -22,7 +22,7 @@ mod tests {
         Sender,
     };
     use crate::system::SystemInfo;
-    use crate::upload::{LATEST_UPLOAD_METADATA_VERSION, ProfileMultipart, Runner, UploadMetadata};
+    use crate::upload::{LATEST_UPLOAD_METADATA_VERSION, ProfileMetadata, Runner, UploadMetadata};
 
     #[test]
     fn test_get_metadata_hash() {
@@ -30,15 +30,15 @@ mod tests {
             repository_provider: RepositoryProvider::GitHub,
             version: Some(LATEST_UPLOAD_METADATA_VERSION),
             tokenless: true,
-            profile_md5: "jp/k05RKuqP3ERQuIIvx4Q==".into(),
-            profile_encoding: Some("gzip".into()),
-            profile_multipart: ProfileMultipart {
+            profile_archive: ProfileMetadata {
+                encoding: Some("gzip".into()),
                 size: 629145600,
+                crc64nvme: "SVWSLdzczJc=".into(),
                 part_size: 268435456,
-                part_md5s: vec![
-                    "eEKfdGLWNqhNnJIvSVWZxQ==".into(),
-                    "vKfHJAI2Hyo68jWwUc6H9A==".into(),
-                    "bQY//BUrm3jASNTyWj/3Aw==".into(),
+                part_crc64nvmes: vec![
+                    "w7Dr86r5+2I=".into(),
+                    "puujmsfPTns=".into(),
+                    "Tt/QAZdhKk4=".into(),
                 ],
             },
             runner: Runner {
@@ -82,7 +82,7 @@ mod tests {
             hash,
             // Caution: when changing this value, we need to ensure that
             // the related backend snapshot remains the same
-            @"307ed5a2218e04b1befe21d355e19a2a3adb7a617b19d1b6e8406c23355a2664"
+            @"07b92482167eaabedd8111906c7d96763d0da5ea951a5be04492413508206261"
         );
         assert_json_snapshot!(upload_metadata);
     }
@@ -93,12 +93,12 @@ mod tests {
             repository_provider: RepositoryProvider::Project,
             version: Some(LATEST_UPLOAD_METADATA_VERSION),
             tokenless: false,
-            profile_md5: "tfC4VxYiYdJcTWpHpv4Ouw==".into(),
-            profile_encoding: Some("gzip".into()),
-            profile_multipart: ProfileMultipart {
+            profile_archive: ProfileMetadata {
+                encoding: Some("gzip".into()),
                 size: 20480,
+                crc64nvme: "XMXoclwBfLo=".into(),
                 part_size: 16777216,
-                part_md5s: vec!["tfC4VxYiYdJcTWpHpv4Ouw==".into()],
+                part_crc64nvmes: vec!["XMXoclwBfLo=".into()],
             },
             runner: Runner {
                 name: "codspeed-runner".into(),
@@ -158,7 +158,7 @@ mod tests {
             hash,
             // Caution: when changing this value, we need to ensure that
             // the related backend snapshot remains the same
-            @"dcbb07dc8bf0c97cc88566ef78acec873f452420ce004807f3cdd6218544a458"
+            @"5fd485b7ad81097b43268e651dfeec697feb7985f3a8e6e1e5eea39d213262cf"
         );
         assert_json_snapshot!(upload_metadata);
     }

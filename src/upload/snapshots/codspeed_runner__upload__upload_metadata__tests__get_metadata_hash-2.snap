@@ -6,15 +6,15 @@ expression: upload_metadata
   "repositoryProvider": "GITHUB",
   "version": 12,
   "tokenless": true,
-  "profileMd5": "jp/k05RKuqP3ERQuIIvx4Q==",
-  "profileEncoding": "gzip",
-  "profileMultipart": {
+  "profileArchive": {
+    "encoding": "gzip",
     "size": 629145600,
+    "crc64nvme": "SVWSLdzczJc=",
     "partSize": 268435456,
-    "partMd5s": [
-      "eEKfdGLWNqhNnJIvSVWZxQ==",
-      "vKfHJAI2Hyo68jWwUc6H9A==",
-      "bQY//BUrm3jASNTyWj/3Aw=="
+    "partCrc64nvmes": [
+      "w7Dr86r5+2I=",
+      "puujmsfPTns=",
+      "Tt/QAZdhKk4="
     ]
   },
   "runner": {

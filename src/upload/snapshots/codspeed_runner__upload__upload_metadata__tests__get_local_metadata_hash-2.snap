@@ -6,13 +6,13 @@ expression: upload_metadata
   "repositoryProvider": "PROJECT",
   "version": 12,
   "tokenless": false,
-  "profileMd5": "tfC4VxYiYdJcTWpHpv4Ouw==",
-  "profileEncoding": "gzip",
-  "profileMultipart": {
+  "profileArchive": {
+    "encoding": "gzip",
     "size": 20480,
+    "crc64nvme": "XMXoclwBfLo=",
     "partSize": 16777216,
-    "partMd5s": [
-      "tfC4VxYiYdJcTWpHpv4Ouw=="
+    "partCrc64nvmes": [
+      "XMXoclwBfLo="
     ]
   },
   "runner": {

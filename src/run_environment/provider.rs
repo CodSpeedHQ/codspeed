@@ -136,9 +136,7 @@ pub trait RunEnvironmentProvider {
             tokenless: api_client.token().is_none(),
             repository_provider: self.get_repository_provider(),
             run_environment_metadata,
-            profile_md5: profile_archive.md5.clone(),
-            profile_encoding: profile_archive.content.encoding(),
-            profile_multipart: profile_archive.multipart.clone(),
+            profile_archive: profile_archive.metadata.clone(),
             commit_hash,
             allow_empty: config.allow_empty,
             runner: Runner {

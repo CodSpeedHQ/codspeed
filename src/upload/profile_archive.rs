@@ -1,7 +1,8 @@
 use base64::{Engine, engine::general_purpose};
+use crc_fast::{CrcAlgorithm, Digest};
 
 use crate::prelude::*;
-use crate::upload::interfaces::ProfileMultipart;
+use crate::upload::interfaces::ProfileMetadata;
 use bytes::Bytes;
 use std::io::{Read, SeekFrom};
 use std::path::PathBuf;
@@ -46,9 +47,8 @@ const HASH_READ_BUFFER_SIZE: usize = 8 * 1024 * 1024; // 8 MiB
 
 #[derive(Debug)]
 pub struct ProfileArchive {
-    pub md5: String,
     pub content: ProfileArchiveContent,
-    pub multipart: ProfileMultipart,
+    pub metadata: ProfileMetadata,
 }
 
 #[derive(Debug)]
@@ -57,24 +57,24 @@ pub enum ProfileArchiveContent {
     UncompressedOnDisk { path: PathBuf },
 }
 
-fn encode_md5(digest: md5::Digest) -> String {
-    general_purpose::STANDARD.encode(digest.0)
+/// Base64 of the big-endian CRC64NVME, the encoding S3 expects
+fn encode_crc64nvme(crc: u64) -> String {
+    general_purpose::STANDARD.encode(crc.to_be_bytes())
 }
 
-/// Read the content once to compute the md5 of all of it and of each consecutive
-/// `part_size` chunk of it.
+/// Read the content once to compute the CRC64NVME of each consecutive `part_size`
+/// chunk of it, and of all of it by combining the part CRCs.
 ///
 /// CPU heavy + potentially reading from blocking IO, so it is recommended to
 /// run this on a blocking thread pool.
-fn compute_md5s_from_reader(
+fn compute_crc64nvmes_from_reader(
     mut reader: impl Read,
     part_size: u64,
 ) -> Result<(String, Vec<String>)> {
     let mut buffer = vec![0u8; HASH_READ_BUFFER_SIZE];
-    let mut whole_context = md5::Context::new();
-    let mut part_context = md5::Context::new();
-    let mut part_length = 0u64;
-    let mut part_md5s = Vec::new();
+    let mut whole_digest = Digest::new(CrcAlgorithm::Crc64Nvme);
+    let mut part_digest = Digest::new(CrcAlgorithm::Crc64Nvme);
+    let mut part_crc64nvmes = Vec::new();
 
     loop {
         let read = reader.read(&mut buffer)?;
@@ -82,43 +82,42 @@ fn compute_md5s_from_reader(
             break;
         }
         let mut chunk = &buffer[..read];
-        whole_context.consume(chunk);
-
         while !chunk.is_empty() {
-            let taken = (part_size - part_length).min(chunk.len() as u64) as usize;
-            part_context.consume(&chunk[..taken]);
-            part_length += taken as u64;
+            let taken = (part_size - part_digest.get_amount()).min(chunk.len() as u64) as usize;
+            part_digest.update(&chunk[..taken]);
             chunk = &chunk[taken..];
-            if part_length == part_size {
-                let finished_part = std::mem::replace(&mut part_context, md5::Context::new());
-                part_md5s.push(encode_md5(finished_part.finalize()));
-                part_length = 0;
+            if part_digest.get_amount() == part_size {
+                whole_digest.combine(&part_digest);
+                part_crc64nvmes.push(encode_crc64nvme(part_digest.finalize_reset()));
             }
         }
     }
-    if part_length > 0 {
-        part_md5s.push(encode_md5(part_context.finalize()));
+    if part_digest.get_amount() > 0 {
+        whole_digest.combine(&part_digest);
+        part_crc64nvmes.push(encode_crc64nvme(part_digest.finalize()));
     }
 
-    Ok((encode_md5(whole_context.finalize()), part_md5s))
+    Ok((encode_crc64nvme(whole_digest.finalize()), part_crc64nvmes))
 }
 
-/// [`compute_md5s_from_reader`] over the content, run on the blocking thread pool as
-/// hashing the whole archive would otherwise stall the async runtime.
-async fn compute_md5s(
+/// [`compute_crc64nvmes_from_reader`] over the content, run on the blocking thread pool
+/// as hashing the whole archive would otherwise stall the async runtime.
+async fn compute_crc64nvmes(
     content: &ProfileArchiveContent,
     part_size: u64,
 ) -> Result<(String, Vec<String>)> {
     match content {
         ProfileArchiveContent::CompressedInMemory { data } => {
             let data = data.clone();
-            tokio::task::spawn_blocking(move || compute_md5s_from_reader(&data[..], part_size))
-                .await?
+            tokio::task::spawn_blocking(move || {
+                compute_crc64nvmes_from_reader(&data[..], part_size)
+            })
+            .await?
         }
         ProfileArchiveContent::UncompressedOnDisk { path } => {
             let path = path.clone();
             tokio::task::spawn_blocking(move || {
-                compute_md5s_from_reader(std::fs::File::open(path)?, part_size)
+                compute_crc64nvmes_from_reader(std::fs::File::open(path)?, part_size)
             })
             .await?
         }
@@ -151,18 +150,16 @@ impl ProfileArchive {
         let size = content.size().await?;
         let part_size = choose_multipart_part_size(size, concurrent_part_uploads());
 
-        let (md5, part_md5s) = compute_md5s(&content, part_size).await?;
-        let multipart = ProfileMultipart {
+        let (crc64nvme, part_crc64nvmes) = compute_crc64nvmes(&content, part_size).await?;
+        let metadata = ProfileMetadata {
+            encoding: content.encoding(),
             size,
+            crc64nvme,
             part_size,
-            part_md5s,
+            part_crc64nvmes,
         };
 
-        Ok(ProfileArchive {
-            md5,
-            content,
-            multipart,
-        })
+        Ok(ProfileArchive { content, metadata })
     }
 }
 
@@ -228,22 +225,31 @@ mod tests {
         path
     }
 
+    fn crc64nvme(data: &[u8]) -> String {
+        encode_crc64nvme(crc_fast::checksum(CrcAlgorithm::Crc64Nvme, data))
+    }
+
     #[test]
-    fn computes_whole_and_part_md5s_in_one_pass() {
+    fn computes_whole_and_part_crc64nvmes_in_one_pass() {
         // Not a multiple of the part size, and spanning several read buffers
         let content: Vec<u8> = (0..HASH_READ_BUFFER_SIZE * 2 + 123)
             .map(|i| (i % 251) as u8)
             .collect();
         let part_size = (HASH_READ_BUFFER_SIZE / 3) as u64;
 
-        let (hash, part_md5s) = compute_md5s_from_reader(&content[..], part_size).unwrap();
+        let (whole, part_crc64nvmes) =
+            compute_crc64nvmes_from_reader(&content[..], part_size).unwrap();
 
-        assert_eq!(hash, encode_md5(md5::compute(&content)));
-        let expected_part_md5s: Vec<String> = content
-            .chunks(part_size as usize)
-            .map(|part| encode_md5(md5::compute(part)))
-            .collect();
-        assert_eq!(part_md5s, expected_part_md5s);
+        assert_eq!(whole, crc64nvme(&content));
+        let expected_part_crc64nvmes: Vec<String> =
+            content.chunks(part_size as usize).map(crc64nvme).collect();
+        assert_eq!(part_crc64nvmes, expected_part_crc64nvmes);
+    }
+
+    #[test]
+    fn crc64nvme_is_base64_of_the_big_endian_crc() {
+        // Check value of the CRC-64/NVME catalogue entry: 0xAE8B14860A799888
+        assert_eq!(crc64nvme(b"123456789"), "rosUhgp5mIg=");
     }
 
     #[tokio::test]
@@ -254,14 +260,15 @@ mod tests {
             .await
             .unwrap();
 
-        let md5 = encode_md5(md5::compute(b"profile-archive"));
-        assert_eq!(archive.md5, md5);
+        let crc = crc64nvme(b"profile-archive");
         assert_eq!(
-            archive.multipart,
-            ProfileMultipart {
+            archive.metadata,
+            ProfileMetadata {
+                encoding: None,
                 size: b"profile-archive".len() as u64,
+                crc64nvme: crc.clone(),
                 part_size: MULTIPART_MIN_PART_SIZE_BYTES,
-                part_md5s: vec![md5],
+                part_crc64nvmes: vec![crc],
             }
         );
     }
