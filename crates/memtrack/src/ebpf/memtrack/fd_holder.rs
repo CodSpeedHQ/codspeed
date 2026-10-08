@@ -21,6 +21,8 @@ pub struct FdHolder {
 /// gaps between them. `close_range` silently ignores fds that are already
 /// closed or out of range, so gaps may safely include fds we never opened.
 ///
+/// Raw syscall: the `libc` crate only exposes `close_range` on glibc.
+///
 /// # Safety
 /// Only safe to call in the single-threaded child right after `fork()`,
 /// before any allocation, locking, or `Drop` impl runs — see
@@ -32,14 +34,14 @@ unsafe fn close_fds_except(keep: &[RawFd]) {
         if fd > lo {
             // SAFETY: caller upholds the fork-child, no-allocation contract.
             unsafe {
-                libc::close_range(lo, fd - 1, 0);
+                libc::syscall(libc::SYS_close_range, lo, fd - 1, 0);
             }
         }
         lo = fd.saturating_add(1);
     }
     // SAFETY: same as above.
     unsafe {
-        libc::close_range(lo, u32::MAX, 0);
+        libc::syscall(libc::SYS_close_range, lo, u32::MAX, 0);
     }
 }
 
