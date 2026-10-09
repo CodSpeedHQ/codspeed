@@ -36,6 +36,22 @@ impl MemtrackArtifact {
         })
     }
 
+    /// Stream only the events that place modules in processes: executable
+    /// mappings, and the forks and execs that inherit or drop them. Offline
+    /// stack attribution needs these few events out of the whole artifact.
+    pub fn decode_module_events<R: std::io::Read>(
+        reader: R,
+    ) -> anyhow::Result<impl Iterator<Item = MemtrackEvent>> {
+        Ok(Self::decode_streamed(reader)?.filter(|event| {
+            matches!(
+                event.kind,
+                MemtrackEventKind::Mapping { .. }
+                    | MemtrackEventKind::Fork { .. }
+                    | MemtrackEventKind::Exec
+            )
+        }))
+    }
+
     pub fn is_empty<R: std::io::Read>(reader: R) -> bool {
         let Ok(mut stream) = MemtrackArtifact::decode_streamed(BufReader::new(reader)) else {
             return true;
