@@ -11,6 +11,7 @@ use provider::RunEnvironmentDetector;
 
 use crate::api_client::CodSpeedAPIClient;
 use crate::executor::config::OrchestratorConfig;
+use crate::exit_code;
 use crate::prelude::*;
 
 pub use self::interfaces::*;
@@ -49,7 +50,9 @@ pub async fn get_provider(
         }
     };
 
-    provider.check_oidc_configuration(api_client)?;
+    provider
+        .check_oidc_configuration(api_client)
+        .map_err(exit_code::auth_failed)?;
 
     Ok(provider)
 }

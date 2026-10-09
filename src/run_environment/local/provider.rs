@@ -11,6 +11,7 @@ use crate::api_client::{
 use crate::cli::run::helpers::{find_repository_root, parse_repository_from_remote};
 use crate::executor::config::OrchestratorConfig;
 use crate::executor::config::RepositoryOverride;
+use crate::exit_code::auth_failed;
 use crate::local_logger::get_local_logger;
 use crate::prelude::*;
 use crate::run_environment::interfaces::{
@@ -271,9 +272,9 @@ impl LocalProvider {
             })
             .await
             .map_err(|err| match err {
-                SessionAndRepositoryOverviewError::Unauthenticated => {
-                    anyhow!("Invalid token. Run `codspeed auth login` to re-authenticate.")
-                }
+                SessionAndRepositoryOverviewError::Unauthenticated => auth_failed(anyhow!(
+                    "Invalid token. Run `codspeed auth login` to re-authenticate."
+                )),
                 SessionAndRepositoryOverviewError::Other(err) => err,
             })?;
 
