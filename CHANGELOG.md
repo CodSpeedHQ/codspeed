@@ -5,6 +5,15 @@
 
 
 
+## [5.4.2] - 2026-10-09
+
+### <!-- 1 -->🐛 Bug Fixes
+- Always set PYTHONPERFSUPPORT (#577) by @not-matthias in [#577](https://github.com/CodSpeedHQ/runner/pull/577)
+
+### <!-- 7 -->⚙️ Internals
+- Pin exec-harness 1.4.1 (#580) by @adriencaccia in [#580](https://github.com/CodSpeedHQ/runner/pull/580)
+
+
 ## [5.4.1] - 2026-10-09
 
 ### <!-- 0 -->🚀 Features
@@ -1631,6 +1640,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[5.4.2]: https://github.com/CodSpeedHQ/runner/compare/v5.4.1..v5.4.2
 [5.4.1]: https://github.com/CodSpeedHQ/runner/compare/v5.4.0..v5.4.1
 [5.4.0]: https://github.com/CodSpeedHQ/runner/compare/v5.3.1..v5.4.0
 [5.3.1]: https://github.com/CodSpeedHQ/runner/compare/v5.3.0..v5.3.1
