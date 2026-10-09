@@ -66,9 +66,9 @@ fn bench(bencher: Bencher, n: usize, payload: Payload) {
     let artifact = unsafe { memmap2::Mmap::map(&file) }.unwrap();
 
     let find = || {
-        MemtrackArtifact::decode_module_events(&artifact[..])
+        MemtrackArtifact::decode_module_events(&artifact)
             .unwrap()
-            .count()
+            .len()
     };
     assert_eq!(find(), module_events);
 
