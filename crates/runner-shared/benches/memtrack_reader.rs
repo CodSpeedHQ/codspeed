@@ -19,8 +19,9 @@ fn main() {
     divan::main();
 }
 
-/// Artifact sizes in events.
-const WALLTIME_MODE_SIZES: &[usize] = &[1_000_000];
+/// Artifact sizes in events, up to a CI-sized artifact with enough frames to
+/// show how the parallel frame scan scales.
+const WALLTIME_MODE_SIZES: &[usize] = &[1_000_000, 10_000_000, 100_000_000];
 
 /// Under the simulation and memory instruments, generating and searching
 /// larger artifacts outlasts the CI job, so these modes only search the
