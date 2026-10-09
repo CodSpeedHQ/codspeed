@@ -3659,6 +3659,7 @@ dependencies = [
  "libc",
  "linux-perf-event-reader 0.10.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "log",
+ "memmap2",
  "rand 0.8.6",
  "rayon",
  "rmp",
@@ -3666,6 +3667,7 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_json",
+ "tempfile",
  "zstd",
 ]
 
