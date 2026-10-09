@@ -1,3 +1,9 @@
+// The release binary targets musl, whose allocator is slow on small
+// allocations and serializes threads. Decoding memtrack artifacts allocates per
+// event, which made post-processing take minutes on large artifacts.
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use codspeed_runner::{clean_logger, cli};
 use console::style;
 use log::log_enabled;
