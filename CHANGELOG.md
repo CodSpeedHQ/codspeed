@@ -5,6 +5,36 @@
 
 
 
+## [5.4.1] - 2026-10-09
+
+### <!-- 0 -->🚀 Features
+- Apply the shared runtime env and node wrapper by @not-matthias
+- Share the benchmark runtime env and add a node wrapper by @not-matthias
+- Emit Python and Node perf maps in memory mode by @not-matthias
+- Harvest perf maps and JIT unwind data for memtrack by @not-matthias
+
+### <!-- 1 -->🐛 Bug Fixes
+- Emit the Node perf map in memory mode by @not-matthias in [#556](https://github.com/CodSpeedHQ/runner/pull/556)
+- Only pass --interpreted-frames-native-stack in analysis mode by @not-matthias
+- Keep every placement of a module mapped more than once by @not-matthias
+- Label dropped benchmarks in the comparison table (#570) by @adriencaccia in [#570](https://github.com/CodSpeedHQ/runner/pull/570)
+- Compare mapped module identity against a mapping, not stat by @not-matthias in [#563](https://github.com/CodSpeedHQ/runner/pull/563)
+- Restore uretprobe-hijacked return addresses in captured stacks by @not-matthias
+
+### <!-- 2 -->🏗️ Refactor
+- Split stack copy and hash into helpers by @not-matthias in [#564](https://github.com/CodSpeedHQ/runner/pull/564)
+
+### <!-- 6 -->🧪 Testing
+- Cover Python and Node allocations with JIT symbols by @not-matthias
+- Run the executor tests against an unreleased valgrind (#571) by @lvaroqui in [#571](https://github.com/CodSpeedHQ/runner/pull/571)
+- Reproduce uretprobe trampoline in nested allocator stacks by @not-matthias
+- Run executor tests end-to-end in docker by @GuillaumeLagrange in [#566](https://github.com/CodSpeedHQ/runner/pull/566)
+
+### <!-- 7 -->⚙️ Internals
+- Pin memtrack 1.6.1 and exec-harness 1.4.0 (#575) by @adriencaccia in [#575](https://github.com/CodSpeedHQ/runner/pull/575)
+- Add a concurrency group to the CI workflow (#573) by @lvaroqui in [#573](https://github.com/CodSpeedHQ/runner/pull/573)
+
+
 ## [5.4.0] - 2026-10-02
 
 ### <!-- 0 -->🚀 Features
@@ -1601,6 +1631,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[5.4.1]: https://github.com/CodSpeedHQ/runner/compare/v5.4.0..v5.4.1
 [5.4.0]: https://github.com/CodSpeedHQ/runner/compare/v5.3.1..v5.4.0
 [5.3.1]: https://github.com/CodSpeedHQ/runner/compare/v5.3.0..v5.3.1
 [5.3.0]: https://github.com/CodSpeedHQ/runner/compare/v5.2.1..v5.3.0
