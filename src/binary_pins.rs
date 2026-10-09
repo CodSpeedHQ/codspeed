@@ -109,17 +109,17 @@ impl ValgrindTarget {
 }
 
 const MEMTRACK_INSTALLER: BinaryPin = BinaryPin {
-    version: "1.6.0",
+    version: "1.6.1",
     url_template: "https://github.com/CodSpeedHQ/codspeed/releases/download/memtrack-v{version}/memtrack-installer.sh",
-    sha256: "e95bbf4f3754ad3303a1e40c8193aba2be98aa7b4cbff470178f87f07159f434",
+    sha256: "3912e92bed8fe5d4ad85bb4208edec71e5b707a6fd8fb73dd9625b890b04f438",
 };
 #[cfg(target_os = "linux")]
 pub const MEMTRACK_VERSION: &str = MEMTRACK_INSTALLER.version;
 
 const EXEC_HARNESS_INSTALLER: BinaryPin = BinaryPin {
-    version: "1.3.0",
+    version: "1.4.0",
     url_template: "https://github.com/CodSpeedHQ/codspeed/releases/download/exec-harness-v{version}/exec-harness-installer.sh",
-    sha256: "75cbff4fdaefe98927d24fff43fd600c621eb1263b0c40b0fd32c68fa6d88ebd",
+    sha256: "cb6c76e23de9fa0ca045c92bc889665a5de55588e55fd6e208e6bac242801402",
 };
 pub const EXEC_HARNESS_VERSION: &str = EXEC_HARNESS_INSTALLER.version;
 
