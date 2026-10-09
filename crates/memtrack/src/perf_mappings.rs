@@ -66,6 +66,7 @@ impl PerfMappingPoller {
             }
             mappings.sort_unstable_by_key(|event| (event.pid, event.timestamp));
             if !mappings.is_empty() {
+                crate::ebpf::stats::add_sent(mappings.len());
                 let _ = tx.send(mappings);
             }
         });

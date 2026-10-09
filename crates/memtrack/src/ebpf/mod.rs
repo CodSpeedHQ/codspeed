@@ -6,6 +6,7 @@ pub(crate) mod poller;
 mod proc_fs;
 mod spawn;
 mod stacks;
+pub mod stats;
 mod tracker;
 
 pub use memtrack::{
