@@ -2,7 +2,7 @@ use base64::{Engine, engine::general_purpose};
 use crc_fast::{CrcAlgorithm, Digest};
 
 use crate::prelude::*;
-use crate::upload::interfaces::ProfileMetadata;
+use crate::upload::interfaces::ProfileArchiveMetadata;
 use bytes::Bytes;
 use std::io::{Read, SeekFrom};
 use std::path::PathBuf;
@@ -18,7 +18,7 @@ const DEFAULT_CONCURRENT_PART_UPLOADS: usize = 8;
 /// Overrides [`DEFAULT_CONCURRENT_PART_UPLOADS`]
 const CONCURRENT_PART_UPLOADS_ENV: &str = "CODSPEED_UPLOAD_CONCURRENCY";
 
-static CONCURRENT_PART_UPLOADS: LazyLock<usize> = LazyLock::new(|| {
+pub static CONCURRENT_PART_UPLOADS: LazyLock<usize> = LazyLock::new(|| {
     let Ok(value) = std::env::var(CONCURRENT_PART_UPLOADS_ENV) else {
         return DEFAULT_CONCURRENT_PART_UPLOADS;
     };
@@ -33,22 +33,21 @@ static CONCURRENT_PART_UPLOADS: LazyLock<usize> = LazyLock::new(|| {
     }
 });
 
-pub(super) fn concurrent_part_uploads() -> usize {
-    *CONCURRENT_PART_UPLOADS
-}
-
 const MULTIPART_MIN_PART_SIZE_BYTES: u64 = 16 * 1024 * 1024; // 16 MiB
 /// Bounds how much a failed part has to re-send
 const MULTIPART_MAX_PART_SIZE_BYTES: u64 = 256 * 1024 * 1024; // 256 MiB
-/// More parts than concurrent uploads, so that the upload slots freed by fast parts
-/// pick up remaining work instead of idling while the slowest part finishes
-const PARTS_PER_CONCURRENT_UPLOAD: u64 = 2;
+/// Target number of parts per concurrent upload. Queuing several parts per upload slot
+/// lets a slot freed by a fast part pick up a remaining one instead of idling while the
+/// slowest part finishes.
+///
+/// See [`choose_multipart_part_size`] for how the target is used to determine the actual part size.
+const TARGET_PARTS_PER_CONCURRENT_UPLOAD: u64 = 2;
 const HASH_READ_BUFFER_SIZE: usize = 8 * 1024 * 1024; // 8 MiB
 
 #[derive(Debug)]
 pub struct ProfileArchive {
     pub content: ProfileArchiveContent,
-    pub metadata: ProfileMetadata,
+    pub metadata: ProfileArchiveMetadata,
 }
 
 #[derive(Debug)]
@@ -100,8 +99,7 @@ fn compute_crc64nvmes_from_reader(
     Ok((encode_crc64nvme(whole_digest.finalize()), part_crc64nvmes))
 }
 
-/// [`compute_crc64nvmes_from_reader`] over the content, run on the blocking thread pool
-/// as hashing the whole archive would otherwise stall the async runtime.
+/// [`compute_crc64nvmes_from_reader`] over the content, on the blocking thread pool
 async fn compute_crc64nvmes(
     content: &ProfileArchiveContent,
     part_size: u64,
@@ -124,11 +122,13 @@ async fn compute_crc64nvmes(
     }
 }
 
-/// Split the archive in about `PARTS_PER_CONCURRENT_UPLOAD` parts per concurrent upload,
-/// within the part size bounds. An archive no larger than the minimum part size is a
-/// single part.
+/// Size parts to split the archive in [`TARGET_PARTS_PER_CONCURRENT_UPLOAD`] parts per
+/// concurrent upload, clamped to the part size bounds. The part count therefore drifts
+/// from the target at both ends: a larger archive is split in more parts of
+/// [`MULTIPART_MAX_PART_SIZE_BYTES`], and a smaller one in fewer parts of
+/// [`MULTIPART_MIN_PART_SIZE_BYTES`], down to a single part.
 fn choose_multipart_part_size(size: u64, concurrent_uploads: usize) -> u64 {
-    let target_part_count = concurrent_uploads as u64 * PARTS_PER_CONCURRENT_UPLOAD;
+    let target_part_count = concurrent_uploads as u64 * TARGET_PARTS_PER_CONCURRENT_UPLOAD;
     size.div_ceil(target_part_count)
         .clamp(MULTIPART_MIN_PART_SIZE_BYTES, MULTIPART_MAX_PART_SIZE_BYTES)
 }
@@ -148,10 +148,10 @@ impl ProfileArchive {
 
     async fn new(content: ProfileArchiveContent) -> Result<Self> {
         let size = content.size().await?;
-        let part_size = choose_multipart_part_size(size, concurrent_part_uploads());
+        let part_size = choose_multipart_part_size(size, *CONCURRENT_PART_UPLOADS);
 
         let (crc64nvme, part_crc64nvmes) = compute_crc64nvmes(&content, part_size).await?;
-        let metadata = ProfileMetadata {
+        let metadata = ProfileArchiveMetadata {
             encoding: content.encoding(),
             size,
             crc64nvme,
@@ -263,7 +263,7 @@ mod tests {
         let crc = crc64nvme(b"profile-archive");
         assert_eq!(
             archive.metadata,
-            ProfileMetadata {
+            ProfileArchiveMetadata {
                 encoding: None,
                 size: b"profile-archive".len() as u64,
                 crc64nvme: crc.clone(),
@@ -274,9 +274,14 @@ mod tests {
     }
 
     #[test]
-    fn archive_is_split_in_two_parts_per_concurrent_upload() {
+    fn part_count_hits_the_target_within_the_part_size_bounds() {
         const MIB: u64 = 1024 * 1024;
-        assert_eq!(choose_multipart_part_size(1024 * MIB, 8), 64 * MIB);
+        let size = 1024 * MIB;
+        let part_size = choose_multipart_part_size(size, 8);
+        assert_eq!(
+            size.div_ceil(part_size),
+            8 * TARGET_PARTS_PER_CONCURRENT_UPLOAD
+        );
     }
 
     #[test]

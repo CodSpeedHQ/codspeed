@@ -22,7 +22,9 @@ mod tests {
         Sender,
     };
     use crate::system::SystemInfo;
-    use crate::upload::{LATEST_UPLOAD_METADATA_VERSION, ProfileMetadata, Runner, UploadMetadata};
+    use crate::upload::{
+        LATEST_UPLOAD_METADATA_VERSION, ProfileArchiveMetadata, Runner, UploadMetadata,
+    };
 
     #[test]
     fn test_get_metadata_hash() {
@@ -30,7 +32,7 @@ mod tests {
             repository_provider: RepositoryProvider::GitHub,
             version: Some(LATEST_UPLOAD_METADATA_VERSION),
             tokenless: true,
-            profile_archive: ProfileMetadata {
+            profile_archive_metadata: ProfileArchiveMetadata {
                 encoding: Some("gzip".into()),
                 size: 629145600,
                 crc64nvme: "SVWSLdzczJc=".into(),
@@ -82,7 +84,7 @@ mod tests {
             hash,
             // Caution: when changing this value, we need to ensure that
             // the related backend snapshot remains the same
-            @"07b92482167eaabedd8111906c7d96763d0da5ea951a5be04492413508206261"
+            @"75a9b81695bbea8934d88e221dd3dd98392170904d4775a84145767117555a60"
         );
         assert_json_snapshot!(upload_metadata);
     }
@@ -93,7 +95,7 @@ mod tests {
             repository_provider: RepositoryProvider::Project,
             version: Some(LATEST_UPLOAD_METADATA_VERSION),
             tokenless: false,
-            profile_archive: ProfileMetadata {
+            profile_archive_metadata: ProfileArchiveMetadata {
                 encoding: Some("gzip".into()),
                 size: 20480,
                 crc64nvme: "XMXoclwBfLo=".into(),
@@ -158,7 +160,7 @@ mod tests {
             hash,
             // Caution: when changing this value, we need to ensure that
             // the related backend snapshot remains the same
-            @"5fd485b7ad81097b43268e651dfeec697feb7985f3a8e6e1e5eea39d213262cf"
+            @"c3b2c0af52a3416543c2f9696aa4c12013027d6e190386d5b0babf9fd895bbc7"
         );
         assert_json_snapshot!(upload_metadata);
     }

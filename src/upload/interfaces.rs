@@ -15,7 +15,7 @@ pub struct UploadMetadata {
     pub repository_provider: RepositoryProvider,
     pub version: Option<u32>,
     pub tokenless: bool,
-    pub profile_archive: ProfileMetadata,
+    pub profile_archive_metadata: ProfileArchiveMetadata,
     pub runner: Runner,
     pub run_environment: RunEnvironment,
     pub run_part: Option<RunPart>,
@@ -25,12 +25,12 @@ pub struct UploadMetadata {
     pub run_environment_metadata: RunEnvironmentMetadata,
 }
 
-/// Profile archive, uploaded as an S3 multipart upload in consecutive `part_size`
-/// chunks, the last one holding the remainder. S3 requires parts of 5 MiB to 5 GiB
+/// Metadata of the profile archive, uploaded as an S3 multipart upload in consecutive
+/// `part_size` chunks, the last one holding the remainder. S3 requires parts of 5 MiB to 5 GiB
 /// (the last one excepted from the minimum), and at most 10,000 of them.
 #[derive(Serialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct ProfileMetadata {
+pub struct ProfileArchiveMetadata {
     /// `Content-Encoding` of the archive, such as `gzip`
     pub encoding: Option<String>,
     pub size: u64,

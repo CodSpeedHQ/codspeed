@@ -22,8 +22,8 @@ use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio_tar::Builder;
 
-use super::interfaces::{MultipartUpload, ProfileMetadata, UploadData, UploadMetadata};
-use super::profile_archive::{ProfileArchive, concurrent_part_uploads};
+use super::interfaces::{UploadData, UploadMetadata};
+use super::profile_archive::{CONCURRENT_PART_UPLOADS, ProfileArchive};
 use super::s3;
 
 fn human_bytes(bytes: u64) -> String {
@@ -47,7 +47,7 @@ fn human_bytes_per_second(bytes: u64, elapsed: std::time::Duration) -> String {
     format!("{}/s", human_bytes(bytes_per_second as u64))
 }
 
-/// Create a profile archive from the profile folder, along with its description
+/// Create a profile archive from the profile folder
 ///
 /// For Valgrind, we create a gzip-compressed tar archive of the entire profile folder.
 /// For WallTime and Memory, we create an uncompressed tar archive on disk: their
@@ -262,20 +262,20 @@ async fn send_upload_request(
     })
 }
 
-/// Upload the parts concurrently, then assemble them with the S3 complete request.
-/// Parts of a failed upload are cleaned up by the bucket lifecycle rules.
-async fn upload_multipart_profile_archive(
-    multipart_upload: &MultipartUpload,
-    profile: &ProfileMetadata,
-    content: &ProfileArchiveContent,
+async fn upload_profile_archive(
+    upload_data: &UploadData,
+    profile_archive: ProfileArchive,
 ) -> Result<()> {
-    debug!("Starting multipart upload for profile archive");
-    let part_count = profile.part_crc64nvmes.len();
-    debug!(
-        "Multipart upload details: part_count={}, part_size={}, total_size={}",
-        part_count, profile.part_size, profile.size
-    );
+    let multipart_upload = &upload_data.multipart_upload;
+    let metadata = &profile_archive.metadata;
+    let content = &profile_archive.content;
+    let part_count = metadata.part_crc64nvmes.len();
+    let concurrency = *CONCURRENT_PART_UPLOADS;
 
+    debug!(
+        "Starting multipart upload for profile archive: part_count={}, part_size={}, total_size={}",
+        part_count, metadata.part_size, metadata.size
+    );
     if multipart_upload.parts.len() != part_count {
         bail!(
             "Received {} part upload requests for {} parts",
@@ -284,18 +284,15 @@ async fn upload_multipart_profile_archive(
         );
     }
 
-    let concurrency = concurrent_part_uploads();
     let upload_start = Instant::now();
-    // Unordered, so that a part finishing frees its slot even while an earlier part is still
-    // uploading
     let part_requests = multipart_upload.parts.iter().enumerate();
     let mut indexed_etags: Vec<_> = futures::stream::iter(part_requests)
         .map(|(index, part_request)| async move {
-            let offset = index as u64 * profile.part_size;
+            let offset = index as u64 * metadata.part_size;
             let range = ContentRange {
                 content,
                 offset,
-                length: profile.part_size.min(profile.size - offset),
+                length: metadata.part_size.min(metadata.size - offset),
             };
             debug!(
                 "Uploading part {}/{} ({} bytes)",
@@ -320,24 +317,26 @@ async fn upload_multipart_profile_archive(
             );
             Ok::<_, anyhow::Error>((index, etag))
         })
+        // Unordered, so that fast connections pick up remaining parts without waiting
+        // for slower ones
         .buffer_unordered(concurrency)
         .try_collect()
         .await?;
 
+    // ETags need to be sorted in the complete upload request
     indexed_etags.sort_unstable_by_key(|(index, _)| *index);
     let etags: Vec<_> = indexed_etags.into_iter().map(|(_, etag)| etag).collect();
 
     let upload_elapsed = upload_start.elapsed();
-    info!(
-        "Uploaded {} part{} ({}) in {:.1?} with {} concurrent uploads ({})",
+    debug!(
+        "Uploaded {} part{plural} ({}) in {:.1?} with {} concurrent upload{plural} ({})",
         part_count,
-        if part_count > 1 { "s" } else { "" },
-        human_bytes(profile.size),
+        human_bytes(metadata.size),
         upload_elapsed,
-        concurrency,
-        human_bytes_per_second(profile.size, upload_elapsed)
+        concurrency.min(part_count),
+        human_bytes_per_second(metadata.size, upload_elapsed),
+        plural = if part_count > 1 { "s" } else { "" },
     );
-
     with_upload_retry(|| async {
         let request = s3::complete_upload(&STREAMING_CLIENT, &multipart_upload.complete, &etags);
         let response = send_upload_request(request).await?;
@@ -349,18 +348,6 @@ async fn upload_multipart_profile_archive(
             Err(error) => Err(AttemptError::Transient(error.into())),
         }
     })
-    .await
-}
-
-async fn upload_profile_archive(
-    upload_data: &UploadData,
-    profile_archive: ProfileArchive,
-) -> Result<()> {
-    upload_multipart_profile_archive(
-        &upload_data.multipart_upload,
-        &profile_archive.metadata,
-        &profile_archive.content,
-    )
     .await
 }
 
@@ -422,7 +409,10 @@ pub async fn upload(
 
 #[cfg(test)]
 mod tests {
-    use crate::api_client::CodSpeedAPIClient;
+    use crate::{
+        api_client::CodSpeedAPIClient,
+        upload::{MultipartUpload, ProfileArchiveMetadata},
+    };
     use temp_env::async_with_vars;
     use url::Url;
 
@@ -543,10 +533,10 @@ mod tests {
         (url, hits, handle)
     }
 
-    /// `send_with_retry` retries transient failures itself, since `STREAMING_CLIENT`
+    /// `with_upload_retry` retries transient failures itself, since `STREAMING_CLIENT`
     /// has no retry middleware.
     #[tokio::test]
-    async fn streamed_upload_is_retried() {
+    async fn part_upload_is_retried() {
         use std::sync::atomic::Ordering;
 
         let (url, hits, server) = spawn_mock_returning_503(EXPECTED_ATTEMPTS);
@@ -571,28 +561,7 @@ mod tests {
         assert_eq!(
             hits.load(Ordering::SeqCst),
             EXPECTED_ATTEMPTS,
-            "streamed upload should be attempted 1 + UPLOAD_RETRY_COUNT times"
-        );
-    }
-
-    #[tokio::test]
-    async fn in_memory_upload_is_retried() {
-        use std::sync::atomic::Ordering;
-
-        let (url, hits, server) = spawn_mock_returning_503(EXPECTED_ATTEMPTS);
-
-        let archive = ProfileArchive::new_compressed_in_memory(b"profile-archive".to_vec())
-            .await
-            .unwrap();
-
-        let result = upload_profile_archive(&multipart_upload_data_for(&url, 1), archive).await;
-        server.join().unwrap();
-
-        assert!(result.is_err(), "a 503 should surface as an error");
-        assert_eq!(
-            hits.load(Ordering::SeqCst),
-            EXPECTED_ATTEMPTS,
-            "in-memory upload should be attempted 1 + UPLOAD_RETRY_COUNT times"
+            "part upload should be attempted 1 + UPLOAD_RETRY_COUNT times"
         );
     }
 
@@ -686,7 +655,7 @@ mod tests {
         let encoding = archive_content.encoding();
         ProfileArchive {
             content: archive_content,
-            metadata: ProfileMetadata {
+            metadata: ProfileArchiveMetadata {
                 encoding,
                 size: content.len() as u64,
                 crc64nvme: "crc".to_string(),

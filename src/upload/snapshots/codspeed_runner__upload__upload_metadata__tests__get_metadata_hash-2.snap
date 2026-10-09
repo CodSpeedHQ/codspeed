@@ -6,7 +6,7 @@ expression: upload_metadata
   "repositoryProvider": "GITHUB",
   "version": 12,
   "tokenless": true,
-  "profileArchive": {
+  "profileArchiveMetadata": {
     "encoding": "gzip",
     "size": 629145600,
     "crc64nvme": "SVWSLdzczJc=",

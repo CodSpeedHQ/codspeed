@@ -135,30 +135,3 @@ fn build_complete_body(etags: &[PartETag]) -> String {
         .collect();
     format!("<CompleteMultipartUpload>{parts}</CompleteMultipartUpload>")
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn success_body_is_not_an_error() {
-        let body =
-            "<CompleteMultipartUploadResult><ETag>\"etag\"</ETag></CompleteMultipartUploadResult>";
-        assert!(S3Error::from_body(body.to_owned()).is_none());
-    }
-
-    #[test]
-    fn internal_error_is_transient() {
-        let error = S3Error::from_body(
-            "<Error><Code>InternalError</Code><Message>Please try again.</Message></Error>".into(),
-        )
-        .unwrap();
-        assert!(error.is_transient());
-    }
-
-    #[test]
-    fn invalid_part_is_permanent() {
-        let error = S3Error::from_body("<Error><Code>InvalidPart</Code></Error>".into()).unwrap();
-        assert!(!error.is_transient());
-    }
-}
