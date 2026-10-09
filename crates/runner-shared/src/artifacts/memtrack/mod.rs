@@ -36,20 +36,27 @@ impl MemtrackArtifact {
         })
     }
 
-    /// Stream only the events that place modules in processes: executable
-    /// mappings, and the forks and execs that inherit or drop them. Offline
-    /// stack attribution needs these few events out of the whole artifact.
-    pub fn decode_module_events<R: std::io::Read>(
-        reader: R,
-    ) -> anyhow::Result<impl Iterator<Item = MemtrackEvent>> {
-        Ok(Self::decode_streamed(reader)?.filter(|event| {
-            matches!(
-                event.kind,
-                MemtrackEventKind::Mapping { .. }
-                    | MemtrackEventKind::Fork { .. }
-                    | MemtrackEventKind::Exec
-            )
-        }))
+    /// Find the events that place modules in processes: executable mappings,
+    /// and the forks and execs that inherit or drop them. Offline stack
+    /// attribution needs these few events out of the whole artifact.
+    ///
+    /// Every frame the encoder writes is a self-contained zstd frame, so frames
+    /// are decoded in parallel; events keep their artifact order. A truncated
+    /// last frame cannot be split off and is streamed instead, so the events
+    /// before the cut are still found.
+    pub fn decode_module_events(artifact: &[u8]) -> anyhow::Result<Vec<MemtrackEvent>> {
+        use rayon::prelude::*;
+
+        let (frames, tail) = split_zstd_frames(artifact);
+        let mut events = frames
+            .par_iter()
+            .map_init(Vec::new, |msgpack, frame| {
+                module_events_in_frame(frame, msgpack)
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?
+            .concat();
+        events.extend(Self::decode_streamed(tail)?.filter(|event| event.kind.is_module_event()));
+        Ok(events)
     }
 
     pub fn is_empty<R: std::io::Read>(reader: R) -> bool {
@@ -58,6 +65,38 @@ impl MemtrackArtifact {
         };
         stream.next().is_none()
     }
+}
+
+/// Split an artifact into its complete zstd frames, plus the unsplittable rest.
+fn split_zstd_frames(mut artifact: &[u8]) -> (Vec<&[u8]>, &[u8]) {
+    let mut frames = Vec::new();
+    while let Ok(len) = zstd::zstd_safe::find_frame_compressed_size(artifact) {
+        let (frame, rest) = artifact.split_at(len);
+        frames.push(frame);
+        artifact = rest;
+    }
+    (frames, artifact)
+}
+
+/// Decompress one frame into `msgpack` and return its module events. Decoding
+/// from the buffer lets strings and stack payloads be read in place instead of
+/// copied out of a stream first. Like [`MemtrackEventStream`], reading stops at
+/// the first event that fails to decode.
+fn module_events_in_frame(
+    frame: &[u8],
+    msgpack: &mut Vec<u8>,
+) -> anyhow::Result<Vec<MemtrackEvent>> {
+    msgpack.clear();
+    zstd::stream::copy_decode(frame, &mut *msgpack)?;
+
+    let mut deserializer = rmp_serde::Deserializer::from_read_ref(msgpack.as_slice());
+    let mut events = Vec::new();
+    while let Ok(event) = MemtrackEvent::deserialize(&mut deserializer) {
+        if event.kind.is_module_event() {
+            events.push(event);
+        }
+    }
+    Ok(events)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -139,6 +178,14 @@ pub enum MemtrackEventKind {
         #[serde(flatten)]
         record: Box<StackRecord>,
     },
+}
+
+impl MemtrackEventKind {
+    /// Whether the event places modules in processes: an executable mapping,
+    /// or a fork or exec that inherits or drops them.
+    pub fn is_module_event(&self) -> bool {
+        matches!(self, Self::Mapping { .. } | Self::Fork { .. } | Self::Exec)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -348,6 +395,81 @@ mod tests {
         let decoded: Vec<_> = MemtrackArtifact::decode_streamed(Cursor::new(file))?.collect();
         assert_eq!(decoded, events);
 
+        Ok(())
+    }
+
+    /// Every event kind, with stack payloads, across several frames and a
+    /// last frame cut short: the parallel frame decoder must find exactly what
+    /// a full streamed decode filtered to module events finds.
+    #[test]
+    fn module_events_match_a_filtered_full_decode() -> anyhow::Result<()> {
+        let kinds = [
+            MemtrackEventKind::Malloc {
+                size: 64,
+                stack_hash: 7,
+            },
+            MemtrackEventKind::Free,
+            MemtrackEventKind::Realloc {
+                old_addr: Some(0x10),
+                size: 128,
+                stack_hash: 0,
+            },
+            MemtrackEventKind::Stack {
+                record: Box::new(StackRecord {
+                    hash: 7,
+                    sp: 0x7fff_0000,
+                    regs: vec![1; 33],
+                    bytes: vec![0xab; 4096],
+                    fp_chain: vec![0x5555_0000, 0x5555_0010],
+                    truncated: true,
+                }),
+            },
+            MemtrackEventKind::Fork { parent_pid: 1 },
+            MemtrackEventKind::Exec,
+            MemtrackEventKind::Rss {
+                member: 1,
+                size: 4096,
+            },
+            MemtrackEventKind::Mapping {
+                path: "/usr/lib/libexample.so".into(),
+                dev: 0x0800_0001,
+                ino: 42,
+                file_offset: 0x1000,
+                len: 0x2000,
+            },
+            MemtrackEventKind::Exit,
+            MemtrackEventKind::Rmap {
+                member: 1,
+                delta: -70_000,
+            },
+        ];
+        let events: Vec<_> = (0..3000u64)
+            .map(|i| MemtrackEvent {
+                pid: 2,
+                tid: 3,
+                timestamp: i,
+                addr: i * 16,
+                kind: kinds[i as usize % kinds.len()].clone(),
+            })
+            .collect();
+
+        let mut artifact = Vec::new();
+        for batch in events.chunks(1000) {
+            let mut writer = MemtrackWriter::new(Vec::<u8>::new())?;
+            for event in batch {
+                writer.write_event(event)?;
+            }
+            artifact.extend_from_slice(&writer.finish()?);
+        }
+        let truncated = &artifact[..artifact.len() - 64];
+
+        for artifact in [&artifact[..], truncated] {
+            let expected: Vec<_> = MemtrackArtifact::decode_streamed(artifact)?
+                .filter(|event| event.kind.is_module_event())
+                .collect();
+            assert!(!expected.is_empty());
+            assert_eq!(MemtrackArtifact::decode_module_events(artifact)?, expected);
+        }
         Ok(())
     }
 
