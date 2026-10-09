@@ -3,6 +3,7 @@
 //! handful of records among millions of allocation events, so the cost is
 //! dominated by everything the search has to read past.
 
+use clap::ValueEnum;
 use divan::Bencher;
 use divan::counter::{BytesCount, ItemsCount};
 use rand::rngs::StdRng;
@@ -10,15 +11,31 @@ use rand::{Rng, SeedableRng};
 use runner_shared::artifacts::{
     MemtrackArtifact, MemtrackEvent, MemtrackEventKind, StackRecord, encode_events,
 };
+use runner_shared::measurement_mode::MeasurementMode;
+use runner_shared::runtime_env::RUNNER_MODE_ENV;
 use std::io::Write;
 
 fn main() {
     divan::main();
 }
 
-/// Artifact sizes in events. CI-sized artifacts take minutes per case with the
-/// streamed decoder under the simulation instrument.
-const SIZES: &[usize] = &[1_000_000];
+/// Artifact sizes in events.
+const WALLTIME_MODE_SIZES: &[usize] = &[1_000_000];
+
+/// Under the simulation and memory instruments, generating and searching
+/// larger artifacts outlasts the CI job, so these modes only search the
+/// smallest artifact.
+const ANALYSIS_MODE_SIZES: &[usize] = &[1_000_000];
+
+fn sizes() -> &'static [usize] {
+    let mode = std::env::var(RUNNER_MODE_ENV)
+        .ok()
+        .and_then(|mode| MeasurementMode::from_str(&mode, true).ok());
+    match mode {
+        Some(MeasurementMode::Simulation | MeasurementMode::Memory) => ANALYSIS_MODE_SIZES,
+        Some(MeasurementMode::Walltime) | None => WALLTIME_MODE_SIZES,
+    }
+}
 
 #[derive(Clone, Copy)]
 enum Payload {
@@ -27,13 +44,13 @@ enum Payload {
 }
 
 /// An artifact without stack capture.
-#[divan::bench(args = SIZES, max_time = 10.0)]
+#[divan::bench(args = sizes(), max_time = 10.0)]
 fn find_module_events(bencher: Bencher, n: usize) {
     bench(bencher, n, Payload::Allocations);
 }
 
 /// An artifact with captured stacks, which make up most of its bytes.
-#[divan::bench(args = SIZES, max_time = 10.0)]
+#[divan::bench(args = sizes(), max_time = 10.0)]
 fn find_module_events_with_stacks(bencher: Bencher, n: usize) {
     bench(bencher, n, Payload::AllocationsAndStacks);
 }
