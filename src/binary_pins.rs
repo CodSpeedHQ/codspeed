@@ -117,9 +117,9 @@ const MEMTRACK_INSTALLER: BinaryPin = BinaryPin {
 pub const MEMTRACK_VERSION: &str = MEMTRACK_INSTALLER.version;
 
 const EXEC_HARNESS_INSTALLER: BinaryPin = BinaryPin {
-    version: "1.4.0",
+    version: "1.4.1",
     url_template: "https://github.com/CodSpeedHQ/codspeed/releases/download/exec-harness-v{version}/exec-harness-installer.sh",
-    sha256: "cb6c76e23de9fa0ca045c92bc889665a5de55588e55fd6e208e6bac242801402",
+    sha256: "e1891561b054e5ef20448a8eb634366d4e4c8bd2508e462d4771da32f182b7c7",
 };
 pub const EXEC_HARNESS_VERSION: &str = EXEC_HARNESS_INSTALLER.version;
 
