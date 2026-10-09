@@ -103,16 +103,7 @@ fn read_mappings(results_folder: &Path) -> Result<Vec<ProcessMapping>> {
 /// Reconstruct mappings across forks because inherited perf events do not
 /// synthesize mappings that already existed when a child was forked.
 fn read_mappings_from_artifact<R: std::io::Read>(reader: R) -> Result<Vec<ProcessMapping>> {
-    let mut timeline = MemtrackArtifact::decode_streamed(reader)?
-        .filter(|event| {
-            matches!(
-                &event.kind,
-                MemtrackEventKind::Exec
-                    | MemtrackEventKind::Mapping { .. }
-                    | MemtrackEventKind::Fork { .. }
-            )
-        })
-        .collect::<Vec<_>>();
+    let mut timeline = MemtrackArtifact::decode_module_events(reader)?.collect::<Vec<_>>();
 
     // Ties break so exec purges before mapping, while fork inherits that mapping.
     timeline.sort_by_key(|event| {
