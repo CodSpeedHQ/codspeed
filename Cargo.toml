@@ -60,6 +60,7 @@ linux-perf-data = { git = "https://github.com/mstange/linux-perf-data.git", rev 
 ] } # unreleased main as of 2026-03-19
 debugid = "0.8.0"
 memmap2 = "0.9.10"
+mimalloc = "0.1"
 nix = { version = "0.31.3", features = ["fs", "time", "user"] }
 futures = "0.3.32"
 runner-shared = { path = "crates/runner-shared" }
