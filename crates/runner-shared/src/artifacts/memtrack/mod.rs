@@ -40,21 +40,21 @@ impl MemtrackArtifact {
     /// and the forks and execs that inherit or drop them. Offline stack
     /// attribution needs these few events out of the whole artifact.
     ///
-    /// Every frame the encoder writes is a self-contained zstd frame, so frames
-    /// are decoded in parallel; events keep their artifact order. A truncated
-    /// last frame cannot be split off and is streamed instead, so the events
-    /// before the cut are still found.
+    /// Events are returned in artifact order. A truncated artifact yields the
+    /// events before the cut.
     pub fn decode_module_events(artifact: &[u8]) -> anyhow::Result<Vec<MemtrackEvent>> {
         use rayon::prelude::*;
 
+        // The encoder writes self-contained zstd frames: split on them and
+        // decode the frames in parallel. Collecting in frame order keeps the
+        // artifact order.
         let (frames, tail) = split_zstd_frames(artifact);
         let mut events = frames
             .par_iter()
-            .map_init(Vec::new, |msgpack, frame| {
-                module_events_in_frame(frame, msgpack)
-            })
+            .map(|frame| module_events_in_frame(frame))
             .collect::<anyhow::Result<Vec<_>>>()?
             .concat();
+        // A truncated last frame cannot be split off; stream it on its own.
         events.extend(Self::decode_streamed(tail)?.filter(|event| event.kind.is_module_event()));
         Ok(events)
     }
@@ -78,25 +78,14 @@ fn split_zstd_frames(mut artifact: &[u8]) -> (Vec<&[u8]>, &[u8]) {
     (frames, artifact)
 }
 
-/// Decompress one frame into `msgpack` and return its module events. Decoding
-/// from the buffer lets strings and stack payloads be read in place instead of
-/// copied out of a stream first. Like [`MemtrackEventStream`], reading stops at
-/// the first event that fails to decode.
-fn module_events_in_frame(
-    frame: &[u8],
-    msgpack: &mut Vec<u8>,
-) -> anyhow::Result<Vec<MemtrackEvent>> {
-    msgpack.clear();
-    zstd::stream::copy_decode(frame, &mut *msgpack)?;
-
-    let mut deserializer = rmp_serde::Deserializer::from_read_ref(msgpack.as_slice());
-    let mut events = Vec::new();
-    while let Ok(event) = MemtrackEvent::deserialize(&mut deserializer) {
-        if event.kind.is_module_event() {
-            events.push(event);
-        }
-    }
-    Ok(events)
+/// Stream one frame and return its module events, holding one decoded event
+/// at a time however large the frame decompresses. Like
+/// [`MemtrackEventStream`], reading stops at the first event that fails to
+/// decode.
+fn module_events_in_frame(frame: &[u8]) -> anyhow::Result<Vec<MemtrackEvent>> {
+    Ok(MemtrackArtifact::decode_streamed(frame)?
+        .filter(|event| event.kind.is_module_event())
+        .collect())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
