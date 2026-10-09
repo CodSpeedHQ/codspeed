@@ -1,15 +1,11 @@
-use crate::binary_installer::ensure_binary_installed;
-use crate::binary_pins::{self, PinnedBinary};
+use crate::cli::self_exe;
 use crate::executor::helpers::capabilities::binary_has_capabilities;
 use crate::executor::helpers::run_with_sudo::{is_root_user, run_with_sudo};
-use crate::executor::{ToolInstallStatus, ToolStatus};
 use crate::prelude::*;
 use caps::Capability;
-use std::path::PathBuf;
-use std::process::Command;
-
-pub const MEMTRACK_COMMAND: &str = "codspeed-memtrack";
-pub const MEMTRACK_CODSPEED_VERSION: &str = binary_pins::MEMTRACK_VERSION;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+use std::time::{Duration, SystemTime};
 
 const MEMTRACK_REQUIRED_CAPS: &[Capability] = &[
     Capability::CAP_DAC_READ_SEARCH,
@@ -18,6 +14,9 @@ const MEMTRACK_REQUIRED_CAPS: &[Capability] = &[
     Capability::CAP_BPF,
     Capability::CAP_SYS_RESOURCE,
 ];
+
+/// Copies of other builds unused for this long are removed.
+const STALE_COPY_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 
 fn memtrack_required_caps_mask() -> u64 {
     MEMTRACK_REQUIRED_CAPS
@@ -28,7 +27,7 @@ fn memtrack_required_caps_mask() -> u64 {
 /// `setcap` grammar form of [`MEMTRACK_REQUIRED_CAPS`]: the lowercase cap names
 /// (libcap renders them lowercase) joined with commas and the `+ep`
 /// effective+permitted flag. Derived from the enum so the two never drift.
-fn memtrack_setcap_spec() -> String {
+pub(crate) fn memtrack_setcap_spec() -> String {
     let caps = MEMTRACK_REQUIRED_CAPS
         .iter()
         .map(|c| c.to_string().to_lowercase())
@@ -37,14 +36,75 @@ fn memtrack_setcap_spec() -> String {
     format!("{caps}+ep")
 }
 
-fn memtrack_path() -> Option<PathBuf> {
-    which::which(MEMTRACK_COMMAND).ok()
+/// The binary that carries the eBPF capabilities: a copy of this executable, so
+/// the runner itself never runs in glibc's secure-execution mode, which strips
+/// `LD_*` and similar variables from the environment benchmarks inherit.
+/// Granted `+ep`, not inheritable, so a benchmark spawned from it does not
+/// receive them.
+///
+/// Keyed by a hash of this executable, and copied there on first use. The copy's
+/// directory mtime records its last use.
+pub fn memtrack_path() -> Result<PathBuf> {
+    static PATH: OnceLock<PathBuf> = OnceLock::new();
+    if let Some(path) = PATH.get() {
+        return Ok(path.clone());
+    }
+
+    let exe = self_exe()?;
+    let hash =
+        sha256::try_digest(&exe).with_context(|| format!("failed to hash {}", exe.display()))?;
+    let cache_dir = memtrack_cache_dir()?;
+    let dir = cache_dir.join(hash);
+    let path = dir.join("codspeed");
+    if path.exists() {
+        let _ = std::fs::File::open(&dir).and_then(|dir| dir.set_modified(SystemTime::now()));
+    } else {
+        std::fs::create_dir_all(&dir)
+            .with_context(|| format!("failed to create {}", dir.display()))?;
+        // Renamed into place: `path.exists()` must never accept an interrupted copy.
+        let tmp = dir.join(format!("codspeed.{}.tmp", std::process::id()));
+        std::fs::copy(&exe, &tmp)
+            .with_context(|| format!("failed to copy {} to {}", exe.display(), tmp.display()))?;
+        std::fs::rename(&tmp, &path)
+            .with_context(|| format!("failed to move {} to {}", tmp.display(), path.display()))?;
+        prune_stale_copies(&cache_dir, &dir);
+    }
+
+    Ok(PATH.get_or_init(|| path).clone())
+}
+
+fn prune_stale_copies(cache_dir: &Path, current: &Path) {
+    let Ok(entries) = std::fs::read_dir(cache_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        let is_stale = entry
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .is_ok_and(|modified| modified.elapsed().is_ok_and(|age| age > STALE_COPY_AGE));
+        if dir != current && is_stale {
+            if let Err(e) = std::fs::remove_dir_all(&dir) {
+                debug!(
+                    "Failed to remove stale memtrack copy {}: {e}",
+                    dir.display()
+                );
+            }
+        }
+    }
+}
+
+fn memtrack_cache_dir() -> Result<PathBuf> {
+    let cache = std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))
+        .context("neither XDG_CACHE_HOME nor HOME is set")?;
+    Ok(cache.join("codspeed").join("memtrack"))
 }
 
 /// Whether the installed memtrack binary already carries the required capabilities.
 pub fn has_memtrack_capabilities() -> bool {
-    memtrack_path()
-        .is_some_and(|path| binary_has_capabilities(&path, memtrack_required_caps_mask()))
+    memtrack_path().is_ok_and(|path| binary_has_capabilities(&path, memtrack_required_caps_mask()))
 }
 
 /// Grant memtrack the capabilities it needs to run without sudo.
@@ -54,14 +114,19 @@ pub fn has_memtrack_capabilities() -> bool {
 /// Failures are surfaced as warnings rather than aborting, since the run-time
 /// privilege guard enforces the requirement and reports it clearly.
 pub fn ensure_memtrack_capabilities() -> Result<()> {
+    const MEMTRACK_COMMAND: &str = "codspeed";
+
     if is_root_user() {
         debug!("Running as root, memtrack does not need file capabilities");
         return Ok(());
     }
 
-    let Some(path) = memtrack_path() else {
-        warn!("Could not locate {MEMTRACK_COMMAND} to grant capabilities");
-        return Ok(());
+    let path = match memtrack_path() {
+        Ok(path) => path,
+        Err(e) => {
+            warn!("Could not install {MEMTRACK_COMMAND} to grant capabilities ({e:#})");
+            return Ok(());
+        }
     };
 
     if binary_has_capabilities(&path, memtrack_required_caps_mask()) {
@@ -91,76 +156,4 @@ pub fn ensure_memtrack_capabilities() -> Result<()> {
     }
 
     Ok(())
-}
-
-pub fn get_memtrack_status() -> ToolStatus {
-    let tool_name = MEMTRACK_COMMAND.to_string();
-
-    let is_available = Command::new("which")
-        .arg(MEMTRACK_COMMAND)
-        .output()
-        .is_ok_and(|output| output.status.success());
-    if !is_available {
-        return ToolStatus {
-            tool_name,
-            status: ToolInstallStatus::NotInstalled,
-        };
-    }
-
-    let Ok(version_output) = Command::new(MEMTRACK_COMMAND).arg("--version").output() else {
-        return ToolStatus {
-            tool_name,
-            status: ToolInstallStatus::NotInstalled,
-        };
-    };
-
-    if !version_output.status.success() {
-        return ToolStatus {
-            tool_name,
-            status: ToolInstallStatus::NotInstalled,
-        };
-    }
-
-    let version = String::from_utf8_lossy(&version_output.stdout)
-        .trim()
-        .to_string();
-
-    // Parse the version number from output like "memtrack 1.2.2"
-    let expected = semver::Version::parse(MEMTRACK_CODSPEED_VERSION).unwrap();
-    if let Some(version_str) = version.split_once(' ').map(|(_, v)| v.trim()) {
-        if let Ok(installed) = semver::Version::parse(version_str) {
-            if installed < expected {
-                return ToolStatus {
-                    tool_name,
-                    status: ToolInstallStatus::IncorrectVersion {
-                        version,
-                        message: format!(
-                            "version too old, expecting {MEMTRACK_CODSPEED_VERSION} or higher",
-                        ),
-                    },
-                };
-            }
-            return ToolStatus {
-                tool_name,
-                status: ToolInstallStatus::Installed { version },
-            };
-        }
-    }
-
-    ToolStatus {
-        tool_name,
-        status: ToolInstallStatus::IncorrectVersion {
-            version,
-            message: "could not parse version".to_string(),
-        },
-    }
-}
-
-pub async fn install_memtrack() -> Result<()> {
-    ensure_binary_installed(
-        MEMTRACK_COMMAND,
-        MEMTRACK_CODSPEED_VERSION,
-        PinnedBinary::MemtrackInstaller,
-    )
-    .await
 }

@@ -24,6 +24,9 @@ jobs:
       - uses: ./.github/actions/install-rust
         with:
           components: rustfmt, clippy
+      # Building the runner builds memtrack's vendored libbpf-sys with it.
+      - uses: ./.github/actions/install-bpf-deps
+        if: matrix.os == 'ubuntu-latest'
       - uses: j178/prek-action@bdca6f102f98e2b4c7029491a53dfd366469e33d # v2.0.4
         with:
           extra-args: --all-files
@@ -77,6 +80,7 @@ jobs:
         with:
           submodules: true
       - uses: ./.github/actions/install-rust
+      - uses: ./.github/actions/install-bpf-deps
       - name: Run tests
         run: cargo run -- exec -m simulation,walltime,memory --warmup-time 0s --max-rounds 5 -- sleep 1
 
@@ -87,10 +91,6 @@ jobs:
         with:
           submodules: true
       - uses: ./.github/actions/install-rust
-      - name: Install exec-harness
-        run: |
-          cargo install --path crates/exec-harness --locked
-
       - name: Run tests
         env:
           # Profiling system commands (e.g. `ls`) with samply is not yet supported on MacOS
@@ -209,13 +209,6 @@ jobs:
       - uses: ./.github/actions/install-rust
       - uses: ./.github/actions/install-bpf-deps
 
-      - name: Install memtrack
-        uses: baptiste0928/cargo-install@8195d4f734a149db85385bb4102b42efcd373759 # v3.5.0
-        with:
-          crate: memtrack
-          git: https://github.com/CodSpeedHQ/codspeed
-          commit: ${{ env.CODSPEED_REV }}
-
       - name: Install codspeed-runner
         uses: baptiste0928/cargo-install@8195d4f734a149db85385bb4102b42efcd373759 # v3.5.0
         with:
@@ -229,16 +222,19 @@ jobs:
       - name: Reuse the cached runner install
         run: echo "CARGO_INSTALL_ROOT=$HOME/.cargo-install/codspeed-runner" >> "$GITHUB_ENV"
 
-      - name: Verify installed binaries
+      - name: Verify the installed binary
         run: |
-          which codspeed codspeed-memtrack
+          which codspeed
           codspeed --version
-          codspeed-memtrack --version
 
-      # The benchmarked command is memtrack itself, which needs file capabilities
-      # to load its eBPF programs even though the runner measures walltime.
+      # The benchmarked command is memtrack, a subcommand of the runner binary,
+      # which needs file capabilities to load its eBPF programs even though the
+      # runner measures walltime. The capabilities land on a copy of the runner,
+      # which the benchmarks call as `codspeed-memtrack`.
       - name: Grant memtrack file capabilities
-        run: codspeed setup --mode memory
+        run: |
+          codspeed setup --mode memory
+          sudo ln -s "$(codspeed setup memtrack-path)" /usr/local/bin/codspeed-memtrack
 
       # The write benchmarks overwrite these files every round; creating them
       # inside a measured round would time one-off disk allocation.
@@ -256,6 +252,32 @@ jobs:
           runner-version: rev:${{ env.CODSPEED_REV }}
           skip-hash-check-warning: true
 
+  musl-build:
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: true
+      - uses: ./.github/actions/install-rust
+        with:
+          cache-key: ${{ matrix.target }}
+      - uses: ./.github/actions/install-bpf-deps
+      - name: Install the musl toolchain
+        run: |
+          sudo apt-get install -y musl-tools linux-libc-dev
+          rustup target add "${{ matrix.target }}"
+
+      - name: Build
+        run: cargo build --bin codspeed --target "${{ matrix.target }}"
+
   check:
     runs-on: ubuntu-latest
     if: always()
@@ -267,6 +289,7 @@ jobs:
       - basic-run-test
       - macos-basic-run-test
       - bpf-tests
+      - musl-build
       - benchmarks
       - memtrack-benchmarks
     steps:
