@@ -90,8 +90,11 @@ fn read_mappings(results_folder: &Path) -> Result<Vec<ProcessMapping>> {
         }
 
         let file = std::fs::File::open(entry.path())?;
+        // SAFETY: read-only mapping of an artifact memtrack finished writing
+        // before it exited; nothing writes to it while the runner reads it.
+        let artifact = unsafe { memmap2::Mmap::map(&file)? };
         mappings.extend(
-            read_mappings_from_artifact(file)
+            read_mappings_from_artifact(&artifact)
                 .with_context(|| format!("Failed to decode {:?}", entry.path()))?,
         );
     }
@@ -102,8 +105,8 @@ fn read_mappings(results_folder: &Path) -> Result<Vec<ProcessMapping>> {
 
 /// Reconstruct mappings across forks because inherited perf events do not
 /// synthesize mappings that already existed when a child was forked.
-fn read_mappings_from_artifact<R: std::io::Read>(reader: R) -> Result<Vec<ProcessMapping>> {
-    let mut timeline = MemtrackArtifact::decode_module_events(reader)?.collect::<Vec<_>>();
+fn read_mappings_from_artifact(artifact: &[u8]) -> Result<Vec<ProcessMapping>> {
+    let mut timeline = MemtrackArtifact::decode_module_events(artifact)?;
 
     // Ties break so exec purges before mapping, while fork inherits that mapping.
     timeline.sort_by_key(|event| {
@@ -611,7 +614,7 @@ mod tests {
         artifact.encode_to_writer(&mut encoded).unwrap();
 
         assert_eq!(
-            read_mappings_from_artifact(std::io::Cursor::new(encoded)).unwrap(),
+            read_mappings_from_artifact(&encoded).unwrap(),
             vec![
                 ProcessMapping {
                     pid: 7,
@@ -858,7 +861,7 @@ mod tests {
         let artifact = MemtrackArtifact { events };
         let mut encoded = Vec::new();
         artifact.encode_to_writer(&mut encoded).unwrap();
-        read_mappings_from_artifact(std::io::Cursor::new(encoded)).unwrap()
+        read_mappings_from_artifact(&encoded).unwrap()
     }
 
     fn mapping_summary(mappings: &[ProcessMapping]) -> Vec<(pid_t, &str, u64)> {
