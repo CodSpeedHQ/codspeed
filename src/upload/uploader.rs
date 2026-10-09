@@ -10,53 +10,48 @@ use crate::{
 };
 use async_compression::tokio::write::GzipEncoder;
 use console::style;
+use futures::{StreamExt, TryStreamExt};
 use reqwest::StatusCode;
 use reqwest_retry::{
     DefaultRetryableStrategy, RetryDecision, RetryPolicy, Retryable, RetryableStrategy,
 };
 use serde_json::Value;
 use std::collections::BTreeMap;
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio_tar::Builder;
 
 use super::interfaces::{UploadData, UploadMetadata};
-use super::profile_archive::ProfileArchive;
+use super::profile_archive::{CONCURRENT_PART_UPLOADS, ProfileArchive};
+use super::s3;
 
-fn bytes_to_mib(bytes: u64) -> u64 {
-    bytes / (1024 * 1024)
-}
+fn human_bytes(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
 
-/// Maximum allowed profile archive size in bytes before upload is rejected
-const MAX_UPLOAD_PROFILE_SIZE_BYTES: u64 = 1024 * 1024 * 1024 * 5; // 5 GiB
-
-/// Calculate the total size of a directory in bytes
-async fn calculate_folder_size(path: &std::path::Path) -> Result<u64> {
-    let mut total_size = 0u64;
-    let mut dirs_to_process = vec![path.to_path_buf()];
-
-    while let Some(current_dir) = dirs_to_process.pop() {
-        let mut entries = tokio::fs::read_dir(&current_dir).await?;
-
-        while let Some(entry) = entries.next_entry().await? {
-            let metadata = entry.metadata().await?;
-            if metadata.is_file() {
-                total_size += metadata.len();
-            } else if metadata.is_dir() {
-                dirs_to_process.push(entry.path());
-            }
-        }
+    if bytes >= GB {
+        format!("{:.2} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.2} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.2} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{bytes}")
     }
-
-    Ok(total_size)
 }
 
-/// Create a profile archive from the profile folder and return its md5 hash encoded in base64
+fn human_bytes_per_second(bytes: u64, elapsed: std::time::Duration) -> String {
+    let bytes_per_second = bytes as f64 / elapsed.as_secs_f64();
+    format!("{}/s", human_bytes(bytes_per_second as u64))
+}
+
+/// Create a profile archive from the profile folder
 ///
 /// For Valgrind, we create a gzip-compressed tar archive of the entire profile folder.
-/// For WallTime, we check the folder size and create either a compressed or uncompressed tar archive
-/// based on the [`MAX_UPLOAD_PROFILE_SIZE_BYTES`] threshold.
+/// For WallTime and Memory, we create an uncompressed tar archive on disk: their
+/// profiles are already compressed, so gzip would barely shrink them.
 async fn create_profile_archive(
     profile_folder: &std::path::Path,
     executor_name: ExecutorName,
@@ -71,13 +66,10 @@ async fn create_profile_archive(
             let mut gzip_encoder = tar.into_inner().await?;
             gzip_encoder.shutdown().await?;
             let data = gzip_encoder.into_inner();
-            ProfileArchive::new_compressed_in_memory(data)
+            ProfileArchive::new_compressed_in_memory(data).await?
         }
         ExecutorName::Memory | ExecutorName::WallTime => {
-            // Check folder size to decide on compression
-            let folder_size_bytes = calculate_folder_size(profile_folder).await?;
-            let should_compress = folder_size_bytes >= MAX_UPLOAD_PROFILE_SIZE_BYTES;
-
+            debug!("Creating uncompressed tar archive on disk");
             let temp_file = tempfile::NamedTempFile::new()?;
             let temp_path = temp_file.path().to_path_buf();
 
@@ -87,32 +79,11 @@ async fn create_profile_archive(
             // Persist the temporary file to prevent deletion when temp_file goes out of scope
             let persistent_path = temp_file.into_temp_path().keep()?;
 
-            if should_compress {
-                debug!(
-                    "Profile folder size ({} MiB) exceeds threshold ({} MiB), creating compressed tar.gz archive on disk",
-                    bytes_to_mib(folder_size_bytes),
-                    bytes_to_mib(MAX_UPLOAD_PROFILE_SIZE_BYTES)
-                );
-                let enc = GzipEncoder::new(file);
-                let mut tar = Builder::new(enc);
-                tar.append_dir_all(".", profile_folder).await?;
-                let mut gzip_encoder = tar.into_inner().await?;
-                gzip_encoder.shutdown().await?;
-                gzip_encoder.into_inner().sync_all().await?;
+            let mut tar = Builder::new(file);
+            tar.append_dir_all(".", profile_folder).await?;
+            tar.into_inner().await?.sync_all().await?;
 
-                ProfileArchive::new_compressed_on_disk(persistent_path)?
-            } else {
-                debug!(
-                    "Profile folder size ({} MiB) is below threshold ({} MiB), creating uncompressed tar archive on disk",
-                    bytes_to_mib(folder_size_bytes),
-                    bytes_to_mib(MAX_UPLOAD_PROFILE_SIZE_BYTES)
-                );
-                let mut tar = Builder::new(file);
-                tar.append_dir_all(".", profile_folder).await?;
-                tar.into_inner().await?.sync_all().await?;
-
-                ProfileArchive::new_uncompressed_on_disk(persistent_path)?
-            }
+            ProfileArchive::new_uncompressed_on_disk(persistent_path).await?
         }
     };
 
@@ -122,10 +93,6 @@ async fn create_profile_archive(
         archive_size,
         time_start.elapsed()
     );
-
-    if archive_size > MAX_UPLOAD_PROFILE_SIZE_BYTES {
-        bail!("Profile archive exceeds the maximum allowed size");
-    }
 
     Ok(profile_archive)
 }
@@ -195,110 +162,193 @@ async fn retrieve_upload_data(
     }
 }
 
-/// The retry middleware can't replay a consumed stream, so we rebuild the body from
-/// disk on each attempt. Response-level errors (4xx/5xx) are left for the caller.
-async fn send_streamed_with_retry(
-    upload_data: &UploadData,
-    path: &std::path::Path,
-    archive_size: u64,
-    archive_hash: &str,
-    encoding: Option<String>,
-) -> Result<reqwest::Response> {
+/// A byte range of the archive content, sent as a request body.
+struct ContentRange<'a> {
+    content: &'a ProfileArchiveContent,
+    offset: u64,
+    length: u64,
+}
+
+impl ContentRange<'_> {
+    /// Attach this range as the body of `request`. The body is rebuilt on every call,
+    /// since a streamed body is consumed by the request that sends it.
+    async fn attach(&self, request: reqwest::RequestBuilder) -> Result<reqwest::RequestBuilder> {
+        let body = self.content.body(self.offset, self.length).await?;
+        Ok(request.header("Content-Length", self.length).body(body))
+    }
+}
+
+/// Failure of one attempt of an upload request
+enum AttemptError {
+    /// Worth sending the request again
+    Transient(Error),
+    Permanent(Error),
+}
+
+impl From<Error> for AttemptError {
+    fn from(error: Error) -> Self {
+        AttemptError::Permanent(error)
+    }
+}
+
+/// Run `attempt` until it succeeds, retrying transient failures with the
+/// [`upload_backoff`] policy.
+async fn with_upload_retry<T, Fut>(mut attempt: impl FnMut() -> Fut) -> Result<T>
+where
+    Fut: Future<Output = std::result::Result<T, AttemptError>>,
+{
     let policy = upload_backoff();
     let start = SystemTime::now();
     let mut n_past_retries = 0;
 
     loop {
-        let file = File::open(path)
-            .await
-            .context(format!("Failed to open file at path: {}", path.display()))?;
-        let stream = tokio_util::io::ReaderStream::new(file);
-        let body = reqwest::Body::wrap_stream(stream);
-
-        let mut request = STREAMING_CLIENT
-            .put(upload_data.upload_url.clone())
-            .header("Content-Type", "application/x-tar")
-            .header("Content-Length", archive_size)
-            .header("Content-MD5", archive_hash);
-        if let Some(encoding) = &encoding {
-            request = request.header("Content-Encoding", encoding);
-        }
-
-        let result = request
-            .body(body)
-            .send()
-            .await
-            .map_err(reqwest_middleware::Error::Reqwest);
-
-        let is_transient = matches!(
-            DefaultRetryableStrategy.handle(&result),
-            Some(Retryable::Transient)
-        );
-        if is_transient {
-            if let RetryDecision::Retry { execute_after } =
-                policy.should_retry(start, n_past_retries)
-            {
-                let wait = execute_after
-                    .duration_since(SystemTime::now())
-                    .unwrap_or_default();
-                debug!("Streamed upload attempt failed (transient), retrying in {wait:?}");
-                tokio::time::sleep(wait).await;
-                n_past_retries += 1;
-                continue;
-            }
-        }
-
-        return Ok(result?);
+        let error = match attempt().await {
+            Ok(value) => return Ok(value),
+            Err(AttemptError::Permanent(error)) => return Err(error),
+            Err(AttemptError::Transient(error)) => error,
+        };
+        let RetryDecision::Retry { execute_after } = policy.should_retry(start, n_past_retries)
+        else {
+            return Err(error);
+        };
+        let wait = execute_after
+            .duration_since(SystemTime::now())
+            .unwrap_or_default();
+        debug!("Upload attempt failed (transient), retrying in {wait:?}: {error}");
+        tokio::time::sleep(wait).await;
+        n_past_retries += 1;
     }
+}
+
+/// Send an upload request, failing on a non-success status. Connection errors and
+/// statuses such as 5xx or 429 are reported as transient.
+async fn send_upload_request(
+    request: reqwest::RequestBuilder,
+) -> std::result::Result<reqwest::Response, AttemptError> {
+    /// Bounds reading the body of a failed upload response, only used in the error message
+    const ERROR_BODY_READ_TIMEOUT: Duration = Duration::from_secs(10);
+
+    let result = request
+        .send()
+        .await
+        .map_err(reqwest_middleware::Error::Reqwest);
+    let is_transient = matches!(
+        DefaultRetryableStrategy.handle(&result),
+        Some(Retryable::Transient)
+    );
+    let error = match result {
+        Ok(response) if response.status().is_success() => return Ok(response),
+        Ok(response) => {
+            let status = response.status();
+            // A stalled error body must not keep a retryable failure from being retried
+            let error_text = tokio::time::timeout(ERROR_BODY_READ_TIMEOUT, response.text())
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .unwrap_or_default();
+            anyhow!(
+                "Failed to upload performance report: {}\n  -> {} {}",
+                status,
+                style("Reason:").bold(),
+                style(error_text).red()
+            )
+        }
+        Err(error) => error.into(),
+    };
+    Err(if is_transient {
+        AttemptError::Transient(error)
+    } else {
+        AttemptError::Permanent(error)
+    })
 }
 
 async fn upload_profile_archive(
     upload_data: &UploadData,
     profile_archive: ProfileArchive,
 ) -> Result<()> {
-    let archive_size = profile_archive.content.size().await?;
-    let archive_hash = profile_archive.hash;
+    let multipart_upload = &upload_data.multipart_upload;
+    let metadata = &profile_archive.metadata;
+    let content = &profile_archive.content;
+    let part_count = metadata.part_crc64nvmes.len();
+    let concurrency = *CONCURRENT_PART_UPLOADS;
 
-    let response = match &profile_archive.content {
-        content @ ProfileArchiveContent::CompressedInMemory { data } => {
-            // Use regular client with retry middleware for compressed data
-            let mut request = REQUEST_CLIENT
-                .put(upload_data.upload_url.clone())
-                .header("Content-Type", "application/x-tar")
-                .header("Content-Length", archive_size)
-                .header("Content-MD5", archive_hash);
-
-            if let Some(encoding) = content.encoding() {
-                request = request.header("Content-Encoding", encoding);
-            }
-
-            request.body(data.clone()).send().await?
-        }
-        content @ ProfileArchiveContent::UncompressedOnDisk { path }
-        | content @ ProfileArchiveContent::CompressedOnDisk { path } => {
-            send_streamed_with_retry(
-                upload_data,
-                path,
-                archive_size,
-                &archive_hash,
-                content.encoding(),
-            )
-            .await?
-        }
-    };
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let error_text = response.text().await?;
+    debug!(
+        "Starting multipart upload for profile archive: part_count={}, part_size={}, total_size={}",
+        part_count, metadata.part_size, metadata.size
+    );
+    if multipart_upload.parts.len() != part_count {
         bail!(
-            "Failed to upload performance report: {}\n  -> {} {}",
-            status,
-            style("Reason:").bold(),
-            style(error_text).red()
+            "Received {} part upload requests for {} parts",
+            multipart_upload.parts.len(),
+            part_count
         );
     }
 
-    Ok(())
+    let upload_start = Instant::now();
+    let part_requests = multipart_upload.parts.iter().enumerate();
+    let mut indexed_etags: Vec<_> = futures::stream::iter(part_requests)
+        .map(|(index, part_request)| async move {
+            let offset = index as u64 * metadata.part_size;
+            let range = ContentRange {
+                content,
+                offset,
+                length: metadata.part_size.min(metadata.size - offset),
+            };
+            debug!(
+                "Uploading part {}/{} ({} bytes)",
+                index + 1,
+                part_count,
+                range.length
+            );
+            let part_start = Instant::now();
+            let etag = with_upload_retry(|| async {
+                let request = s3::upload_part(&STREAMING_CLIENT, part_request);
+                let response = send_upload_request(range.attach(request).await?).await?;
+                Ok(s3::part_etag(&response)?)
+            })
+            .await?;
+            let part_elapsed = part_start.elapsed();
+            debug!(
+                "Uploaded part {}/{} in {:.1?} ({})",
+                index + 1,
+                part_count,
+                part_elapsed,
+                human_bytes_per_second(range.length, part_elapsed)
+            );
+            Ok::<_, anyhow::Error>((index, etag))
+        })
+        // Unordered, so that fast connections pick up remaining parts without waiting
+        // for slower ones
+        .buffer_unordered(concurrency)
+        .try_collect()
+        .await?;
+
+    // ETags need to be sorted in the complete upload request
+    indexed_etags.sort_unstable_by_key(|(index, _)| *index);
+    let etags: Vec<_> = indexed_etags.into_iter().map(|(_, etag)| etag).collect();
+
+    let upload_elapsed = upload_start.elapsed();
+    debug!(
+        "Uploaded {} part{plural} ({}) in {:.1?} with {} concurrent upload{plural} ({})",
+        part_count,
+        human_bytes(metadata.size),
+        upload_elapsed,
+        concurrency.min(part_count),
+        human_bytes_per_second(metadata.size, upload_elapsed),
+        plural = if part_count > 1 { "s" } else { "" },
+    );
+    with_upload_retry(|| async {
+        let request = s3::complete_upload(&STREAMING_CLIENT, &multipart_upload.complete, &etags);
+        let response = send_upload_request(request).await?;
+        match s3::check_complete_upload_response(response).await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(error)) if error.is_transient() => Err(AttemptError::Transient(error.into())),
+            Ok(Err(error)) => Err(AttemptError::Permanent(error.into())),
+            // The connection stays open while S3 assembles the parts, and can drop
+            Err(error) => Err(AttemptError::Transient(error.into())),
+        }
+    })
+    .await
 }
 
 #[derive(Clone)]
@@ -359,11 +409,15 @@ pub async fn upload(
 
 #[cfg(test)]
 mod tests {
-    use crate::api_client::CodSpeedAPIClient;
+    use crate::{
+        api_client::CodSpeedAPIClient,
+        upload::{MultipartUpload, ProfileArchiveMetadata},
+    };
     use temp_env::async_with_vars;
     use url::Url;
 
     use super::*;
+    use crate::upload::interfaces::PresignedRequest;
     use std::path::PathBuf;
 
     // TODO: remove the ignore when implementing network mocking
@@ -442,7 +496,7 @@ mod tests {
     const EXPECTED_ATTEMPTS: usize = crate::request_client::UPLOAD_RETRY_COUNT as usize + 1;
 
     /// Answers `503` to each of the next `max_conns` connections, then exits. Returns
-    /// the URL, a counter of connections received, and the server's join handle.
+    /// the base URL, a counter of connections received, and the server's join handle.
     fn spawn_mock_returning_503(
         max_conns: usize,
     ) -> (
@@ -456,7 +510,7 @@ mod tests {
         use std::sync::atomic::{AtomicUsize, Ordering};
 
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let url = format!("http://{}/upload", listener.local_addr().unwrap());
+        let url = format!("http://{}", listener.local_addr().unwrap());
         let hits = Arc::new(AtomicUsize::new(0));
 
         let hits_loop = hits.clone();
@@ -479,18 +533,10 @@ mod tests {
         (url, hits, handle)
     }
 
-    fn upload_data_for(url: String) -> UploadData {
-        UploadData {
-            status: "success".to_string(),
-            upload_url: url,
-            run_id: "test-run".to_string(),
-        }
-    }
-
-    /// On-disk archives stream through `send_streamed_with_retry`, which retries
-    /// transient failures itself since `STREAMING_CLIENT` has no retry middleware.
+    /// `with_upload_retry` retries transient failures itself, since `STREAMING_CLIENT`
+    /// has no retry middleware.
     #[tokio::test]
-    async fn streamed_upload_is_retried() {
+    async fn part_upload_is_retried() {
         use std::sync::atomic::Ordering;
 
         let (url, hits, server) = spawn_mock_returning_503(EXPECTED_ATTEMPTS);
@@ -501,9 +547,11 @@ mod tests {
             .keep()
             .unwrap();
         std::fs::write(&path, b"profile-archive").unwrap();
-        let archive = ProfileArchive::new_uncompressed_on_disk(path).unwrap();
+        let archive = ProfileArchive::new_uncompressed_on_disk(path)
+            .await
+            .unwrap();
 
-        let result = upload_profile_archive(&upload_data_for(url), archive).await;
+        let result = upload_profile_archive(&multipart_upload_data_for(&url, 1), archive).await;
         server.join().unwrap();
 
         assert!(
@@ -513,28 +561,266 @@ mod tests {
         assert_eq!(
             hits.load(Ordering::SeqCst),
             EXPECTED_ATTEMPTS,
-            "streamed upload should be attempted 1 + UPLOAD_RETRY_COUNT times"
+            "part upload should be attempted 1 + UPLOAD_RETRY_COUNT times"
         );
     }
 
-    /// In-memory archives go through `REQUEST_CLIENT`, whose retry middleware handles
-    /// transient failures.
+    struct RecordedRequest {
+        method: String,
+        path: String,
+        headers: BTreeMap<String, String>,
+        body: Vec<u8>,
+    }
+
+    /// Serves the next `max_conns` connections, answering each request with the
+    /// response `respond` builds for it, and returns every request it received.
+    fn spawn_recording_mock(
+        max_conns: usize,
+        respond: impl Fn(&RecordedRequest) -> String + Send + 'static,
+    ) -> (String, std::thread::JoinHandle<Vec<RecordedRequest>>) {
+        use std::io::{BufRead, BufReader, Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+
+        let handle = std::thread::spawn(move || {
+            let mut requests = Vec::new();
+            for stream in listener.incoming().take(max_conns) {
+                let mut stream = stream.unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+
+                let mut request_line = String::new();
+                reader.read_line(&mut request_line).unwrap();
+                let mut parts = request_line.split_whitespace();
+                let method = parts.next().unwrap().to_string();
+                let path = parts.next().unwrap().to_string();
+
+                let mut headers = BTreeMap::new();
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    let line = line.trim_end();
+                    if line.is_empty() {
+                        break;
+                    }
+                    let (name, value) = line.split_once(':').unwrap();
+                    headers.insert(name.to_lowercase(), value.trim().to_string());
+                }
+                let content_length: usize = headers
+                    .get("content-length")
+                    .map_or(0, |value| value.parse().unwrap());
+                let mut body = vec![0u8; content_length];
+                reader.read_exact(&mut body).unwrap();
+
+                let request = RecordedRequest {
+                    method,
+                    path,
+                    headers,
+                    body,
+                };
+                stream.write_all(respond(&request).as_bytes()).unwrap();
+                requests.push(request);
+            }
+            requests
+        });
+
+        (base_url, handle)
+    }
+
+    fn ok_response(extra_headers: &str, body: &str) -> String {
+        format!(
+            "HTTP/1.1 200 OK\r\n{extra_headers}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
+    /// Archive split in `part_size` parts. The checksums are placeholders: the uploader
+    /// sends the headers the API presigned, not checksums of its own.
+    fn multipart_archive(content: &[u8], part_size: u64, in_memory: bool) -> ProfileArchive {
+        let part_count = content.len().div_ceil(part_size as usize);
+        let archive_content = if in_memory {
+            ProfileArchiveContent::CompressedInMemory {
+                data: content.to_vec().into(),
+            }
+        } else {
+            let path = tempfile::NamedTempFile::new()
+                .unwrap()
+                .into_temp_path()
+                .keep()
+                .unwrap();
+            std::fs::write(&path, content).unwrap();
+            ProfileArchiveContent::UncompressedOnDisk { path }
+        };
+        let encoding = archive_content.encoding();
+        ProfileArchive {
+            content: archive_content,
+            metadata: ProfileArchiveMetadata {
+                encoding,
+                size: content.len() as u64,
+                crc64nvme: "crc".to_string(),
+                part_size,
+                part_crc64nvmes: (1..=part_count).map(|part| format!("crc-{part}")).collect(),
+            },
+        }
+    }
+
+    fn multipart_upload_data_for(base_url: &str, part_count: usize) -> UploadData {
+        let presigned = |path: String, header: (&str, String)| PresignedRequest {
+            url: format!("{base_url}{path}"),
+            headers: BTreeMap::from([(header.0.to_string(), header.1)]),
+        };
+        UploadData {
+            status: "success".to_string(),
+            multipart_upload: MultipartUpload {
+                parts: (1..=part_count)
+                    .map(|part| {
+                        presigned(
+                            format!("/part/{part}"),
+                            ("x-amz-checksum-crc64nvme", format!("signed-crc-{part}")),
+                        )
+                    })
+                    .collect(),
+                complete: presigned(
+                    "/complete".to_string(),
+                    ("x-amz-mp-object-size", "signed-size".to_string()),
+                ),
+            },
+            run_id: "test-run".to_string(),
+        }
+    }
+
     #[tokio::test]
-    async fn in_memory_upload_is_retried() {
-        use std::sync::atomic::Ordering;
+    async fn multipart_upload_sends_each_part_then_completes() {
+        assert_multipart_upload_sends_each_part_then_completes(false).await;
+    }
 
-        let (url, hits, server) = spawn_mock_returning_503(EXPECTED_ATTEMPTS);
+    #[tokio::test]
+    async fn multipart_upload_of_in_memory_archive_sends_each_part_then_completes() {
+        assert_multipart_upload_sends_each_part_then_completes(true).await;
+    }
 
-        let archive = ProfileArchive::new_compressed_in_memory(b"profile-archive".to_vec());
+    async fn assert_multipart_upload_sends_each_part_then_completes(in_memory: bool) {
+        let content = b"0123456789";
+        let archive = multipart_archive(content, 4, in_memory);
 
-        let result = upload_profile_archive(&upload_data_for(url), archive).await;
-        server.join().unwrap();
+        let (base_url, server) = spawn_recording_mock(4, |request| {
+            if request.method == "PUT" {
+                let part = request.path.trim_start_matches("/part/");
+                ok_response(&format!("ETag: \"etag-{part}\"\r\n"), "")
+            } else {
+                ok_response("", "<CompleteMultipartUploadResult/>")
+            }
+        });
 
-        assert!(result.is_err(), "a 503 should surface as an error");
+        upload_profile_archive(&multipart_upload_data_for(&base_url, 3), archive)
+            .await
+            .unwrap();
+        let requests = server.join().unwrap();
+
+        let expected_parts: [&[u8]; 3] = [b"0123", b"4567", b"89"];
+        // Parts are uploaded concurrently, so they can reach the server in any order
+        for (index, expected_body) in expected_parts.iter().enumerate() {
+            let path = format!("/part/{}", index + 1);
+            let request = requests[..3]
+                .iter()
+                .find(|request| request.path == path)
+                .unwrap();
+            assert_eq!(request.method, "PUT");
+            assert_eq!(request.body, *expected_body);
+            assert_eq!(
+                request.headers["x-amz-checksum-crc64nvme"],
+                format!("signed-crc-{}", index + 1)
+            );
+        }
+
+        let complete = &requests[3];
+        assert_eq!(complete.method, "POST");
+        assert_eq!(complete.path, "/complete");
+        assert_eq!(complete.headers["x-amz-mp-object-size"], "signed-size");
         assert_eq!(
-            hits.load(Ordering::SeqCst),
-            EXPECTED_ATTEMPTS,
-            "in-memory upload should be attempted 1 + UPLOAD_RETRY_COUNT times"
+            String::from_utf8(complete.body.clone()).unwrap(),
+            "<CompleteMultipartUpload>\
+             <Part><PartNumber>1</PartNumber><ETag>\"etag-1\"</ETag></Part>\
+             <Part><PartNumber>2</PartNumber><ETag>\"etag-2\"</ETag></Part>\
+             <Part><PartNumber>3</PartNumber><ETag>\"etag-3\"</ETag></Part>\
+             </CompleteMultipartUpload>"
         );
+    }
+
+    #[tokio::test]
+    async fn multipart_upload_retries_completion_error_body() {
+        let archive = multipart_archive(b"0123", 4, false);
+
+        let (base_url, server) = spawn_recording_mock(1 + EXPECTED_ATTEMPTS, |request| {
+            if request.method == "PUT" {
+                ok_response("ETag: \"etag-1\"\r\n", "")
+            } else {
+                ok_response("", "<Error><Code>InternalError</Code></Error>")
+            }
+        });
+
+        let result =
+            upload_profile_archive(&multipart_upload_data_for(&base_url, 1), archive).await;
+        let requests = server.join().unwrap();
+
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains("Failed to complete the performance report upload"),
+            "unexpected error: {error}"
+        );
+        let completion_attempts = requests
+            .iter()
+            .filter(|request| request.path == "/complete")
+            .count();
+        assert_eq!(completion_attempts, EXPECTED_ATTEMPTS);
+    }
+
+    #[tokio::test]
+    async fn multipart_upload_does_not_retry_permanent_completion_error() {
+        let archive = multipart_archive(b"0123", 4, false);
+
+        let (base_url, server) = spawn_recording_mock(2, |request| {
+            if request.method == "PUT" {
+                ok_response("ETag: \"etag-1\"\r\n", "")
+            } else {
+                ok_response("", "<Error><Code>InvalidPart</Code></Error>")
+            }
+        });
+
+        let result =
+            upload_profile_archive(&multipart_upload_data_for(&base_url, 1), archive).await;
+        let requests = server.join().unwrap();
+
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("InvalidPart"), "unexpected error: {error}");
+        let completion_attempts = requests
+            .iter()
+            .filter(|request| request.path == "/complete")
+            .count();
+        assert_eq!(completion_attempts, 1);
+    }
+
+    #[tokio::test]
+    async fn multipart_upload_completes_after_a_retried_error_body() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let archive = multipart_archive(b"0123", 4, false);
+
+        let completion_attempts = AtomicUsize::new(0);
+        let (base_url, server) = spawn_recording_mock(3, move |request| {
+            if request.method == "PUT" {
+                ok_response("ETag: \"etag-1\"\r\n", "")
+            } else if completion_attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+                ok_response("", "<Error><Code>InternalError</Code></Error>")
+            } else {
+                ok_response("", "<CompleteMultipartUploadResult/>")
+            }
+        });
+
+        upload_profile_archive(&multipart_upload_data_for(&base_url, 1), archive)
+            .await
+            .unwrap();
+        server.join().unwrap();
     }
 }
