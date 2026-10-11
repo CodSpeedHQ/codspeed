@@ -44,9 +44,10 @@ impl Executor for ValgrindExecutor {
             ExecutorSupport::FullySupported => {
                 install_valgrind_from_package(system_info, setup_cache_dir).await?
             }
-            // No package exists for this system, so there is nothing to install automatically.
+            // No package exists for this system, so the install is a source build, or the one
+            // a previous run left in the setup cache.
             ExecutorSupport::RequiresManualInstallation => {
-                try_install_from_source(system_info).await?
+                try_install_from_source(system_info, setup_cache_dir).await?
             }
             ExecutorSupport::Unsupported => {
                 bail!(

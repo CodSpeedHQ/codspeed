@@ -259,8 +259,18 @@ fn warn_on_missing_libc_debug_symbols(system_info: &SystemInfo) {
 }
 
 /// Provide valgrind on the systems we publish no package for: take the installation the
-/// user brings, or build one from source, and otherwise ask for a manual installation.
-pub(super) async fn try_install_from_source(system_info: &SystemInfo) -> Result<()> {
+/// user brings, the build a previous run cached, or build one from source, and otherwise
+/// ask for a manual installation.
+pub(super) async fn try_install_from_source(
+    system_info: &SystemInfo,
+    setup_cache_dir: Option<&Path>,
+) -> Result<()> {
+    // A cached build is the installation the user would otherwise bring, so it is restored
+    // before the version check: that is what keeps a warm cache from asking for a build.
+    if let Some(cache_dir) = setup_cache_dir {
+        apt::restore_files_to_root(cache_dir)?;
+    }
+
     if is_valgrind_installed() {
         debug!(
             "Using the valgrind installation already present on {}",
@@ -280,7 +290,7 @@ pub(super) async fn try_install_from_source(system_info: &SystemInfo) -> Result<
     if build_from_source::is_wanted() {
         // A best effort: the toolchain may be missing or the build may fail, in which case
         // the user is pointed to a manual installation like a declined build would be.
-        match build_from_source::build_and_install().await {
+        match build_from_source::build_and_install(setup_cache_dir).await {
             Ok(()) if is_valgrind_installed() => {
                 info!("valgrind-codspeed has been built and installed from source");
                 warn_on_missing_libc_debug_symbols(system_info);

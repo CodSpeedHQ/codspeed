@@ -9,6 +9,7 @@
 //! The build is also opt-in rather than automatic, see [`is_wanted`]: it takes
 //! minutes and installs system-wide, so an interactive user is asked first.
 
+use crate::executor::helpers::apt;
 use crate::executor::helpers::command::CommandBuilder;
 use crate::executor::helpers::confirm::confirm_default_yes;
 use crate::executor::helpers::run_command_with_log_pipe::run_command_with_log_pipe;
@@ -126,11 +127,30 @@ async fn fetch_and_compile() -> Result<TempDir> {
     Ok(source_dir)
 }
 
-/// Install the freshly built valgrind system-wide. Kept out of the rolling
-/// buffer so that a sudo password prompt stays visible to the user.
-async fn install_build(source_dir: &Path) -> Result<()> {
-    let builder = wrap_with_sudo(command_in(source_dir, "make", &["install"]))?;
-    run_build_command(builder).await
+/// Install the freshly built valgrind, into the setup cache when there is one.
+///
+/// With a setup cache, `make install` stages the build under the cache directory instead of the
+/// root filesystem, which puts the files in the same root-relative layout a warm cache holds and
+/// lets a later run skip the build. Kept out of the rolling buffer so that a sudo password prompt
+/// stays visible to the user.
+async fn install_build(source_dir: &Path, setup_cache_dir: Option<&Path>) -> Result<()> {
+    let Some(cache_dir) = setup_cache_dir else {
+        let builder = wrap_with_sudo(command_in(source_dir, "make", &["install"]))?;
+        return run_build_command(builder).await;
+    };
+
+    let cache_dir_str = cache_dir
+        .to_str()
+        .ok_or_else(|| anyhow!("Invalid cache directory path"))?;
+
+    run_build_command(command_in(
+        source_dir,
+        "make",
+        &["install", &format!("DESTDIR={cache_dir_str}")],
+    ))
+    .await?;
+
+    apt::restore_files_to_root(cache_dir)
 }
 
 /// Whether to build valgrind-codspeed from source, asking the user when we can.
@@ -175,7 +195,7 @@ pub(super) fn is_wanted() -> bool {
 ///
 /// Returns an error describing the first failing step, leaving the caller free
 /// to fall back to instructions for a manual installation.
-pub(super) async fn build_and_install() -> Result<()> {
+pub(super) async fn build_and_install(setup_cache_dir: Option<&Path>) -> Result<()> {
     let missing_dependencies = missing_build_dependencies();
     if !missing_dependencies.is_empty() {
         bail!(
@@ -191,7 +211,7 @@ pub(super) async fn build_and_install() -> Result<()> {
     deactivate_rolling_buffer();
 
     let source_dir = compilation_result?;
-    install_build(source_dir.path()).await?;
+    install_build(source_dir.path(), setup_cache_dir).await?;
 
     Ok(())
 }

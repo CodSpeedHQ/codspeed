@@ -105,13 +105,11 @@ pub fn install(system_info: &SystemInfo, packages: &[&str]) -> Result<()> {
     Ok(())
 }
 
-/// Restore cached tools from the cache directory to the root filesystem
-fn restore_from_cache(system_info: &SystemInfo, cache_dir: &Path) -> Result<()> {
-    if !is_system_compatible(system_info) {
-        info!("Cache restore is not supported on this system, skipping");
-        return Ok(());
-    }
-
+/// Copy a root-relative cache tree onto the root filesystem.
+///
+/// The copy is the whole restore mechanism, so it serves both a warm cache and the files a
+/// fresh `make install DESTDIR=<cache_dir>` just staged there.
+pub fn restore_files_to_root(cache_dir: &Path) -> Result<()> {
     if !cache_dir.exists() {
         debug!("Cache directory does not exist: {}", cache_dir.display());
         return Ok(());
@@ -132,6 +130,26 @@ fn restore_from_cache(system_info: &SystemInfo, cache_dir: &Path) -> Result<()> 
         cache_dir.display()
     );
 
+    // Use bash to properly handle glob expansion
+    let cache_dir_str = cache_dir
+        .to_str()
+        .ok_or_else(|| anyhow!("Invalid cache directory path"))?;
+
+    // IMPORTANT: We have to use 'bash' here to ensure that glob patterns are expanded correctly
+    let copy_cmd = format!("cp -r {cache_dir_str}/* /");
+    run_with_sudo("bash", ["-c", &copy_cmd])?;
+
+    debug!("Cache restored successfully");
+    Ok(())
+}
+
+/// Restore cached tools from the cache directory to the root filesystem
+fn restore_from_cache(system_info: &SystemInfo, cache_dir: &Path) -> Result<()> {
+    if !is_system_compatible(system_info) {
+        info!("Cache restore is not supported on this system, skipping");
+        return Ok(());
+    }
+
     // Read and log the metadata file if it exists
     let metadata_path = cache_dir.join(METADATA_FILENAME);
     if metadata_path.exists() {
@@ -150,17 +168,7 @@ fn restore_from_cache(system_info: &SystemInfo, cache_dir: &Path) -> Result<()> 
         debug!("No metadata file found in cache directory");
     }
 
-    // Use bash to properly handle glob expansion
-    let cache_dir_str = cache_dir
-        .to_str()
-        .ok_or_else(|| anyhow!("Invalid cache directory path"))?;
-
-    // IMPORTANT: We have to use 'bash' here to ensure that glob patterns are expanded correctly
-    let copy_cmd = format!("cp -r {cache_dir_str}/* /");
-    run_with_sudo("bash", ["-c", &copy_cmd])?;
-
-    debug!("Cache restored successfully");
-    Ok(())
+    restore_files_to_root(cache_dir)
 }
 
 /// Save installed packages to the cache directory
