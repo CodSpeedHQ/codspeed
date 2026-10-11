@@ -151,10 +151,18 @@ pub async fn run() -> Result<()> {
     )?;
 
     // In the context of the CI, it is likely that a ~ made its way here without being expanded by the shell
+    // The directory is resolved against the current directory here: the cache is read back from
+    // several working directories (a source build stages into it from its own build directory),
+    // so a relative path has to mean one thing for the whole run.
     let setup_cache_dir = cli
         .setup_cache_dir
-        .as_ref()
-        .map(|d| PathBuf::from(shellexpand::tilde(d).as_ref()));
+        .as_deref()
+        .filter(|dir| !dir.is_empty())
+        .map(|dir| {
+            let dir = shellexpand::tilde(dir);
+            std::path::absolute(&*dir)
+        })
+        .transpose()?;
     let setup_cache_dir = setup_cache_dir.as_deref();
 
     match cli.command {

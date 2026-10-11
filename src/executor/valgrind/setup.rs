@@ -265,12 +265,6 @@ pub(super) async fn try_install_from_source(
     system_info: &SystemInfo,
     setup_cache_dir: Option<&Path>,
 ) -> Result<()> {
-    // A cached build is the installation the user would otherwise bring, so it is restored
-    // before the version check: that is what keeps a warm cache from asking for a build.
-    if let Some(cache_dir) = setup_cache_dir {
-        apt::restore_files_to_root(cache_dir)?;
-    }
-
     if is_valgrind_installed() {
         debug!(
             "Using the valgrind installation already present on {}",
@@ -278,6 +272,18 @@ pub(super) async fn try_install_from_source(
         );
         warn_on_missing_libc_debug_symbols(system_info);
         return Ok(());
+    }
+
+    // A cached build is the installation the user would otherwise bring, so it is restored
+    // before the build prompt: that is what keeps a warm cache from asking for a build.
+    if let Some(cache_dir) = setup_cache_dir {
+        apt::restore_files_to_root(cache_dir)?;
+
+        if is_valgrind_installed() {
+            info!("valgrind-codspeed has been restored from the setup cache");
+            warn_on_missing_libc_debug_symbols(system_info);
+            return Ok(());
+        }
     }
 
     // The build compiles for a few minutes and installs system-wide, so the user decides

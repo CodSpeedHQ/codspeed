@@ -135,8 +135,11 @@ pub fn restore_files_to_root(cache_dir: &Path) -> Result<()> {
         .to_str()
         .ok_or_else(|| anyhow!("Invalid cache directory path"))?;
 
-    // IMPORTANT: We have to use 'bash' here to ensure that glob patterns are expanded correctly
-    let copy_cmd = format!("cp -r {cache_dir_str}/* /");
+    // IMPORTANT: We have to use 'bash' here to ensure that glob patterns are expanded correctly.
+    // The directory is single-quoted, so that a path containing a space or a glob character
+    // survives the shell's word splitting and reaches cp as one argument.
+    let quoted_dir = cache_dir_str.replace('\'', r"'\''");
+    let copy_cmd = format!("cp -r '{quoted_dir}'/* /");
     run_with_sudo("bash", ["-c", &copy_cmd])?;
 
     debug!("Cache restored successfully");
