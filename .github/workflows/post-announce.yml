@@ -66,16 +66,16 @@ jobs:
           done
           gh release upload "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" --clobber ./*.sha256.sum
 
-      - name: Refresh the CodSpeed eBPF allowlist
-        env:
-          REVALIDATE_TOKEN: ${{ secrets.EBPF_ALLOWLIST_REVALIDATE_TOKEN }}
-        run: |
-          curl -fsS --retry 3 -X POST \
-            -H "Authorization: Bearer ${REVALIDATE_TOKEN}" \
-            https://app.codspeed.io/api/ebpf-allowlist/revalidate
-          # Rebuild it now rather than on the first runner's request.
-          curl -fsS --retry 3 -o /dev/null \
-            https://app.codspeed.io/api/ebpf-allowlist
+      # - name: Refresh the CodSpeed eBPF allowlist
+      #   env:
+      #     REVALIDATE_TOKEN: ${{ secrets.EBPF_ALLOWLIST_REVALIDATE_TOKEN }}
+      #   run: |
+      #     curl -fsS --retry 3 -X POST \
+      #       -H "Authorization: Bearer ${REVALIDATE_TOKEN}" \
+      #       https://app.codspeed.io/api/ebpf-allowlist/revalidate
+      #     # Rebuild it now rather than on the first runner's request.
+      #     curl -fsS --retry 3 -o /dev/null \
+      #       https://app.codspeed.io/api/ebpf-allowlist
 
       - name: Mark release as latest
         if: steps.check_runner.outputs.runner_released == 'true'
