@@ -15,6 +15,9 @@ use runner_shared::measurement_mode::MeasurementMode;
 use runner_shared::runtime_env::RUNNER_MODE_ENV;
 use std::io::Write;
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 fn main() {
     divan::main();
 }

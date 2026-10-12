@@ -16,7 +16,8 @@ use runner_shared::artifacts::{
 /// there anyway.
 #[cfg(not(codspeed))]
 #[global_allocator]
-static ALLOC: divan::AllocProfiler = divan::AllocProfiler::system();
+static ALLOC: divan::AllocProfiler<mimalloc::MiMalloc> =
+    divan::AllocProfiler::new(mimalloc::MiMalloc);
 
 fn main() {
     divan::main();

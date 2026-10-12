@@ -28,6 +28,7 @@ zstd = "0.13.3"
 [dev-dependencies]
 divan = { version = "4.2.0", package = "codspeed-divan-compat" }
 memmap2 = "0.9.10"
+mimalloc = { workspace = true }
 rand = "0.8"
 tempfile = { workspace = true }
 
