@@ -2402,6 +2402,7 @@ dependencies = [
  "clap",
  "crossbeam-channel",
  "env_logger",
+ "exec-harness",
  "insta",
  "ipc-channel",
  "itertools 0.14.0",

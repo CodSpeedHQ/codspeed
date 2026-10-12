@@ -4,24 +4,16 @@ mod shared;
 use memtrack::TrackerOptions;
 use runner_shared::artifacts::{MemtrackEvent, MemtrackEventKind};
 use runner_shared::measurement_mode::MeasurementMode;
-use runner_shared::runtime_env;
 use std::path::Path;
 use std::process::Command;
 
 const ALLOCATION_SIZE: u64 = 2_000_001;
-const NODE_PROGRAM: &str = "node";
-/// Writes /tmp/perf-<pid>.map.
-const NODE_PERF_MAP_FLAG: &str = "--perf-basic-prof";
 
-/// Applies the memory-mode runtime env the runner injects, and makes Node
-/// emit its perf map like exec-harness's `node` wrapper does in memory mode.
+/// Runs `program` with the env exec-harness sets for memory-mode benchmarks.
 fn memory_mode_command(program: &str, fixture_path: &str) -> anyhow::Result<Command> {
     let mut command = Command::new(program);
-    if program == NODE_PROGRAM {
-        command.arg(NODE_PERF_MAP_FLAG);
-    }
     command.arg(fixture_path);
-    command.envs(runtime_env::env(MeasurementMode::Memory));
+    command.envs(exec_harness::runtime_env::env(MeasurementMode::Memory)?);
     Ok(command)
 }
 
@@ -87,7 +79,7 @@ fn test_python_allocation_has_jit_symbol() -> anyhow::Result<()> {
 #[test_with::env(GITHUB_ACTIONS)]
 #[test_log::test]
 fn test_node_allocation_has_jit_symbol() -> anyhow::Result<()> {
-    let command = memory_mode_command(NODE_PROGRAM, &fixture("node_alloc.js"))?;
+    let command = memory_mode_command("node", &fixture("node_alloc.js"))?;
     let (events, thread_handle) = shared::track_command(command, stack_capture())?;
 
     assert_perf_map_symbol(allocation_pid(&events), "JS:~allocation ");

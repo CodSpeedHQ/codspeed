@@ -5,7 +5,7 @@ use std::io::{self, BufRead};
 pub mod analysis;
 pub mod constants;
 pub mod prelude;
-mod runtime_env;
+pub mod runtime_env;
 mod uri;
 pub mod walltime;
 
