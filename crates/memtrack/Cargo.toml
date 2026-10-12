@@ -49,6 +49,7 @@ bindgen = "0.72"
 
 [dev-dependencies]
 tempfile = { workspace = true }
+exec-harness = { path = "../exec-harness" }
 rstest = { workspace = true }
 test-log = { workspace = true }
 insta = { workspace = true, features = ["json", "redactions"] }
