@@ -40,6 +40,49 @@ jobs:
             echo "Runner version ${NEW_VERSION} was released"
           fi
 
+      # The archives and the final dist-manifest.json built earlier in this run.
+      - name: Download release artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: artifacts-*
+          path: artifacts
+          merge-multiple: true
+
+      # Publish the SHA-256 of every released executable, as extracted from its
+      # archive, as `<executable>-<target>.sha256.sum` holding one
+      # `<hex> *<executable>` line. The CodSpeed eBPF allowlist is built from them.
+      - name: Publish executable hashes
+        shell: bash
+        working-directory: artifacts
+        env:
+          RELEASE_TAG: ${{ steps.check_runner.outputs.release_tag }}
+        run: |
+          jq -r '.artifacts | to_entries[]
+            | select(.value.kind == "executable-zip")
+            | .key as $archive
+            | .value.target_triples[0] as $target
+            | .value.assets[]
+            | select(.kind == "executable")
+            | [$archive, $target, .path] | @tsv' dist-manifest.json |
+          while IFS=$'\t' read -r archive target path; do
+            executable=$(basename "$path")
+            hash=$(tar -xzOf "$archive" "${archive%.tar.gz}/$path" | sha256sum | cut -d' ' -f1)
+            echo "$hash *$executable" > "$executable-$target.sha256.sum"
+            echo "$executable ($target): $hash"
+          done
+          gh release upload "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" --clobber ./*.sha256.sum
+
+      - name: Refresh the CodSpeed eBPF allowlist
+        env:
+          REVALIDATE_TOKEN: ${{ secrets.EBPF_ALLOWLIST_REVALIDATE_TOKEN }}
+        run: |
+          curl -fsS --retry 3 -X POST \
+            -H "Authorization: Bearer ${REVALIDATE_TOKEN}" \
+            https://app.codspeed.io/api/ebpf-allowlist/revalidate
+          # Rebuild it now rather than on the first runner's request.
+          curl -fsS --retry 3 -o /dev/null \
+            https://app.codspeed.io/api/ebpf-allowlist
+
       - name: Mark release as latest
         if: steps.check_runner.outputs.runner_released == 'true'
         run: |
