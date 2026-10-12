@@ -4,10 +4,17 @@ expression: upload_metadata
 ---
 {
   "repositoryProvider": "PROJECT",
-  "version": 11,
+  "version": 12,
   "tokenless": false,
-  "profileMd5": "tfC4VxYiYdJcTWpHpv4Ouw==",
-  "profileEncoding": "gzip",
+  "profileArchiveMetadata": {
+    "encoding": "gzip",
+    "size": 20480,
+    "crc64nvme": "XMXoclwBfLo=",
+    "partSize": 16777216,
+    "partCrc64nvmes": [
+      "XMXoclwBfLo="
+    ]
+  },
   "runner": {
     "name": "codspeed-runner",
     "version": "4.11.1",

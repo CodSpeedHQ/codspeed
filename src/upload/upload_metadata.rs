@@ -22,7 +22,9 @@ mod tests {
         Sender,
     };
     use crate::system::SystemInfo;
-    use crate::upload::{LATEST_UPLOAD_METADATA_VERSION, Runner, UploadMetadata};
+    use crate::upload::{
+        LATEST_UPLOAD_METADATA_VERSION, ProfileArchiveMetadata, Runner, UploadMetadata,
+    };
 
     #[test]
     fn test_get_metadata_hash() {
@@ -30,8 +32,17 @@ mod tests {
             repository_provider: RepositoryProvider::GitHub,
             version: Some(LATEST_UPLOAD_METADATA_VERSION),
             tokenless: true,
-            profile_md5: "jp/k05RKuqP3ERQuIIvx4Q==".into(),
-            profile_encoding: Some("gzip".into()),
+            profile_archive_metadata: ProfileArchiveMetadata {
+                encoding: Some("gzip".into()),
+                size: 629145600,
+                crc64nvme: "SVWSLdzczJc=".into(),
+                part_size: 268435456,
+                part_crc64nvmes: vec![
+                    "w7Dr86r5+2I=".into(),
+                    "puujmsfPTns=".into(),
+                    "Tt/QAZdhKk4=".into(),
+                ],
+            },
             runner: Runner {
                 name: "codspeed-runner".into(),
                 version: "2.1.0".into(),
@@ -73,7 +84,7 @@ mod tests {
             hash,
             // Caution: when changing this value, we need to ensure that
             // the related backend snapshot remains the same
-            @"b6e221583869b0a49498d71538432a5396b08fec7783081dcdf23c9e037a9365"
+            @"75a9b81695bbea8934d88e221dd3dd98392170904d4775a84145767117555a60"
         );
         assert_json_snapshot!(upload_metadata);
     }
@@ -84,8 +95,13 @@ mod tests {
             repository_provider: RepositoryProvider::Project,
             version: Some(LATEST_UPLOAD_METADATA_VERSION),
             tokenless: false,
-            profile_md5: "tfC4VxYiYdJcTWpHpv4Ouw==".into(),
-            profile_encoding: Some("gzip".into()),
+            profile_archive_metadata: ProfileArchiveMetadata {
+                encoding: Some("gzip".into()),
+                size: 20480,
+                crc64nvme: "XMXoclwBfLo=".into(),
+                part_size: 16777216,
+                part_crc64nvmes: vec!["XMXoclwBfLo=".into()],
+            },
             runner: Runner {
                 name: "codspeed-runner".into(),
                 version: "4.11.1".into(),
@@ -144,7 +160,7 @@ mod tests {
             hash,
             // Caution: when changing this value, we need to ensure that
             // the related backend snapshot remains the same
-            @"5c960260ea5b5ceaafa20ea220e566743e20b65106d0fd672a844a63bba3835a"
+            @"c3b2c0af52a3416543c2f9696aa4c12013027d6e190386d5b0babf9fd895bbc7"
         );
         assert_json_snapshot!(upload_metadata);
     }
