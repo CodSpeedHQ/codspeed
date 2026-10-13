@@ -112,7 +112,7 @@ impl Profiler for SamplyProfiler {
                 args.extend(["--unwinding-mode".into(), mode.into()]);
             }
             if let Some(size) = config.walltime_stack_sample_size {
-                args.extend(["--stack-size".into(), size.to_string().into()]);
+                args.extend(["--unwinding-stack-size".into(), size.to_string().into()]);
             }
         }
         #[cfg(not(target_os = "linux"))]
