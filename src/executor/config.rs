@@ -68,8 +68,10 @@ pub struct OrchestratorConfig {
     pub modes: Vec<RunnerMode>,
     pub instruments: Instruments,
     pub enable_profiler: bool,
-    /// Stack unwinding mode for perf (if enabled)
-    pub perf_unwinding_mode: Option<UnwindingMode>,
+    /// Stack unwinding mode for the walltime profiler (if None, inferred from the command)
+    pub walltime_unwinding_mode: Option<UnwindingMode>,
+    /// User stack size in bytes copied per sample for DWARF unwinding (if None, profiler default)
+    pub walltime_stack_sample_size: Option<u32>,
     /// Profiler override for walltime mode (if None, selected based on the platform)
     pub walltime_profiler: Option<WalltimeProfiler>,
 
@@ -120,8 +122,10 @@ pub struct ExecutorConfig {
 
     pub instruments: Instruments,
     pub enable_profiler: bool,
-    /// Stack unwinding mode for perf (if enabled)
-    pub perf_unwinding_mode: Option<UnwindingMode>,
+    /// Stack unwinding mode for the walltime profiler (if None, inferred from the command)
+    pub walltime_unwinding_mode: Option<UnwindingMode>,
+    /// User stack size in bytes copied per sample for DWARF unwinding (if None, profiler default)
+    pub walltime_stack_sample_size: Option<u32>,
 
     pub simulation_tool: SimulationTool,
 
@@ -218,7 +222,8 @@ impl OrchestratorConfig {
             command,
             instruments: self.instruments.clone(),
             enable_profiler: self.enable_profiler,
-            perf_unwinding_mode: self.perf_unwinding_mode,
+            walltime_unwinding_mode: self.walltime_unwinding_mode,
+            walltime_stack_sample_size: self.walltime_stack_sample_size,
             simulation_tool: self.simulation_tool,
             skip_run: self.skip_run,
             skip_setup: self.skip_setup,
@@ -251,7 +256,8 @@ impl OrchestratorConfig {
             }],
             modes: vec![RunnerMode::Simulation],
             instruments: Instruments::test(),
-            perf_unwinding_mode: None,
+            walltime_unwinding_mode: None,
+            walltime_stack_sample_size: None,
             walltime_profiler: None,
             enable_profiler: false,
             simulation_tool: SimulationTool::default(),

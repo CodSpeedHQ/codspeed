@@ -228,14 +228,38 @@ pub struct ProfilerRunArgs {
     pub enable_perf: Option<bool>,
 
     #[command(flatten)]
-    pub perf: PerfRunArgs,
+    pub walltime: WalltimeRunArgs,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct PerfRunArgs {
-    /// The unwinding mode that should be used with perf to collect the call stack.
-    #[arg(long, env = "CODSPEED_PERF_UNWINDING_MODE")]
+pub struct WalltimeRunArgs {
+    /// The unwinding mode that the walltime profiler should use to collect the call stack.
+    #[arg(long, env = "CODSPEED_WALLTIME_UNWINDING_MODE")]
+    pub walltime_unwinding_mode: Option<UnwindingMode>,
+
+    /// Deprecated alias for --walltime-unwinding-mode / CODSPEED_WALLTIME_UNWINDING_MODE.
+    #[arg(long, env = "CODSPEED_PERF_UNWINDING_MODE", hide = true)]
     pub perf_unwinding_mode: Option<UnwindingMode>,
+
+    /// Size in bytes of the user stack copied with each sample for DWARF unwinding.
+    /// Larger values produce deeper call stacks but bigger profiles.
+    #[arg(long, env = "CODSPEED_WALLTIME_STACK_SAMPLE_SIZE")]
+    pub walltime_stack_sample_size: Option<u32>,
+}
+
+impl WalltimeRunArgs {
+    /// Resolves the effective unwinding mode, honoring the deprecated
+    /// `--perf-unwinding-mode` / `CODSPEED_PERF_UNWINDING_MODE` flag with a warning.
+    /// The new flag takes precedence when both are set.
+    pub fn resolve_unwinding_mode(&self) -> Option<UnwindingMode> {
+        let Some(legacy) = self.perf_unwinding_mode else {
+            return self.walltime_unwinding_mode;
+        };
+        log::warn!(
+            "CODSPEED_PERF_UNWINDING_MODE / --perf-unwinding-mode is deprecated; use CODSPEED_WALLTIME_UNWINDING_MODE / --walltime-unwinding-mode instead."
+        );
+        Some(self.walltime_unwinding_mode.unwrap_or(legacy))
+    }
 }
 
 impl ProfilerRunArgs {
