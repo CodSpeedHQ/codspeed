@@ -3,6 +3,8 @@
 use crate::cli::InternalCommands;
 use crate::cli::samply::SamplyArgs;
 use crate::executor::ExecutorConfig;
+#[cfg(target_os = "linux")]
+use crate::executor::config::WalltimeUnwinding;
 use crate::executor::helpers::command::CommandBuilder;
 use crate::executor::helpers::run_with_sudo::wrap_with_sudo;
 use crate::executor::shared::fifo::FifoBenchmarkData;
@@ -81,7 +83,7 @@ impl Profiler for SamplyProfiler {
     async fn wrap_command(
         &mut self,
         mut cmd_builder: CommandBuilder,
-        _config: &ExecutorConfig,
+        config: &ExecutorConfig,
         profile_folder: &Path,
         requires_sudo: bool,
     ) -> anyhow::Result<CommandBuilder> {
@@ -89,20 +91,36 @@ impl Profiler for SamplyProfiler {
 
         // samply is bundled into this binary as the `samply` subcommand;
         // re-exec ourselves so we don't depend on a system install.
-        let samply_builder = InternalCommands::Samply(SamplyArgs {
-            args: vec![
-                "record".into(),
-                "--presymbolicate".into(),
-                "--no-open".into(),
-                "--save-only".into(),
-                "--rate".into(),
-                SAMPLING_RATE_HZ.to_string().into(),
-                "-o".into(),
-                output_path.clone().into(),
-                "--".into(),
-            ],
-        })
-        .get_command_builder()?;
+        let mut args: Vec<std::ffi::OsString> = vec![
+            "record".into(),
+            "--presymbolicate".into(),
+            "--no-open".into(),
+            "--save-only".into(),
+            "--rate".into(),
+            SAMPLING_RATE_HZ.to_string().into(),
+            "-o".into(),
+            output_path.clone().into(),
+        ];
+        // Unwinding knobs are Linux-only in samply.
+        #[cfg(target_os = "linux")]
+        {
+            match config.walltime_unwinding {
+                Some(WalltimeUnwinding::FramePointer) => {
+                    args.extend(["--unwinding-mode".into(), "fp".into()]);
+                }
+                Some(WalltimeUnwinding::Dwarf { stack_size }) => {
+                    args.extend(["--unwinding-mode".into(), "dwarf".into()]);
+                    if let Some(size) = stack_size {
+                        args.extend(["--stack-size".into(), size.to_string().into()]);
+                    }
+                }
+                None => {}
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        let _ = config;
+        args.push("--".into());
+        let samply_builder = InternalCommands::Samply(SamplyArgs { args }).get_command_builder()?;
 
         cmd_builder.wrap_with(samply_builder);
 
