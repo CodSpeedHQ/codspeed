@@ -1,11 +1,10 @@
 use super::experimental::ExperimentalArgs;
 use crate::VERSION;
-use crate::executor::config::{SimulationTool, WalltimeProfiler};
+use crate::executor::config::{SimulationTool, WalltimeProfiler, WalltimeUnwinding};
 use crate::prelude::*;
 use crate::run_environment::interfaces::RepositoryProvider;
 use crate::runner_mode::{RunnerMode, load_shell_session_mode};
 use clap::Args;
-use clap::ValueEnum;
 use std::path::PathBuf;
 
 pub(crate) fn show_banner() {
@@ -205,17 +204,6 @@ impl ExecAndRunSharedArgs {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, ValueEnum, Default)]
-pub enum UnwindingMode {
-    /// Use the frame pointer for unwinding. Requires the binary to be compiled with frame pointers enabled.
-    #[clap(name = "fp")]
-    FramePointer,
-
-    /// Use DWARF unwinding. This does not require any special compilation flags and is enabled by default.
-    #[default]
-    Dwarf,
-}
-
 #[derive(Args, Debug, Clone)]
 pub struct ProfilerRunArgs {
     /// Enable a profiler to collect granular performance data.
@@ -228,14 +216,48 @@ pub struct ProfilerRunArgs {
     pub enable_perf: Option<bool>,
 
     #[command(flatten)]
-    pub perf: PerfRunArgs,
+    pub walltime: WalltimeRunArgs,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct PerfRunArgs {
-    /// The unwinding mode that should be used with perf to collect the call stack.
-    #[arg(long, env = "CODSPEED_PERF_UNWINDING_MODE")]
-    pub perf_unwinding_mode: Option<UnwindingMode>,
+pub struct WalltimeRunArgs {
+    /// Call stack unwinding for the walltime profiler: `fp`, `dwarf`, or `dwarf,<bytes>`.
+    /// - `fp` requires binaries compiled with frame pointers.
+    /// - `dwarf,<bytes>` sets the user stack size copied per sample; larger values produce
+    ///   deeper call stacks but bigger profiles.
+    ///
+    /// Inferred from the benchmark command when unset:
+    /// - Java: `fp`
+    /// - Go: `fp`
+    /// - Python: `dwarf,32768`
+    /// - Others: `dwarf,8192`
+    #[arg(
+        long,
+        env = "CODSPEED_WALLTIME_UNWINDING_MODE",
+        value_parser = parse_walltime_unwinding,
+        verbatim_doc_comment
+    )]
+    pub walltime_unwinding_mode: Option<WalltimeUnwinding>,
+
+    /// Deprecated alias for --walltime-unwinding-mode / CODSPEED_WALLTIME_UNWINDING_MODE.
+    #[arg(long, env = "CODSPEED_PERF_UNWINDING_MODE", hide = true, value_parser = parse_walltime_unwinding)]
+    pub perf_unwinding_mode: Option<WalltimeUnwinding>,
+}
+
+impl WalltimeRunArgs {
+    /// Resolves the effective unwinding, honoring the deprecated
+    /// `--perf-unwinding-mode` / `CODSPEED_PERF_UNWINDING_MODE` flag with a warning.
+    /// The new flag takes precedence when both are set.
+    pub fn resolve_unwinding(&self) -> Option<WalltimeUnwinding> {
+        let Some(legacy) = self.perf_unwinding_mode else {
+            return self.walltime_unwinding_mode;
+        };
+        // TODO(COD-4063): use warn! once the logger is installed before config resolution.
+        eprintln!(
+            "Warning: CODSPEED_PERF_UNWINDING_MODE / --perf-unwinding-mode is deprecated; use CODSPEED_WALLTIME_UNWINDING_MODE / --walltime-unwinding-mode instead."
+        );
+        Some(self.walltime_unwinding_mode.unwrap_or(legacy))
+    }
 }
 
 impl ProfilerRunArgs {
@@ -255,4 +277,28 @@ impl ProfilerRunArgs {
 /// Parser for go-runner version that validates semver format
 fn parse_version(s: &str) -> Result<semver::Version, String> {
     semver::Version::parse(s).map_err(|e| format!("Invalid semantic version: {e}"))
+}
+
+const FRAME_POINTER_UNWINDING: &str = "fp";
+const DWARF_UNWINDING: &str = "dwarf";
+
+/// Parses `fp`, `dwarf`, or `dwarf,<bytes>`.
+fn parse_walltime_unwinding(value: &str) -> Result<WalltimeUnwinding, String> {
+    let (mode, stack_size) = match value.split_once(',') {
+        Some((mode, size)) => {
+            let size = size
+                .parse()
+                .map_err(|e| format!("Invalid stack size `{size}`: {e}"))?;
+            (mode, Some(size))
+        }
+        None => (value, None),
+    };
+    match (mode, stack_size) {
+        (DWARF_UNWINDING, stack_size) => Ok(WalltimeUnwinding::Dwarf { stack_size }),
+        (FRAME_POINTER_UNWINDING, None) => Ok(WalltimeUnwinding::FramePointer),
+        (FRAME_POINTER_UNWINDING, Some(_)) => {
+            Err("A stack size only applies to `dwarf` unwinding".into())
+        }
+        _ => Err("Expected `fp`, `dwarf`, or `dwarf,<bytes>`".into()),
+    }
 }

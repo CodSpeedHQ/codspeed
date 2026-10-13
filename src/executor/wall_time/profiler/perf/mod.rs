@@ -1,8 +1,8 @@
 #![cfg_attr(not(unix), allow(dead_code, unused_mut))]
 
-use crate::cli::UnwindingMode;
 use crate::executor::ExecutorConfig;
 use crate::executor::ToolStatus;
+use crate::executor::config::WalltimeUnwinding;
 use crate::executor::helpers::command::CommandBuilder;
 use crate::executor::helpers::detect_executable::command_has_executable;
 use crate::executor::helpers::env::is_codspeed_debug_enabled;
@@ -38,6 +38,40 @@ pub mod fifo;
 pub mod perf_executable;
 
 const PERF_PIPEDATA_FILE_NAME: &str = "perf.pipedata";
+
+/// Unwinding suggested for the benchmarked runtime, if it has a known best setting.
+fn suggested_unwinding(command: &str) -> Option<WalltimeUnwinding> {
+    if command_has_executable(
+        command,
+        &["gradle", "gradlew", "java", "maven", "mvn", "mvnw"],
+    ) {
+        return Some(WalltimeUnwinding::FramePointer);
+    }
+    if command_has_executable(command, &["go"]) {
+        return Some(WalltimeUnwinding::FramePointer);
+    }
+    if command_has_executable(command, &["pytest", "uv", "python", "python3"]) {
+        return Some(WalltimeUnwinding::Dwarf {
+            stack_size: Some(32 * 1024),
+        });
+    }
+    None
+}
+
+fn resolve_unwinding(command: &str, explicit: Option<WalltimeUnwinding>) -> WalltimeUnwinding {
+    let suggested = suggested_unwinding(command);
+    let Some(explicit) = explicit else {
+        return suggested.unwrap_or(WalltimeUnwinding::Dwarf { stack_size: None });
+    };
+    if let Some(suggested) = suggested
+        && suggested != explicit
+    {
+        warn!(
+            "Overriding suggested unwinding `{suggested}` with `{explicit}`, call stacks may be incomplete"
+        );
+    }
+    explicit
+}
 
 pub struct PerfProfiler {
     /// Set by [`Profiler::wrap_command`]; used by the FIFO hooks to control event
@@ -89,35 +123,16 @@ impl Profiler for PerfProfiler {
         let perf_fifo = PerfFifo::new()?;
         let perf_file_path = profile_folder.join(PERF_PIPEDATA_FILE_NAME);
 
-        // Infer the unwinding mode from the benchmark cmd
-        let (cg_mode, stack_size) = if let Some(mode) = config.perf_unwinding_mode {
-            (mode, None)
-        } else if command_has_executable(
-            &config.command,
-            &["gradle", "gradlew", "java", "maven", "mvn", "mvnw"],
-        ) {
-            // In Java, we must use FP unwinding otherwise we'll have broken call stacks.
-            (UnwindingMode::FramePointer, None)
-        } else if command_has_executable(&config.command, &["cargo"]) {
-            (UnwindingMode::Dwarf, None)
-        } else if command_has_executable(&config.command, &["go"]) {
-            (UnwindingMode::FramePointer, None)
-        } else if command_has_executable(&config.command, &["pytest", "uv", "python", "python3"]) {
-            // Note that the higher the stack size, the larger the file, although it is mitigated
-            // by zstd compression
-            (UnwindingMode::Dwarf, Some(32 * 1024))
-        } else {
-            // Default to dwarf unwinding since it works well with most binaries.
-            debug!("No call graph mode detected, defaulting to dwarf");
-            (UnwindingMode::Dwarf, None)
-        };
+        let unwinding = resolve_unwinding(&config.command, config.walltime_unwinding);
 
-        let cg_mode = match cg_mode {
-            UnwindingMode::FramePointer => {
+        let cg_mode = match unwinding {
+            WalltimeUnwinding::FramePointer => {
                 suppress_go_perf_unwinding_warning();
                 "fp"
             }
-            UnwindingMode::Dwarf => &format!("dwarf,{}", stack_size.unwrap_or(8192)),
+            WalltimeUnwinding::Dwarf { stack_size } => {
+                &format!("dwarf,{}", stack_size.unwrap_or(8 * 1024))
+            }
         };
         debug!("Using call graph mode: {cg_mode:?}");
 
@@ -308,5 +323,34 @@ impl BenchmarkData<'_> {
         metadata.save_to(path).unwrap();
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explicit_unwinding_overrides_language_inference() {
+        let explicit = WalltimeUnwinding::Dwarf {
+            stack_size: Some(16 * 1024),
+        };
+        for (command, inferred) in [
+            (
+                "python bench.py",
+                WalltimeUnwinding::Dwarf {
+                    stack_size: Some(32 * 1024),
+                },
+            ),
+            ("cargo bench", WalltimeUnwinding::Dwarf { stack_size: None }),
+            ("go test -bench=.", WalltimeUnwinding::FramePointer),
+        ] {
+            assert_eq!(resolve_unwinding(command, None), inferred);
+            assert_eq!(resolve_unwinding(command, Some(explicit)), explicit);
+        }
+        assert_eq!(
+            resolve_unwinding("python bench.py", Some(WalltimeUnwinding::FramePointer)),
+            WalltimeUnwinding::FramePointer,
+        );
     }
 }

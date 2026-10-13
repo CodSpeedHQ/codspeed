@@ -48,7 +48,7 @@ impl RunArgs {
     /// Constructs a new `RunArgs` with default values for testing purposes
     pub fn test() -> Self {
         use super::experimental::ExperimentalArgs;
-        use super::{PerfRunArgs, ProfilerRunArgs};
+        use super::{ProfilerRunArgs, WalltimeRunArgs};
         use crate::RunnerMode;
 
         Self {
@@ -77,7 +77,8 @@ impl RunArgs {
                 profiler_run_args: ProfilerRunArgs {
                     enable_profiler: false,
                     enable_perf: None,
-                    perf: PerfRunArgs {
+                    walltime: WalltimeRunArgs {
+                        walltime_unwinding_mode: None,
                         perf_unwinding_mode: None,
                     },
                 },
@@ -127,7 +128,7 @@ fn build_orchestrator_config(
         targets,
         modes,
         instruments,
-        perf_unwinding_mode: args.shared.profiler_run_args.perf.perf_unwinding_mode,
+        walltime_unwinding: args.shared.profiler_run_args.walltime.resolve_unwinding(),
         enable_profiler: args.shared.profiler_run_args.resolve_enable_profiler(),
         walltime_profiler: args.shared.walltime_profiler,
         simulation_tool: args.shared.simulation_tool.unwrap_or_default(),
