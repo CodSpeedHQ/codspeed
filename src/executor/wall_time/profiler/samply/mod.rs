@@ -111,14 +111,16 @@ impl Profiler for SamplyProfiler {
                 Some(WalltimeUnwinding::Dwarf { stack_size }) => {
                     args.extend(["--unwinding-mode".into(), "dwarf".into()]);
                     if let Some(size) = stack_size {
-                        args.extend(["--stack-size".into(), size.to_string().into()]);
+                        args.extend(["--unwinding-stack-size".into(), size.to_string().into()]);
                     }
                 }
                 None => {}
             }
         }
         #[cfg(not(target_os = "linux"))]
-        let _ = config;
+        if config.walltime_unwinding.is_some() {
+            bail!("Samply unwinding options are only supported on Linux");
+        }
         args.push("--".into());
         let samply_builder = InternalCommands::Samply(SamplyArgs { args }).get_command_builder()?;
 
