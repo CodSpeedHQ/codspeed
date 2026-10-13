@@ -42,7 +42,7 @@ curl -fsSL https://codspeed.io/install.sh | bash
 ```
 
 > [!NOTE]
-> The CodSpeed CLI officially supports Ubuntu 20.04, 22.04, 24.04 and Debian 11, 12.
+> The CodSpeed CLI officially supports Ubuntu 22.04, 24.04, 26.04 and Debian 12.
 > Other Linux distributions may work, but are not officially supported.
 
 ## Quick Start
