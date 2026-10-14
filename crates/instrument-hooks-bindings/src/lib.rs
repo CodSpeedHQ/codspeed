@@ -58,10 +58,15 @@ mod linux_impl {
 
         #[inline(always)]
         pub fn set_executed_benchmark(&self, uri: &str) -> Result<(), u8> {
-            let pid = std::process::id() as i32;
+            self.set_executed_benchmark_for_pid(std::process::id(), uri)
+        }
+
+        /// Declares a benchmark that ran in the process `pid` rather than in this one.
+        #[inline(always)]
+        pub fn set_executed_benchmark_for_pid(&self, pid: u32, uri: &str) -> Result<(), u8> {
             let c_uri = CString::new(uri).map_err(|_| 1u8)?;
             let result = unsafe {
-                ffi::instrument_hooks_set_executed_benchmark(self.0, pid, c_uri.as_ptr())
+                ffi::instrument_hooks_set_executed_benchmark(self.0, pid as i32, c_uri.as_ptr())
             };
             if result == 0 { Ok(()) } else { Err(result) }
         }
@@ -184,6 +189,10 @@ mod other_impl {
             Ok(())
         }
 
+        pub fn set_executed_benchmark_for_pid(&self, _pid: u32, _uri: &str) -> Result<(), u8> {
+            Ok(())
+        }
+
         pub fn set_integration(&self, _name: &str, _version: &str) -> Result<(), u8> {
             Ok(())
         }
@@ -213,6 +222,11 @@ mod tests {
         let hooks = InstrumentHooks::instance("test_integration", "1.0.0");
         assert!(!hooks.is_instrumented() || hooks.start_benchmark().is_ok());
         assert!(hooks.set_executed_benchmark("test_uri").is_ok());
+        assert!(
+            hooks
+                .set_executed_benchmark_for_pid(std::process::id() + 1, "test_uri")
+                .is_ok()
+        );
         assert!(hooks.set_integration("test_integration", "1.0.0").is_ok());
         let start = InstrumentHooks::current_timestamp();
         let end = start + 1_000_000; // Simulate 1ms later

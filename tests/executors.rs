@@ -269,6 +269,51 @@ fn walltime_exec_harness() {
         .success();
 }
 
+/// exec-harness measures the command from its own process, so its part
+/// must declare the pid of the spawned process that ran the benchmark.
+#[test]
+fn simulation_exec_harness_declares_benchmark_pid() {
+    let profile_folder = tempfile::tempdir().unwrap();
+    let _guard = Mode::Simulation.acquire();
+    codspeed()
+        .args(["exec", "--mode", "simulation", "--skip-upload"])
+        .arg("--profile-folder")
+        .arg(profile_folder.path())
+        .args(["--", "sh", "-c", "ls > /dev/null"])
+        .assert()
+        .success();
+
+    let profiles: Vec<(String, String)> = std::fs::read_dir(profile_folder.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "out"))
+        .map(|path| {
+            let pid = path.file_stem().unwrap().to_string_lossy().into_owned();
+            (pid, std::fs::read_to_string(&path).unwrap())
+        })
+        .collect();
+
+    let declarations: Vec<(&str, &str)> = profiles
+        .iter()
+        .flat_map(|(pid, content)| {
+            content
+                .lines()
+                .filter_map(|line| line.strip_prefix("desc: Benchmark pid: "))
+                .map(move |benchmark_pid| (pid.as_str(), benchmark_pid))
+        })
+        .collect();
+    let [(harness_pid, benchmark_pid)] = declarations.as_slice() else {
+        panic!("expected exactly one benchmark pid declaration, got {declarations:?}");
+    };
+
+    assert_ne!(harness_pid, benchmark_pid);
+    assert!(
+        profiles.iter().any(|(pid, _)| pid == benchmark_pid),
+        "benchmark pid {benchmark_pid} has no profile among {:?}",
+        profiles.iter().map(|(pid, _)| pid).collect::<Vec<_>>()
+    );
+}
+
 /// Prepends `prefix` to `var` and checks the benchmark still sees it.
 fn memory_forwards_path_like(var: &str, prefix: &str) {
     let value = match std::env::var(var).unwrap_or_default() {
