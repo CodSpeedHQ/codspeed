@@ -5,6 +5,34 @@
 
 
 
+## [5.5.0] - 2026-10-14
+
+### <!-- 0 -->🚀 Features
+- Split profile archive uploads into concurrent parts (#565) by @lvaroqui in [#565](https://github.com/CodSpeedHQ/runner/pull/565)
+
+### <!-- 1 -->🐛 Bug Fixes
+- Only set PYTHONPERFSUPPORT for exec-harness benchmarks (#584) by @not-matthias in [#584](https://github.com/CodSpeedHQ/runner/pull/584)
+
+### <!-- 2 -->🏗️ Refactor
+- Move the module event filter next to the decoder by @not-matthias
+
+### <!-- 4 -->⚡ Performance
+- Use mimalloc as the runner's global allocator by @not-matthias
+- Stream each memtrack frame when finding module events by @not-matthias in [#578](https://github.com/CodSpeedHQ/runner/pull/578)
+- Decode memtrack frames for module events in parallel by @not-matthias
+
+### <!-- 6 -->🧪 Testing
+- Run the memtrack benches on mimalloc by @not-matthias in [#581](https://github.com/CodSpeedHQ/runner/pull/581)
+- Search artifacts of up to 100M events in the module event bench by @not-matthias
+- Keep instrumented module event benches to 1M events by @not-matthias in [#576](https://github.com/CodSpeedHQ/runner/pull/576)
+- Benchmark finding module events in a memtrack artifact by @not-matthias
+
+### <!-- 7 -->⚙️ Internals
+- Support Ubuntu 26.04 (#574) by @lvaroqui in [#574](https://github.com/CodSpeedHQ/runner/pull/574)
+- Publish executable hashes and refresh the eBPF allowlist on release (#585) by @GuillaumeLagrange in [#585](https://github.com/CodSpeedHQ/runner/pull/585)
+- Migrate to github default arm runners (#583) by @lvaroqui in [#583](https://github.com/CodSpeedHQ/runner/pull/583)
+
+
 ## [5.4.2] - 2026-10-09
 
 ### <!-- 1 -->🐛 Bug Fixes
@@ -1640,6 +1668,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[5.5.0]: https://github.com/CodSpeedHQ/runner/compare/v5.4.2..v5.5.0
 [5.4.2]: https://github.com/CodSpeedHQ/runner/compare/v5.4.1..v5.4.2
 [5.4.1]: https://github.com/CodSpeedHQ/runner/compare/v5.4.0..v5.4.1
 [5.4.0]: https://github.com/CodSpeedHQ/runner/compare/v5.3.1..v5.4.0
