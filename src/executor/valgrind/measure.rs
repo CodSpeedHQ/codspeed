@@ -9,13 +9,14 @@ use crate::executor::valgrind::helpers::python::is_free_threaded_python;
 use crate::instruments::mongo_tracer::MongoTracer;
 use crate::prelude::*;
 use log::log_enabled;
+use std::env::consts::ARCH;
 use std::fs::canonicalize;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
-use std::{env::consts::ARCH, process::Command};
 use tempfile::TempPath;
+use tokio::process::Command;
 
 /// Builds the Valgrind argument list for the given simulation tool.
 fn get_valgrind_args(tool: &SimulationTool, config: &ExecutorConfig) -> Vec<String> {
@@ -232,6 +233,8 @@ mod tests {
     use super::*;
 
     fn safe_run(to_execute: &str) -> (u32, u32) {
+        use std::process::Command;
+
         let script_path = create_run_script().unwrap();
         let out_status = tempfile::NamedTempFile::new().unwrap().into_temp_path();
 

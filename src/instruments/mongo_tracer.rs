@@ -2,17 +2,21 @@ use std::{
     env,
     io::Read,
     path::{Path, PathBuf},
-    process::{Child, Command, Stdio},
+    process::Stdio,
     str::FromStr,
     thread,
 };
 
 use reqwest::Client;
-use tokio::fs;
+use tokio::{
+    fs,
+    process::{Child, Command},
+};
 use url::Url;
 
 use crate::binary_pins::PinnedBinary;
 use crate::cli::run::helpers::{download_pinned_file, get_env_variable};
+use crate::executor::helpers::run_command_with_log_pipe::take_blocking_stdio;
 use crate::prelude::*;
 
 use super::MongoDBConfig;
@@ -152,8 +156,7 @@ impl MongoTracer {
             .stderr(Stdio::piped())
             .spawn()?;
 
-        let process_stdout = process.stdout.take().expect("error taking child stdout");
-        let process_stderr = process.stderr.take().expect("error taking child stderr");
+        let (process_stdout, process_stderr) = take_blocking_stdio(&mut process)?;
         thread::spawn(move || {
             dump_tracer_log(process_stdout).expect("error communicating with child stdout")
         });
@@ -178,6 +181,7 @@ impl MongoTracer {
         if let Some(process) = self.process.as_mut() {
             process
                 .kill()
+                .await
                 .context("Failed to kill the MongoDB tracer")?;
         }
 
@@ -235,6 +239,7 @@ pub async fn install_mongodb_tracer() -> Result<()> {
         .arg(installer_path.to_str().unwrap())
         .stdout(Stdio::piped())
         .output()
+        .await
         .map_err(|_| anyhow!("Failed to install mongo-tracer"))?;
 
     if !output.status.success() {
@@ -377,7 +382,7 @@ mod tests {
             .expect("Failed to apply the transformations");
 
         assert_eq!(
-            command.get_envs().collect_vec(),
+            command.as_std().get_envs().collect_vec(),
             vec![
                 (
                     OsStr::new("CODSPEED_MONGO_INSTR_SERVER_ADDRESS"),
@@ -414,7 +419,7 @@ mod tests {
             .expect("Failed to apply the transformations");
 
         assert_eq!(
-            command.get_envs().collect_vec(),
+            command.as_std().get_envs().collect_vec(),
             vec![
                 (
                     OsStr::new("CODSPEED_MONGO_INSTR_SERVER_ADDRESS"),
@@ -451,7 +456,7 @@ mod tests {
             .expect("Failed to apply the transformations");
 
         assert_eq!(
-            command.get_envs().collect_vec(),
+            command.as_std().get_envs().collect_vec(),
             vec![
                 (
                     OsStr::new("CODSPEED_MONGO_INSTR_SERVER_ADDRESS"),
@@ -485,7 +490,7 @@ mod tests {
             .expect("Failed to apply the transformations");
 
         assert_eq!(
-            command.get_envs().collect_vec(),
+            command.as_std().get_envs().collect_vec(),
             vec![(
                 OsStr::new("CODSPEED_MONGO_INSTR_SERVER_ADDRESS"),
                 Some(OsStr::new("http://0.0.0.0:55581"))

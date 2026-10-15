@@ -184,7 +184,7 @@ impl Executor for MemoryExecutor {
         let fifo_data = Rc::new(RefCell::new(None));
         let on_process_started = {
             let fifo_data_cell = fifo_data.clone();
-            |mut child: std::process::Child| async move {
+            |mut child: tokio::process::Child| async move {
                 let (marker_result, data, exit_status) =
                     Self::handle_fifo(runner_fifo, ipc, &mut child).await?;
                 *fifo_data_cell.borrow_mut() = Some(data);
@@ -194,7 +194,7 @@ impl Executor for MemoryExecutor {
             }
         };
 
-        let status = run_command_with_log_pipe_and_callback(cmd, on_process_started).await?;
+        let status = run_command_with_log_pipe_and_callback(cmd.into(), on_process_started).await?;
         debug!("cmd exit status: {status:?}");
 
         if !status.success() {
@@ -256,7 +256,7 @@ impl MemoryExecutor {
     async fn handle_fifo(
         mut runner_fifo: RunnerFifo,
         ipc: MemtrackIpcServer,
-        child: &mut std::process::Child,
+        child: &mut tokio::process::Child,
     ) -> anyhow::Result<(
         ExecutionTimestamps,
         crate::executor::shared::fifo::FifoBenchmarkData,

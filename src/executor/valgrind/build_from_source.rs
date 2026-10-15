@@ -77,7 +77,7 @@ async fn run_build_command(builder: CommandBuilder) -> Result<()> {
     let command_line = builder.as_command_line();
     debug!("Running: {command_line}");
 
-    let status = run_command_with_log_pipe(builder.build())
+    let status = run_command_with_log_pipe(builder.build().into())
         .await
         .with_context(|| format!("failed to run `{command_line}`"))?;
 
