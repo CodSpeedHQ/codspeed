@@ -720,6 +720,9 @@ dependencies = [
  "gimli",
  "git2",
  "gql_client",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "indicatif",
  "insta",
  "instrument-hooks-bindings",
@@ -807,6 +810,8 @@ dependencies = [
  "compression-core",
  "flate2",
  "memchr",
+ "zstd",
+ "zstd-safe",
 ]
 
 [[package]]

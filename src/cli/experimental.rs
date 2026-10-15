@@ -26,6 +26,16 @@ pub struct ExperimentalArgs {
     )]
     pub experimental_disable_pythonmalloc_override: bool,
 
+    /// Receive the OpenTelemetry data exported by the benchmarks over OTLP/HTTP, and upload it
+    /// with the results. The receiver's URL is passed in `CODSPEED_OTEL_ENDPOINT`.
+    #[arg(
+        long,
+        default_value_t = false,
+        help_heading = "Experimental",
+        env = "CODSPEED_EXPERIMENTAL_OTEL"
+    )]
+    pub experimental_otel: bool,
+
     /// Deprecated alias for `--cycle-estimation`, still honored for now.
     #[arg(long, hide = true, env = "CODSPEED_EXPERIMENTAL_CYCLE_ESTIMATION")]
     pub experimental_cycle_estimation: bool,
@@ -68,6 +78,9 @@ impl ExperimentalArgs {
         }
         if self.experimental_disable_pythonmalloc_override {
             flags.push("--experimental-disable-pythonmalloc-override");
+        }
+        if self.experimental_otel {
+            flags.push("--experimental-otel");
         }
         flags
     }

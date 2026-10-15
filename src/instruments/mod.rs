@@ -7,6 +7,7 @@ use crate::cli::run::RunArgs;
 use crate::prelude::*;
 
 pub mod mongo_tracer;
+pub mod otel_receiver;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MongoDBConfig {
