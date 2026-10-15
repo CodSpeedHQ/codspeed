@@ -105,6 +105,8 @@ pub struct OrchestratorConfig {
     /// Capture allocation call stacks in memory mode, so allocations can be
     /// attributed to the code that made them.
     pub memory_capture_stack: bool,
+    /// Receive the OTLP data exported by the benchmarks and store it in the profile folder.
+    pub collect_otel: bool,
 }
 
 /// Per-execution configuration passed to executors.
@@ -271,6 +273,7 @@ impl OrchestratorConfig {
             memory_track_physical: true,
             disable_pythonmalloc_override: false,
             memory_capture_stack: true,
+            collect_otel: false,
         }
     }
 }

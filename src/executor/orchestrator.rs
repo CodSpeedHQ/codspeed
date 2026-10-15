@@ -7,6 +7,7 @@ use crate::cli::run::logger::Logger;
 use crate::executor::config::BenchmarkTarget;
 use crate::executor::config::OrchestratorConfig;
 use crate::executor::helpers::profile_folder::create_profile_folder;
+use crate::instruments::otel_receiver::{OTEL_ENDPOINT_ENV, OtelReceiver};
 use crate::prelude::*;
 use crate::run_environment::{self, RunEnvironment, RunEnvironmentProvider};
 use crate::runner_mode::RunnerMode;
@@ -141,12 +142,22 @@ impl Orchestrator {
         }
 
         for (run_part_index, part) in run_parts.into_iter().enumerate() {
-            let config = self
+            let mut config = self
                 .config
                 .executor_config_for_command(part.command, !part.uses_exec_harness);
             let mut executor = get_executor_from_mode(part.mode, self.config.walltime_profiler);
             let profile_folder =
                 self.resolve_profile_folder(&executor.name(), run_part_index, total_parts)?;
+
+            let otel_receiver = if self.config.collect_otel && !self.config.skip_run {
+                let receiver = OtelReceiver::start(&profile_folder).await?;
+                config
+                    .extra_env
+                    .insert(OTEL_ENDPOINT_ENV.into(), receiver.endpoint().into());
+                Some(receiver)
+            } else {
+                None
+            };
 
             let ctx = ExecutionContext::new(config, profile_folder);
 
@@ -161,6 +172,14 @@ impl Orchestrator {
                 rolling_buffer_label,
             )
             .await?;
+
+            if let Some(receiver) = otel_receiver {
+                let stats = receiver.stop().await?;
+                info!(
+                    "Collected {} OpenTelemetry export requests ({} bytes, {} bytes archived)",
+                    stats.requests, stats.received_bytes, stats.archive_bytes_count
+                );
+            }
 
             all_completed_runs.push((ctx, executor.name()));
         }
