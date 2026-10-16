@@ -1,7 +1,11 @@
-//! End-to-end OTLP collection of a benchmark built from the codspeed-rust checkout.
+//! End-to-end OTLP collection of the spans and logs of a benchmark built from the codspeed-rust
+//! checkout.
 //!
 //! Needs codspeed-rust checked out next to this repository. Run with
 //! `cargo test --test otel -- --ignored`.
+//!
+//! Set `CODSPEED_OTEL_TEST_PROFILE_FOLDER` to a path to keep the profile folder there for
+//! inspection instead of in a temporary directory. Its previous content is removed.
 #![cfg(target_os = "linux")]
 
 use std::path::{Path, PathBuf};
@@ -38,6 +42,25 @@ fn codspeed_rust_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
     cmd
 }
 
+/// The profile folder to run the benchmark with: `CODSPEED_OTEL_TEST_PROFILE_FOLDER` when set,
+/// emptied first and kept after the test, a temporary directory otherwise.
+fn profile_folder() -> (PathBuf, Option<tempfile::TempDir>) {
+    match std::env::var_os("CODSPEED_OTEL_TEST_PROFILE_FOLDER") {
+        Some(dir) => {
+            let dir = PathBuf::from(dir);
+            if dir.exists() {
+                std::fs::remove_dir_all(&dir).unwrap();
+            }
+            std::fs::create_dir_all(&dir).unwrap();
+            (dir, None)
+        }
+        None => {
+            let temp_dir = tempfile::tempdir().unwrap();
+            (temp_dir.path().to_path_buf(), Some(temp_dir))
+        }
+    }
+}
+
 /// Returns the name and content of each entry of the zstd-compressed tar at `path`.
 async fn archive_entries(path: &Path) -> Vec<(String, Vec<u8>)> {
     let compressed = std::fs::read(path).unwrap();
@@ -56,7 +79,7 @@ async fn archive_entries(path: &Path) -> Vec<(String, Vec<u8>)> {
 
 #[tokio::test]
 #[ignore = "needs codspeed-rust checked out in ../codspeed-rust"]
-async fn collects_the_spans_of_the_divan_otel_example() {
+async fn collects_the_spans_and_logs_of_the_divan_otel_example() {
     let cargo_codspeed = "cargo run -q -p cargo-codspeed -- codspeed";
     let bench_args = "-p codspeed-divan-compat --bench otel_example";
 
@@ -68,7 +91,7 @@ async fn collects_the_spans_of_the_divan_otel_example() {
         .assert()
         .success();
 
-    let profile_folder = tempfile::tempdir().unwrap();
+    let (profile_folder, _temp_dir) = profile_folder();
     codspeed_rust_command(env!("CARGO_BIN_EXE_codspeed"))
         // Forces the local provider; the GitHub Actions one needs a workflow event.
         .env_remove("GITHUB_ACTIONS")
@@ -82,13 +105,13 @@ async fn collects_the_spans_of_the_divan_otel_example() {
             "--experimental-otel",
         ])
         .arg("--profile-folder")
-        .arg(profile_folder.path())
+        .arg(&profile_folder)
         .args(["--", &format!("{cargo_codspeed} run {bench_args}")])
         .assert()
         .success();
 
-    assert!(!profile_folder.path().join("otel").exists());
-    let entries = archive_entries(&profile_folder.path().join("otel.tar.zst")).await;
+    assert!(!profile_folder.join("otel").exists());
+    let entries = archive_entries(&profile_folder.join("otel.tar.zst")).await;
     let traces: Vec<_> = entries
         .iter()
         .filter(|(name, _)| name.starts_with("traces-") && name.ends_with(".pb"))
@@ -101,4 +124,20 @@ async fn collects_the_spans_of_the_divan_otel_example() {
             .any(|window| window == b"parse_and_sum")
     });
     assert!(has_benchmark_span, "no `parse_and_sum` span in the traces");
+
+    let logs: Vec<_> = entries
+        .iter()
+        .filter(|(name, _)| name.starts_with("logs-") && name.ends_with(".pb"))
+        .collect();
+    assert!(!logs.is_empty(), "no log request in {entries:?}");
+
+    let has_benchmark_log = logs.iter().any(|(_, content)| {
+        content
+            .windows(b"skipped invalid fields".len())
+            .any(|window| window == b"skipped invalid fields")
+    });
+    assert!(
+        has_benchmark_log,
+        "no `skipped invalid fields` log in the logs"
+    );
 }
