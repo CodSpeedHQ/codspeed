@@ -4,6 +4,8 @@ pub const MARKER_TYPE_SAMPLE_START: u32 = 0;
 pub const MARKER_TYPE_SAMPLE_END: u32 = 1;
 pub const MARKER_TYPE_BENCHMARK_START: u32 = 2;
 pub const MARKER_TYPE_BENCHMARK_END: u32 = 3;
+pub const INSTRUMENT_HOOKS_MONOTONIC_OFFSET_ATTRIBUTE: &[u8; 35] =
+    b"codspeed.clock.monotonic_offset_ns\0";
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct InstrumentHooks {
@@ -55,6 +57,12 @@ unsafe extern "C" {
 }
 unsafe extern "C" {
     pub fn instrument_hooks_current_timestamp() -> u64;
+}
+unsafe extern "C" {
+    pub fn instrument_hooks_monotonic_offset() -> i64;
+}
+unsafe extern "C" {
+    pub fn instrument_hooks_callgrind_add_obj_skip(path: *const ::std::os::raw::c_char) -> u8;
 }
 pub const instrument_hooks_feature_t_FEATURE_DISABLE_CALLGRIND_MARKERS: instrument_hooks_feature_t =
     0;

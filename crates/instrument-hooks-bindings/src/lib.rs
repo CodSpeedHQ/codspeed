@@ -1,4 +1,4 @@
-#[cfg(use_instrument_hooks)]
+// Also compiled without instrument hooks for its constants; its functions are then never called.
 mod ffi;
 
 #[cfg(use_instrument_hooks)]
@@ -138,6 +138,13 @@ mod linux_impl {
             }
         }
 
+        /// Offset, in nanoseconds, to add to [`Self::current_timestamp`] to read it as a wall
+        /// clock time since the Unix epoch, or 0 where the monotonic clock is unavailable. Cached
+        /// for the process.
+        pub fn monotonic_offset() -> i64 {
+            unsafe { ffi::instrument_hooks_monotonic_offset() }
+        }
+
         pub fn disable_callgrind_markers() {
             unsafe {
                 ffi::instrument_hooks_set_feature(
@@ -194,9 +201,24 @@ mod other_impl {
             0
         }
 
+        pub fn monotonic_offset() -> i64 {
+            0
+        }
+
         pub fn disable_callgrind_markers() {}
     }
 }
+
+/// OpenTelemetry resource attribute holding [`InstrumentHooks::monotonic_offset`] when spans and
+/// logs are timestamped with the shifted monotonic clock.
+pub const MONOTONIC_OFFSET_ATTRIBUTE: &str =
+    match std::ffi::CStr::from_bytes_with_nul(ffi::INSTRUMENT_HOOKS_MONOTONIC_OFFSET_ATTRIBUTE) {
+        Ok(name) => match name.to_str() {
+            Ok(name) => name,
+            Err(_) => panic!("the monotonic offset attribute is not UTF-8"),
+        },
+        Err(_) => panic!("the monotonic offset attribute is not a C string"),
+    };
 
 #[cfg(use_instrument_hooks)]
 pub use linux_impl::InstrumentHooks;
@@ -218,5 +240,18 @@ mod tests {
         let end = start + 1_000_000; // Simulate 1ms later
         hooks.add_benchmark_timestamps(start, end);
         assert!(!hooks.is_instrumented() || hooks.stop_benchmark().is_ok());
+    }
+
+    #[cfg(all(use_instrument_hooks, any(target_os = "linux", target_os = "macos")))]
+    #[test]
+    fn monotonic_offset_shifts_the_monotonic_clock_to_the_wall_clock() {
+        let offset = InstrumentHooks::monotonic_offset();
+        assert_eq!(offset, InstrumentHooks::monotonic_offset());
+        let shifted_ns = InstrumentHooks::current_timestamp() as i64 + offset;
+        let wall_ns = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as i64;
+        assert!((wall_ns - shifted_ns).abs() < 1_000_000_000);
     }
 }
