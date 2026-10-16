@@ -1,5 +1,5 @@
 //! End-to-end OTLP collection of the spans and logs of a benchmark built from the codspeed-rust
-//! checkout.
+//! checkout, timestamped on the clock of the benchmark markers.
 //!
 //! Needs codspeed-rust checked out next to this repository. Run with
 //! `cargo test --test otel -- --ignored`.
@@ -13,6 +13,14 @@ use std::path::{Path, PathBuf};
 use assert_cmd::Command;
 use async_compression::tokio::bufread::ZstdDecoder;
 use futures::StreamExt;
+use instrument_hooks_bindings::MONOTONIC_OFFSET_ATTRIBUTE;
+use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
+use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
+use opentelemetry_proto::tonic::common::v1::any_value::Value;
+use opentelemetry_proto::tonic::resource::v1::Resource;
+use prost::Message;
+use runner_shared::artifacts::{ArtifactExt, ExecutionTimestamps};
+use runner_shared::fifo::MarkerType;
 use tokio::io::AsyncReadExt;
 
 fn codspeed_rust_dir() -> PathBuf {
@@ -112,32 +120,98 @@ async fn collects_the_spans_and_logs_of_the_divan_otel_example() {
 
     assert!(!profile_folder.join("otel").exists());
     let entries = archive_entries(&profile_folder.join("otel.tar.zst")).await;
-    let traces: Vec<_> = entries
-        .iter()
-        .filter(|(name, _)| name.starts_with("traces-") && name.ends_with(".pb"))
-        .collect();
+    let traces: Vec<ExportTraceServiceRequest> = decode_requests(&entries, "traces-");
+    let logs: Vec<ExportLogsServiceRequest> = decode_requests(&entries, "logs-");
     assert!(!traces.is_empty(), "no trace request in {entries:?}");
-
-    let has_benchmark_span = traces.iter().any(|(_, content)| {
-        content
-            .windows(b"parse_and_sum".len())
-            .any(|window| window == b"parse_and_sum")
-    });
-    assert!(has_benchmark_span, "no `parse_and_sum` span in the traces");
-
-    let logs: Vec<_> = entries
-        .iter()
-        .filter(|(name, _)| name.starts_with("logs-") && name.ends_with(".pb"))
-        .collect();
     assert!(!logs.is_empty(), "no log request in {entries:?}");
 
-    let has_benchmark_log = logs.iter().any(|(_, content)| {
-        content
-            .windows(b"skipped invalid fields".len())
-            .any(|window| window == b"skipped invalid fields")
-    });
+    // (timestamp, offset to the monotonic clock) of each span start and end and log record.
+    let mut timestamps = Vec::new();
+    let mut span_names = Vec::new();
+    for resource_spans in traces.iter().flat_map(|request| &request.resource_spans) {
+        let offset = monotonic_offset(resource_spans.resource.as_ref());
+        for span in resource_spans
+            .scope_spans
+            .iter()
+            .flat_map(|scope| &scope.spans)
+        {
+            span_names.push(span.name.as_str());
+            timestamps.push((span.start_time_unix_nano, offset));
+            timestamps.push((span.end_time_unix_nano, offset));
+        }
+    }
+    let mut log_bodies = Vec::new();
+    for resource_logs in logs.iter().flat_map(|request| &request.resource_logs) {
+        let offset = monotonic_offset(resource_logs.resource.as_ref());
+        for record in resource_logs
+            .scope_logs
+            .iter()
+            .flat_map(|scope| &scope.log_records)
+        {
+            if let Some(Value::StringValue(body)) =
+                record.body.as_ref().and_then(|body| body.value.as_ref())
+            {
+                log_bodies.push(body.as_str());
+            }
+            timestamps.push((record.time_unix_nano, offset));
+        }
+    }
     assert!(
-        has_benchmark_log,
-        "no `skipped invalid fields` log in the logs"
+        span_names.contains(&"parse_and_sum"),
+        "no `parse_and_sum` span in {span_names:?}"
     );
+    assert!(
+        log_bodies.contains(&"skipped invalid fields"),
+        "no `skipped invalid fields` log in {log_bodies:?}"
+    );
+
+    let execution_timestamps = ExecutionTimestamps::decode_from_reader(
+        std::fs::File::open(profile_folder.join(ExecutionTimestamps::file_name(None))).unwrap(),
+    )
+    .unwrap();
+    let marker_timestamps = execution_timestamps
+        .markers
+        .iter()
+        .map(|marker| match marker {
+            MarkerType::SampleStart(timestamp)
+            | MarkerType::SampleEnd(timestamp)
+            | MarkerType::RoundStart(timestamp)
+            | MarkerType::RoundEnd(timestamp) => *timestamp,
+        });
+    let markers = marker_timestamps.clone().min().unwrap()..=marker_timestamps.max().unwrap();
+    for (timestamp, offset) in timestamps {
+        let monotonic = timestamp - offset;
+        assert!(
+            markers.contains(&monotonic),
+            "timestamp {timestamp} is {monotonic} on the monotonic clock, outside of the \
+             benchmark markers {markers:?}"
+        );
+    }
+}
+
+/// Decodes the archived requests whose name starts with `prefix`.
+fn decode_requests<M: Message + Default>(entries: &[(String, Vec<u8>)], prefix: &str) -> Vec<M> {
+    entries
+        .iter()
+        .filter(|(name, _)| name.starts_with(prefix) && name.ends_with(".pb"))
+        .map(|(_, content)| M::decode(content.as_slice()).unwrap())
+        .collect()
+}
+
+/// The offset to subtract from the timestamps of `resource` to get the monotonic clock of the
+/// benchmark markers.
+fn monotonic_offset(resource: Option<&Resource>) -> u64 {
+    let attribute = resource
+        .into_iter()
+        .flat_map(|resource| &resource.attributes)
+        .find(|attribute| attribute.key == MONOTONIC_OFFSET_ATTRIBUTE)
+        .expect("no monotonic clock offset in the resource");
+    match attribute
+        .value
+        .as_ref()
+        .and_then(|value| value.value.as_ref())
+    {
+        Some(Value::IntValue(offset)) => u64::try_from(*offset).unwrap(),
+        value => panic!("unexpected monotonic clock offset {value:?}"),
+    }
 }
