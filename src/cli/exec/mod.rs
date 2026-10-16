@@ -94,6 +94,7 @@ fn build_orchestrator_config(
         poll_results_options,
         extra_env: HashMap::new(),
         fair_sched: args.shared.experimental.experimental_fair_sched,
+        collect_otel: args.shared.experimental.experimental_otel,
         cycle_estimation,
         exclude_allocations,
         simulation_track_subprocess: args.shared.simulation_track_subprocess,

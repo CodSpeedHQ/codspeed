@@ -83,6 +83,7 @@ impl RunArgs {
                 },
                 experimental: ExperimentalArgs {
                     experimental_fair_sched: false,
+                    experimental_otel: false,
                     experimental_memory_capture_stack: None,
                     experimental_cycle_estimation: false,
                     experimental_exclude_allocations: false,
@@ -141,6 +142,7 @@ fn build_orchestrator_config(
         poll_results_options,
         extra_env: HashMap::new(),
         fair_sched: args.shared.experimental.experimental_fair_sched,
+        collect_otel: args.shared.experimental.experimental_otel,
         cycle_estimation,
         exclude_allocations,
         simulation_track_subprocess: args.shared.simulation_track_subprocess,
