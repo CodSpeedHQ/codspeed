@@ -2,11 +2,21 @@ use crate::executor::EXECUTOR_TARGET;
 use crate::local_logger::rolling_buffer::ROLLING_BUFFER;
 use crate::local_logger::suspend_progress_bar;
 use crate::prelude::*;
+use std::fs::File;
 use std::future::Future;
 use std::io::{Read, Write};
-use std::process::Command;
 use std::process::ExitStatus;
-use std::thread;
+use tokio::process::Command;
+
+/// Take the child's piped stdout and stderr as blocking files, for reading on plain threads.
+pub fn take_blocking_stdio(child: &mut tokio::process::Child) -> Result<(File, File)> {
+    let stdout = child.stdout.take().context("child stdout is not piped")?;
+    let stderr = child.stderr.take().context("child stderr is not piped")?;
+    Ok((
+        File::from(stdout.into_owned_fd()?),
+        File::from(stderr.into_owned_fd()?),
+    ))
+}
 
 /// Run a command and log its output to stdout and stderr
 ///
@@ -23,7 +33,7 @@ pub async fn run_command_with_log_pipe_and_callback<F, Fut>(
     cb: F,
 ) -> Result<ExitStatus>
 where
-    F: FnOnce(std::process::Child) -> Fut,
+    F: FnOnce(tokio::process::Child) -> Fut,
     Fut: Future<Output = anyhow::Result<ExitStatus>>,
 {
     /// Write text to the rolling buffer if active, otherwise write raw bytes to the writer.
@@ -85,26 +95,26 @@ where
         .stderr(std::process::Stdio::piped())
         .spawn()
         .context("failed to spawn the process")?;
-    let stdout = process.stdout.take().expect("unable to get stdout");
-    let stderr = process.stderr.take().expect("unable to get stderr");
+    let (stdout, stderr) = take_blocking_stdio(&mut process)?;
 
-    let stdout_handle = thread::spawn(move || {
+    let stdout_handle = tokio::task::spawn_blocking(move || {
         log_tee(stdout, std::io::stdout(), None).unwrap();
     });
 
-    let stderr_handle = thread::spawn(move || {
+    let stderr_handle = tokio::task::spawn_blocking(move || {
         log_tee(stderr, std::io::stderr(), Some("[stderr]")).unwrap();
     });
 
     let result = cb(process).await;
 
     // Wait for threads to drain remaining output
-    let _ = stdout_handle.join();
-    let _ = stderr_handle.join();
+    let _ = stdout_handle.await;
+    let _ = stderr_handle.await;
 
     result
 }
 
 pub async fn run_command_with_log_pipe(cmd: Command) -> Result<ExitStatus> {
-    run_command_with_log_pipe_and_callback(cmd, |mut child| async move { Ok(child.wait()?) }).await
+    run_command_with_log_pipe_and_callback(cmd, |mut child| async move { Ok(child.wait().await?) })
+        .await
 }

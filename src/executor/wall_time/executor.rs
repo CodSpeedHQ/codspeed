@@ -167,7 +167,7 @@ impl Executor for WallTimeExecutor {
                 } else {
                     cmd_builder
                 };
-                let cmd = cmd_builder.build();
+                let cmd = cmd_builder.build().into();
                 debug!("cmd: {cmd:?}");
                 run_command_with_log_pipe(cmd).await
             }
@@ -217,7 +217,7 @@ async fn run_with_profiler(
     let wrapped = profiler
         .wrap_command(cmd_builder, config, profile_folder, requires_sudo)
         .await?;
-    let cmd = wrapped.build();
+    let cmd = wrapped.build().into();
     debug!("cmd: {cmd:?}");
 
     let mut runner_fifo = RunnerFifo::new()?;
