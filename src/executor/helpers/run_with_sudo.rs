@@ -111,6 +111,10 @@ pub fn wrap_with_sudo(mut cmd_builder: CommandBuilder) -> Result<CommandBuilder>
             [
                 // Password prompt should not appear here since it has already been validated
                 OsStr::new("--non-interactive"),
+                // Both forms are needed: sudo-rs ignores the bare flag, and with only the
+                // list classic sudo keeps `env_reset`, which lets variables exported by PAM
+                // session modules (e.g. HOME from pam_systemd) override the preserved ones.
+                OsStr::new("--preserve-env"),
                 &preserve_env_arg(&cmd_builder),
             ],
         );
