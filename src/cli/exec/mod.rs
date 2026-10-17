@@ -80,7 +80,16 @@ fn build_orchestrator_config(
         targets: vec![target],
         modes,
         instruments: Instruments { mongodb: None }, // exec doesn't support MongoDB
-        perf_unwinding_mode: args.shared.profiler_run_args.perf.perf_unwinding_mode,
+        walltime_unwinding_mode: args
+            .shared
+            .profiler_run_args
+            .walltime
+            .resolve_unwinding_mode(),
+        walltime_stack_sample_size: args
+            .shared
+            .profiler_run_args
+            .walltime
+            .walltime_stack_sample_size,
         enable_profiler: args.shared.profiler_run_args.resolve_enable_profiler(),
         walltime_profiler: args.shared.walltime_profiler,
         simulation_tool: args.shared.simulation_tool.unwrap_or_default(),

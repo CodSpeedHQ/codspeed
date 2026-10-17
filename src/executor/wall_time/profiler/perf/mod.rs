@@ -90,7 +90,7 @@ impl Profiler for PerfProfiler {
         let perf_file_path = profile_folder.join(PERF_PIPEDATA_FILE_NAME);
 
         // Infer the unwinding mode from the benchmark cmd
-        let (cg_mode, stack_size) = if let Some(mode) = config.perf_unwinding_mode {
+        let (cg_mode, stack_size) = if let Some(mode) = config.walltime_unwinding_mode {
             (mode, None)
         } else if command_has_executable(
             &config.command,
@@ -117,7 +117,13 @@ impl Profiler for PerfProfiler {
                 suppress_go_perf_unwinding_warning();
                 "fp"
             }
-            UnwindingMode::Dwarf => &format!("dwarf,{}", stack_size.unwrap_or(8192)),
+            UnwindingMode::Dwarf => &format!(
+                "dwarf,{}",
+                config
+                    .walltime_stack_sample_size
+                    .or(stack_size)
+                    .unwrap_or(8192)
+            ),
         };
         debug!("Using call graph mode: {cg_mode:?}");
 
