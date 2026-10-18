@@ -243,9 +243,14 @@ impl MemtrackBpf {
         poll_interval_ms: u64,
         tx: std::sync::mpsc::Sender<Vec<runner_shared::artifacts::MemtrackEvent>>,
     ) -> Result<RingBufferPoller> {
+        let parse = |data: &[u8]| {
+            let event = crate::ebpf::events::parse_event(data)?;
+            crate::ebpf::stats::add_sent(1);
+            Some(event)
+        };
         with_skel!(self, skel => RingBufferPoller::new(
             &skel.maps.events,
-            crate::ebpf::events::parse_event,
+            parse,
             tx,
             poll_interval_ms,
             None,
@@ -276,9 +281,15 @@ impl MemtrackBpf {
                 event
             };
 
+        let parse = |data: &[u8]| {
+            let stack = events::parse_stack(data)?;
+            crate::ebpf::stats::add_sent(1);
+            Some(stack)
+        };
+
         with_skel!(self, skel => ThreadedRingBufferPoller::new(
             &skel.maps.stacks,
-            events::parse_stack,
+            parse,
             resolve,
             tx,
             poll_interval_ms,
