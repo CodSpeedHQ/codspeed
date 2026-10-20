@@ -8,6 +8,8 @@ pub enum MeasurementMode {
     Memory,
     #[value(alias = "instrumentation")]
     Simulation,
+    /// Runs the benchmarks without measuring them, to collect the telemetry they emit
+    Telemetry,
 }
 
 impl MeasurementMode {
@@ -19,6 +21,7 @@ impl MeasurementMode {
             Self::Simulation => "instrumentation",
             Self::Walltime => "walltime",
             Self::Memory => "memory",
+            Self::Telemetry => "telemetry",
         }
     }
 }

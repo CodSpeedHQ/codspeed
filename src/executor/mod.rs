@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+mod analysis;
 pub mod config;
 mod execution_context;
 pub(crate) mod helpers;
@@ -22,6 +23,8 @@ pub use execution_context::ExecutionContext;
 pub use interfaces::ExecutorName;
 pub use orchestrator::Orchestrator;
 
+use crate::instruments::Instruments;
+use analysis::executor::AnalysisExecutor;
 #[cfg(target_os = "linux")]
 use memory::executor::MemoryExecutor;
 use std::path::Path;
@@ -37,6 +40,7 @@ impl Display for RunnerMode {
             RunnerMode::Walltime => write!(f, "walltime"),
             #[cfg(target_os = "linux")]
             RunnerMode::Memory => write!(f, "memory"),
+            RunnerMode::Telemetry => write!(f, "telemetry"),
         }
     }
 }
@@ -53,6 +57,14 @@ pub fn get_executor_from_mode(
         RunnerMode::Walltime => Box::new(WallTimeExecutor::new(walltime_profiler)),
         #[cfg(target_os = "linux")]
         RunnerMode::Memory => Box::new(MemoryExecutor),
+        RunnerMode::Telemetry => Box::new(AnalysisExecutor::new(RunnerMode::Telemetry)),
+    }
+}
+
+/// Enables the instruments `mode` runs on top of its executor.
+pub fn apply_mode_instruments(mode: &RunnerMode, instruments: &mut Instruments) {
+    if *mode == RunnerMode::Telemetry {
+        instruments.telemetry = true;
     }
 }
 
