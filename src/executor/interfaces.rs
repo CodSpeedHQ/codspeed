@@ -8,6 +8,7 @@ pub enum ExecutorName {
     Valgrind,
     WallTime,
     Memory,
+    Analysis,
 }
 
 impl fmt::Display for ExecutorName {
@@ -16,6 +17,7 @@ impl fmt::Display for ExecutorName {
             ExecutorName::Valgrind => write!(f, "valgrind"),
             ExecutorName::WallTime => write!(f, "walltime"),
             ExecutorName::Memory => write!(f, "memory"),
+            ExecutorName::Analysis => write!(f, "analysis"),
         }
     }
 }
@@ -27,6 +29,7 @@ impl ExecutorName {
             ExecutorName::Valgrind => "CPU Simulation",
             ExecutorName::WallTime => "Walltime",
             ExecutorName::Memory => "Memory",
+            ExecutorName::Analysis => "Analysis",
         }
     }
 
@@ -36,6 +39,7 @@ impl ExecutorName {
             ExecutorName::Valgrind => Icon::ExecutorValgrind,
             ExecutorName::WallTime => Icon::ExecutorWallTime,
             ExecutorName::Memory => Icon::ExecutorMemory,
+            ExecutorName::Analysis => Icon::ExecutorAnalysis,
         }
     }
 }
