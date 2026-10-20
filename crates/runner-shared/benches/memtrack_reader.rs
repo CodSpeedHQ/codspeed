@@ -36,7 +36,9 @@ fn sizes() -> &'static [usize] {
         .ok()
         .and_then(|mode| MeasurementMode::from_str(&mode, true).ok());
     match mode {
-        Some(MeasurementMode::Simulation | MeasurementMode::Memory) => ANALYSIS_MODE_SIZES,
+        Some(
+            MeasurementMode::Simulation | MeasurementMode::Memory | MeasurementMode::Telemetry,
+        ) => ANALYSIS_MODE_SIZES,
         Some(MeasurementMode::Walltime) | None => WALLTIME_MODE_SIZES,
     }
 }

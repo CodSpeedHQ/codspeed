@@ -13,6 +13,8 @@ pub enum RunnerMode {
     Walltime,
     #[cfg(target_os = "linux")]
     Memory,
+    #[value(hide = true)]
+    Telemetry,
 }
 
 impl From<&RunnerMode> for runner_shared::measurement_mode::MeasurementMode {
@@ -23,6 +25,7 @@ impl From<&RunnerMode> for runner_shared::measurement_mode::MeasurementMode {
             RunnerMode::Walltime => Self::Walltime,
             #[cfg(target_os = "linux")]
             RunnerMode::Memory => Self::Memory,
+            RunnerMode::Telemetry => Self::Telemetry,
         }
     }
 }

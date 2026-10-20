@@ -15,12 +15,15 @@ mod tests {
 
     use insta::{assert_json_snapshot, assert_snapshot};
 
-    use crate::executor::ExecutorName;
-    use crate::instruments::InstrumentName;
+    use serde_json::json;
+
+    use crate::executor::{ExecutorName, apply_mode_instruments, get_executor_from_mode};
+    use crate::instruments::{InstrumentName, Instruments};
     use crate::run_environment::{
         LocalData, RepositoryProvider, RunEnvironment, RunEnvironmentMetadata, RunEvent, RunPart,
         Sender,
     };
+    use crate::runner_mode::RunnerMode;
     use crate::system::SystemInfo;
     use crate::upload::{
         LATEST_UPLOAD_METADATA_VERSION, ProfileArchiveMetadata, Runner, UploadMetadata,
@@ -87,6 +90,27 @@ mod tests {
             @"75a9b81695bbea8934d88e221dd3dd98392170904d4775a84145767117555a60"
         );
         assert_json_snapshot!(upload_metadata);
+    }
+
+    #[test]
+    fn test_telemetry_runs_upload_as_analysis_with_the_telemetry_instrument() {
+        let mut instruments = Instruments {
+            mongodb: None,
+            telemetry: false,
+        };
+        apply_mode_instruments(&RunnerMode::Telemetry, &mut instruments);
+        let runner = Runner {
+            name: "codspeed-runner".into(),
+            version: "5.5.0".into(),
+            instruments: instruments.get_active_instrument_names(),
+            executor: get_executor_from_mode(&RunnerMode::Telemetry, None).name(),
+            exclude_allocations: false,
+            system_info: SystemInfo::test(),
+        };
+
+        let runner = serde_json::to_value(&runner).unwrap();
+        assert_eq!(runner["executor"], "analysis");
+        assert_eq!(runner["instruments"], json!(["Telemetry"]));
     }
 
     #[test]
