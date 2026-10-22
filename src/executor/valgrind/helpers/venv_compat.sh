@@ -3,6 +3,14 @@
 function add_symlink() {
     local venv_python="$1"
 
+    venv_path="$(dirname "$(dirname "$venv_python")")"
+    # Only virtual environments resolve libpython relative to themselves; any other Python
+    # (e.g. a uv shim in ~/.local/bin) has nowhere to put the link.
+    if [ ! -f "$venv_path/pyvenv.cfg" ]; then
+        echo "Not a virtual environment, skipping: $venv_python"
+        return 0
+    fi
+
     system_python="$(readlink -f "$venv_python")"
     if [ -z "$system_python" ]; then
         echo "Error: Failed to resolve real path for $venv_python" >&2
@@ -10,7 +18,6 @@ function add_symlink() {
     fi
 
     system_path="$(dirname $(dirname "$system_python"))"
-    venv_path="$(dirname $(dirname "$venv_python"))"
     echo "Python installation (system): $system_path"
     echo "Python installation (venv): $venv_path"
 
@@ -26,13 +33,14 @@ function add_symlink() {
     system_link="$system_path/lib/$libpython_name"
     if [ -e "$venv_link" ]; then
         echo "Symlink already exists: $venv_link"
-    else
-        echo "Creating symlink: $system_link -> $venv_link"
-        ln -s "$system_link" "$venv_link"
-        if [ $? -ne 0 ]; then
-            echo "Error: Failed to create symlink $venv_link" >&2
-            return 1
-        fi
+        return 0
+    fi
+
+    # `-f` replaces a dangling link left behind when the venv's Python was moved or upgraded.
+    echo "Creating symlink: $system_link -> $venv_link"
+    if ! mkdir -p "$venv_path/lib" || ! ln -sfn "$system_link" "$venv_link"; then
+        echo "Error: Failed to create symlink $venv_link" >&2
+        return 1
     fi
 }
 

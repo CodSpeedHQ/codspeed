@@ -50,6 +50,101 @@ pub fn symlink_libpython(cwd: Option<&String>) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{fs, os::unix::fs::symlink, path::Path};
+
+    const LIBPYTHON: &str = "libpython3.13.so.1.0";
+
+    fn write_executable(path: &Path, content: &str) {
+        fs::write(path, content).unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    /// Runs the script with a fake `uv` and `ldd` first in `PATH`. `uv python find` reports
+    /// `uv_python`, and `ldd` always reports `LIBPYTHON` as missing.
+    fn run_script(root: &Path, uv_python: &Path) -> std::process::Output {
+        let fake_bin = root.join("fake-bin");
+        fs::create_dir_all(&fake_bin).unwrap();
+        write_executable(
+            &fake_bin.join("uv"),
+            &format!("#!/usr/bin/env bash\necho {}\n", uv_python.display()),
+        );
+        write_executable(
+            &fake_bin.join("ldd"),
+            &format!("#!/usr/bin/env bash\necho '{LIBPYTHON} => not found'\n"),
+        );
+        // Without a `python3` in the fake bin, the script would inspect the host's python.
+        symlink(uv_python, fake_bin.join("python3")).unwrap();
+
+        let path = format!("{}:{}", fake_bin.display(), std::env::var("PATH").unwrap());
+        Command::new("bash")
+            .arg("-c")
+            .arg(VENV_COMPAT_SCRIPT)
+            .env("PATH", path)
+            .output()
+            .unwrap()
+    }
+
+    /// Creates `real/bin/python3` and a `venv/bin/python3` pointing at it.
+    fn create_venv(root: &Path) -> std::path::PathBuf {
+        fs::create_dir_all(root.join("real/bin")).unwrap();
+        fs::create_dir_all(root.join("venv/bin")).unwrap();
+        fs::write(root.join("real/bin/python3"), "").unwrap();
+        fs::write(root.join("venv/pyvenv.cfg"), "").unwrap();
+        symlink(root.join("real/bin/python3"), root.join("venv/bin/python3")).unwrap();
+        root.join("venv/bin/python3")
+    }
+
+    #[test]
+    fn test_creates_missing_lib_dir_and_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let venv_python = create_venv(dir.path());
+
+        let output = run_script(dir.path(), &venv_python);
+
+        assert!(output.status.success(), "{output:?}");
+        let link = dir.path().join("venv/lib").join(LIBPYTHON);
+        assert_eq!(
+            fs::read_link(link).unwrap(),
+            dir.path()
+                .canonicalize()
+                .unwrap()
+                .join("real/lib")
+                .join(LIBPYTHON)
+        );
+    }
+
+    #[test]
+    fn test_replaces_dangling_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let venv_python = create_venv(dir.path());
+        fs::create_dir_all(dir.path().join("venv/lib")).unwrap();
+        let link = dir.path().join("venv/lib").join(LIBPYTHON);
+        symlink(dir.path().join("moved-python/lib").join(LIBPYTHON), &link).unwrap();
+
+        let output = run_script(dir.path(), &venv_python);
+
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(
+            fs::read_link(link).unwrap(),
+            dir.path()
+                .canonicalize()
+                .unwrap()
+                .join("real/lib")
+                .join(LIBPYTHON)
+        );
+    }
+
+    #[test]
+    fn test_skips_python_outside_a_venv() {
+        let dir = tempfile::tempdir().unwrap();
+        let venv_python = create_venv(dir.path());
+        fs::remove_file(dir.path().join("venv/pyvenv.cfg")).unwrap();
+
+        let output = run_script(dir.path(), &venv_python);
+
+        assert!(output.status.success(), "{output:?}");
+        assert!(!dir.path().join("venv/lib").exists());
+    }
 
     // Only run in Github Actions, to ensure python is dynamically linked.
     #[test_with::env(GITHUB_ACTIONS)]

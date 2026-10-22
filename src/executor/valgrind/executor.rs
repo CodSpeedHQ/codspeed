@@ -57,8 +57,9 @@ impl Executor for ValgrindExecutor {
         }
 
         if let Err(error) = venv_compat::symlink_libpython(None) {
-            warn!("Failed to symlink libpython");
-            debug!("Script error: {error}");
+            warn!(
+                "Failed to symlink libpython into the virtual environment, flamegraphs may contain artifacts: {error}"
+            );
         }
 
         Ok(())
