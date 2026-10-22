@@ -5,6 +5,18 @@
 
 
 
+## [5.6.0] - 2026-10-22
+
+### <!-- 1 -->🐛 Bug Fixes
+- Keep the user's HOME when wrapping commands with sudo (#588) by @lvaroqui in [#588](https://github.com/CodSpeedHQ/runner/pull/588)
+
+### <!-- 2 -->🏗️ Refactor
+- Spawn child processes with tokio::process (#587) by @lvaroqui in [#587](https://github.com/CodSpeedHQ/runner/pull/587)
+
+### <!-- 7 -->⚙️ Internals
+- Bump pinned valgrind-codspeed to 3.26.0-0codspeed10 (#593) by @adriencaccia in [#593](https://github.com/CodSpeedHQ/runner/pull/593)
+
+
 ## [5.5.0] - 2026-10-14
 
 ### <!-- 0 -->🚀 Features
@@ -1668,6 +1680,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[5.6.0]: https://github.com/CodSpeedHQ/runner/compare/v5.5.0..v5.6.0
 [5.5.0]: https://github.com/CodSpeedHQ/runner/compare/v5.4.2..v5.5.0
 [5.4.2]: https://github.com/CodSpeedHQ/runner/compare/v5.4.1..v5.4.2
 [5.4.1]: https://github.com/CodSpeedHQ/runner/compare/v5.4.0..v5.4.1
