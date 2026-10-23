@@ -32,14 +32,14 @@ unsafe fn close_fds_except(keep: &[RawFd]) {
         if fd > lo {
             // SAFETY: caller upholds the fork-child, no-allocation contract.
             unsafe {
-                libc::close_range(lo, fd - 1, 0);
+                libc::syscall(libc::SYS_close_range, lo, fd - 1, 0);
             }
         }
         lo = fd.saturating_add(1);
     }
     // SAFETY: same as above.
     unsafe {
-        libc::close_range(lo, u32::MAX, 0);
+        libc::syscall(libc::SYS_close_range, lo, u32::MAX, 0);
     }
 }
 
