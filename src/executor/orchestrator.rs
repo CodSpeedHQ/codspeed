@@ -1,4 +1,6 @@
-use super::{ExecutionContext, ExecutorName, get_executor_from_mode, run_executor};
+use super::{
+    ExecutionContext, ExecutorName, apply_mode_instruments, get_executor_from_mode, run_executor,
+};
 use crate::api_client::CodSpeedAPIClient;
 use crate::binary_installer::ensure_binary_installed;
 use crate::binary_pins::{self, PinnedBinary};
@@ -45,6 +47,13 @@ impl Orchestrator {
             warn!(
                 "The 'instrumentation' runner mode is deprecated and will be removed in a future version. \
                 Please use 'simulation' instead."
+            );
+        }
+
+        if config.modes.contains(&RunnerMode::Telemetry) {
+            warn!(
+                "The 'telemetry' runner mode is experimental and may change or be removed without \
+                notice."
             );
         }
 
@@ -141,9 +150,10 @@ impl Orchestrator {
         }
 
         for (run_part_index, part) in run_parts.into_iter().enumerate() {
-            let config = self
+            let mut config = self
                 .config
                 .executor_config_for_command(part.command, !part.uses_exec_harness);
+            apply_mode_instruments(part.mode, &mut config.instruments);
             let mut executor = get_executor_from_mode(part.mode, self.config.walltime_profiler);
             let profile_folder =
                 self.resolve_profile_folder(&executor.name(), run_part_index, total_parts)?;

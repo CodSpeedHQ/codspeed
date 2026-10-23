@@ -50,7 +50,7 @@ fn human_bytes_per_second(bytes: u64, elapsed: std::time::Duration) -> String {
 /// Create a profile archive from the profile folder
 ///
 /// For Valgrind, we create a gzip-compressed tar archive of the entire profile folder.
-/// For WallTime and Memory, we create an uncompressed tar archive on disk: their
+/// For WallTime, Memory and Analysis, we create an uncompressed tar archive on disk: their
 /// profiles are already compressed, so gzip would barely shrink them.
 async fn create_profile_archive(
     profile_folder: &std::path::Path,
@@ -68,7 +68,7 @@ async fn create_profile_archive(
             let data = gzip_encoder.into_inner();
             ProfileArchive::new_compressed_in_memory(data).await?
         }
-        ExecutorName::Memory | ExecutorName::WallTime => {
+        ExecutorName::Memory | ExecutorName::WallTime | ExecutorName::Analysis => {
             debug!("Creating uncompressed tar archive on disk");
             let temp_file = tempfile::NamedTempFile::new()?;
             let temp_path = temp_file.path().to_path_buf();
