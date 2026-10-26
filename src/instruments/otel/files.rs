@@ -24,7 +24,7 @@ pub struct TelemetryStats {
 }
 
 /// Decodes `requests` into the [`SPANS_FILE`] and [`LOGS_FILE`] of `profile_folder`, then removes
-/// them. A file is only written when it has rows.
+/// them. A file is only written when it has rows, and the files of a previous run are removed.
 pub async fn write_telemetry_files(
     requests: ReceivedRequests,
     profile_folder: &Path,
@@ -42,8 +42,8 @@ fn write_files_blocking(
     requests: &ReceivedRequests,
     profile_folder: &Path,
 ) -> Result<TelemetryStats> {
-    let mut spans = LazyWriter::new(profile_folder.join(SPANS_FILE));
-    let mut logs = LazyWriter::new(profile_folder.join(LOGS_FILE));
+    let mut spans = LazyWriter::new(profile_folder.join(SPANS_FILE))?;
+    let mut logs = LazyWriter::new(profile_folder.join(LOGS_FILE))?;
     let mut stats = TelemetryStats::default();
 
     for request in requests.list()? {
@@ -92,15 +92,21 @@ fn decode<M: Message + Default + DeserializeOwned>(request: &StoredRequest) -> R
     })
 }
 
-/// Creates its file on the first rows.
+/// Removes the file already at its path, and only creates its file on the first rows.
 struct LazyWriter<R: TelemetryRow> {
     path: std::path::PathBuf,
     writer: Option<TelemetryWriter<R>>,
 }
 
 impl<R: TelemetryRow> LazyWriter<R> {
-    fn new(path: std::path::PathBuf) -> Self {
-        Self { path, writer: None }
+    fn new(path: std::path::PathBuf) -> Result<Self> {
+        match std::fs::remove_file(&path) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                return Err(error).with_context(|| format!("Failed to remove {}", path.display()));
+            }
+            _ => {}
+        }
+        Ok(Self { path, writer: None })
     }
 
     fn write(&mut self, rows: Vec<R>) -> Result<()> {
@@ -232,5 +238,40 @@ mod tests {
 
         assert_eq!(stats, TelemetryStats::default());
         assert_eq!(std::fs::read_dir(profile_folder.path()).unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn replaces_the_output_of_a_previous_run() {
+        let profile_folder = tempfile::tempdir().unwrap();
+        let logs_path = profile_folder.path().join(LOGS_FILE);
+        std::fs::create_dir_all(logs_path.parent().unwrap()).unwrap();
+        std::fs::write(&logs_path, b"previous logs").unwrap();
+        let spool_dir = profile_folder.path().join("otel-requests");
+        std::fs::create_dir_all(&spool_dir).unwrap();
+        std::fs::write(
+            spool_dir.join("000005-logs.pb"),
+            logs_request().encode_to_vec(),
+        )
+        .unwrap();
+
+        let receiver = OtelReceiver::start(profile_folder.path()).await.unwrap();
+        let response = post(
+            &receiver,
+            "/v1/traces",
+            &[("content-type", "application/x-protobuf")],
+            trace_request().encode_to_vec(),
+        )
+        .await;
+        assert!(response.status().is_success());
+        let stats = write_telemetry_files(receiver.stop().await, profile_folder.path())
+            .await
+            .unwrap();
+
+        assert_eq!((stats.spans, stats.logs), (2, 0));
+        assert!(!logs_path.exists());
+        assert_eq!(
+            read::<SpanRow>(&profile_folder.path().join(SPANS_FILE)),
+            span_rows(trace_request())
+        );
     }
 }
