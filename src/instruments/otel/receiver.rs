@@ -44,16 +44,19 @@ pub struct OtelReceiver {
 
 impl OtelReceiver {
     /// Starts listening on a free localhost port, storing the received requests in
-    /// `profile_folder`.
+    /// `profile_folder`. Requests left there by an interrupted run are removed.
     ///
     /// The server stops when the receiver is stopped or dropped.
     pub async fn start(profile_folder: &Path) -> Result<Self> {
+        let spool_dir = profile_folder.join(SPOOL_DIR);
+        remove_dir(&spool_dir)?;
+
         let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
             .await
             .context("Failed to bind the OTLP receiver")?;
         let endpoint = format!("http://{}", listener.local_addr()?);
 
-        let store = Arc::new(RequestStore::new(profile_folder.join(SPOOL_DIR)));
+        let store = Arc::new(RequestStore::new(spool_dir));
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let server = tokio::spawn(serve(listener, store.clone(), shutdown_rx));
 
@@ -120,12 +123,16 @@ impl ReceivedRequests {
 
     /// Removes the stored requests.
     pub(super) fn remove(self) -> Result<()> {
-        match std::fs::remove_dir_all(&self.dir) {
-            Err(error) if error.kind() != io::ErrorKind::NotFound => {
-                Err(error).with_context(|| format!("Failed to remove {}", self.dir.display()))
-            }
-            _ => Ok(()),
+        remove_dir(&self.dir)
+    }
+}
+
+fn remove_dir(dir: &Path) -> Result<()> {
+    match std::fs::remove_dir_all(dir) {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => {
+            Err(error).with_context(|| format!("Failed to remove {}", dir.display()))
         }
+        _ => Ok(()),
     }
 }
 
