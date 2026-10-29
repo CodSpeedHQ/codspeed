@@ -210,7 +210,7 @@ jobs:
       - name: Build benchmarks
         run: cargo codspeed build -p runner-shared -m ${{ matrix.mode }}
       - name: Run benchmarks
-        uses: CodSpeedHQ/action@3194d9a39c4d46684cb44bf7207fc56626aad8fd # v4
+        uses: CodSpeedHQ/action@78102a468f96d8e0ccb92d0ec49425753fc42062 # v5.6.0
         with:
           mode: ${{ matrix.mode }}
           run: cargo codspeed run -p runner-shared
@@ -274,7 +274,7 @@ jobs:
           dd if=/dev/zero of=/tmp/memtrack-bench-dd.bin bs=1M count=64 2> /dev/null
 
       - name: Run memtrack walltime benchmarks (${{ matrix.workload }})
-        uses: CodSpeedHQ/action@3194d9a39c4d46684cb44bf7207fc56626aad8fd # v4
+        uses: CodSpeedHQ/action@78102a468f96d8e0ccb92d0ec49425753fc42062 # v5.6.0
         with:
           config: crates/memtrack/benchmarks/${{ matrix.workload }}.yml
           mode: walltime
