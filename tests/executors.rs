@@ -305,3 +305,34 @@ fn memory_forwards_path() {
 fn memory_forwards_ld_library_path() {
     memory_forwards_path_like("LD_LIBRARY_PATH", "/custom/test/lib");
 }
+
+#[test]
+fn bundled_samply_launches_command_with_explicit_unwinding() {
+    let _guard = UPROBES.read().unwrap_or_else(PoisonError::into_inner);
+    let dir = tempfile::tempdir().unwrap();
+    let profile = dir.path().join("profile.json");
+    codspeed()
+        .args([
+            "samply",
+            "record",
+            "--save-only",
+            "--no-open",
+            "--unwinding-mode",
+            "dwarf",
+            "--unwinding-stack-size",
+            "16384",
+            "-o",
+        ])
+        .arg(profile)
+        .args([
+            "--",
+            "sh",
+            "-c",
+            "printf '%s\\n' \"$1\"",
+            "profiled-command",
+            "--unwinding-stack-size=application-value",
+        ])
+        .assert()
+        .success()
+        .stdout("--unwinding-stack-size=application-value\n");
+}

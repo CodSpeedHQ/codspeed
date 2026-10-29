@@ -1,4 +1,3 @@
-use crate::cli::UnwindingMode;
 use crate::instruments::Instruments;
 use crate::prelude::*;
 use crate::run_environment::RepositoryProvider;
@@ -51,6 +50,29 @@ pub enum WalltimeProfiler {
     Samply,
 }
 
+/// Explicit walltime unwinding settings. An absent setting preserves backend inference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WalltimeUnwinding {
+    FramePointer,
+    /// An absent size preserves the profiler's default stack copy size.
+    Dwarf {
+        stack_size: Option<u32>,
+    },
+}
+
+/// Formats as the `--walltime-unwinding-mode` value.
+impl std::fmt::Display for WalltimeUnwinding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::FramePointer => f.write_str("fp"),
+            Self::Dwarf { stack_size: None } => f.write_str("dwarf"),
+            Self::Dwarf {
+                stack_size: Some(size),
+            } => write!(f, "dwarf,{size}"),
+        }
+    }
+}
+
 /// Run-level configuration owned by the orchestrator.
 ///
 /// Holds all parameters that are constant across benchmark targets within a run,
@@ -68,8 +90,8 @@ pub struct OrchestratorConfig {
     pub modes: Vec<RunnerMode>,
     pub instruments: Instruments,
     pub enable_profiler: bool,
-    /// Stack unwinding mode for perf (if enabled)
-    pub perf_unwinding_mode: Option<UnwindingMode>,
+    /// Explicit unwinding settings; None preserves the profiler's automatic selection.
+    pub walltime_unwinding: Option<WalltimeUnwinding>,
     /// Profiler override for walltime mode (if None, selected based on the platform)
     pub walltime_profiler: Option<WalltimeProfiler>,
 
@@ -120,8 +142,8 @@ pub struct ExecutorConfig {
 
     pub instruments: Instruments,
     pub enable_profiler: bool,
-    /// Stack unwinding mode for perf (if enabled)
-    pub perf_unwinding_mode: Option<UnwindingMode>,
+    /// Explicit unwinding settings; None preserves the profiler's automatic selection.
+    pub walltime_unwinding: Option<WalltimeUnwinding>,
 
     pub simulation_tool: SimulationTool,
 
@@ -218,7 +240,7 @@ impl OrchestratorConfig {
             command,
             instruments: self.instruments.clone(),
             enable_profiler: self.enable_profiler,
-            perf_unwinding_mode: self.perf_unwinding_mode,
+            walltime_unwinding: self.walltime_unwinding,
             simulation_tool: self.simulation_tool,
             skip_run: self.skip_run,
             skip_setup: self.skip_setup,
@@ -251,7 +273,7 @@ impl OrchestratorConfig {
             }],
             modes: vec![RunnerMode::Simulation],
             instruments: Instruments::test(),
-            perf_unwinding_mode: None,
+            walltime_unwinding: None,
             walltime_profiler: None,
             enable_profiler: false,
             simulation_tool: SimulationTool::default(),
