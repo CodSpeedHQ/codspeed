@@ -8,12 +8,12 @@
 #define MEMTRACK_SIGCONT 18
 #define MEMTRACK_SIGSTOP 19
 
-/* tgid -> 1 for every process BPF stopped, one map per reason. A process is
- * recorded before its stop can take effect, and userspace resumes only
- * recorded processes, so a process stopped for both reasons resumes once
- * neither map holds it. Sized like tracked_pids. */
-BPF_HASH_MAP(pressure_stopped, __u32, __u8, 10000);
-BPF_HASH_MAP(attach_stopped, __u32, __u8, 10000);
+/* tgid -> stop ktime (ns) for every process BPF stopped, one map per reason.
+ * A process is recorded before its stop can take effect, and userspace
+ * resumes only recorded processes, so a process stopped for both reasons
+ * resumes once neither map holds it. Sized like tracked_pids. */
+BPF_HASH_MAP(pressure_stopped, __u32, __u64, 10000);
+BPF_HASH_MAP(attach_stopped, __u32, __u64, 10000);
 /* Stops that could not be recorded because the map was full; userspace warns. */
 BPF_ARRAY_MAP(stop_record_failed, __u64, 1);
 
@@ -27,8 +27,8 @@ static __always_inline void memtrack_stop_current(void* map, __u32 tgid) {
         return;
     }
 
-    __u8 marker = 1;
-    if (bpf_map_update_elem(map, &tgid, &marker, BPF_ANY) == 0) {
+    __u64 stopped_at = bpf_ktime_get_ns();
+    if (bpf_map_update_elem(map, &tgid, &stopped_at, BPF_ANY) == 0) {
         return;
     }
 
