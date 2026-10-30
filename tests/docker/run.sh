@@ -125,7 +125,7 @@ memory=()
 walltime=()
 while read -r name; do
   case $name in
-    *Simulation*) simulation+=("$name") ;;
+    *Simulation* | simulation_*) simulation+=("$name") ;;
     *Memory* | memory_*) memory+=("$name") ;;
     *) walltime+=("$name") ;;
   esac
