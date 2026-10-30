@@ -14,7 +14,7 @@ impl MemtrackBpf {
         self.attach_sched_process_exit()?;
         if self.physical {
             if let Err(e) = self.attach_rss_stat() {
-                warn!("Failed to attach rss_stat tracepoint, RSS collection disabled: {e:#}");
+                debug!("Failed to attach rss_stat tracepoint, RSS collection disabled: {e:#}");
             }
         }
 
