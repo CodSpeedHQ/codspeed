@@ -50,6 +50,7 @@ add_analysis_flags() {
         --hash-seed=1
         --random-seed=1
         --no-opt
+        --always-sparkplug
         --predictable
         --predictable-gc-schedule
         --expose-gc
