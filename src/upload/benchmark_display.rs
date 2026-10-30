@@ -288,6 +288,8 @@ pub fn build_benchmark_table(results: &[FetchLocalRunBenchmarkResult]) -> String
                 ExecutorName::Valgrind => build_simulation_table(executor_results),
                 ExecutorName::WallTime => build_walltime_table(executor_results),
                 ExecutorName::Memory => build_memory_table(executor_results),
+                // Not in `executor_order`: analysis runs have no performance results.
+                ExecutorName::Analysis => continue,
             };
             output.push_str(&table);
         }
@@ -318,6 +320,7 @@ pub fn build_detailed_summary(result: &FetchLocalRunBenchmarkResult) -> String {
                 format!("{name}: {time}")
             }
         }
+        ExecutorName::Analysis => name.to_string(),
         ExecutorName::Memory => {
             if let Some(mem) = &result.memory {
                 let peak = style(helpers::format_memory(mem.peak_memory as f64, Some(1))).cyan();

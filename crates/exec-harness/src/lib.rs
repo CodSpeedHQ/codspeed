@@ -69,7 +69,7 @@ pub fn execute_benchmarks(
 
     match measurement_mode {
         MeasurementMode::Walltime => walltime::perform(commands),
-        MeasurementMode::Memory => analysis::perform(commands),
+        MeasurementMode::Memory | MeasurementMode::Telemetry => analysis::perform(commands),
         MeasurementMode::Simulation => analysis::perform_with_valgrind(commands),
     }
 }
