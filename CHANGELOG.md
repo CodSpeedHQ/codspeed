@@ -5,6 +5,18 @@
 
 
 
+## [5.6.1] - 2026-10-30
+
+### <!-- 1 -->🐛 Bug Fixes
+- Stop the libpython symlink warning from firing falsely by @not-matthias in [#594](https://github.com/CodSpeedHQ/runner/pull/594)
+
+### <!-- 10 -->💼 Other
+- Bump submodule to not loop on corrupted jit dump by @GuillaumeLagrange in [#599](https://github.com/CodSpeedHQ/runner/pull/599)
+
+### <!-- 7 -->⚙️ Internals
+- Bump CodSpeedHQ/action to v5.6.0 (#597) by @not-matthias in [#597](https://github.com/CodSpeedHQ/runner/pull/597)
+
+
 ## [5.6.0] - 2026-10-22
 
 ### <!-- 1 -->🐛 Bug Fixes
@@ -1680,6 +1692,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[5.6.1]: https://github.com/CodSpeedHQ/runner/compare/v5.6.0..v5.6.1
 [5.6.0]: https://github.com/CodSpeedHQ/runner/compare/v5.5.0..v5.6.0
 [5.5.0]: https://github.com/CodSpeedHQ/runner/compare/v5.4.2..v5.5.0
 [5.4.2]: https://github.com/CodSpeedHQ/runner/compare/v5.4.1..v5.4.2
