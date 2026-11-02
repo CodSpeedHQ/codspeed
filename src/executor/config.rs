@@ -270,7 +270,7 @@ impl OrchestratorConfig {
             poll_results_options: PollResultsOptions::new(false, None),
             extra_env: HashMap::new(),
             fair_sched: false,
-            deterministic_rng: false,
+            deterministic_rng: true,
             cycle_estimation: true,
             exclude_allocations: false,
             simulation_track_subprocess: false,

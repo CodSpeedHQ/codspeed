@@ -147,6 +147,10 @@ pub struct ExecAndRunSharedArgs {
     #[arg(long, env = "CODSPEED_DISABLE_MEMORY_CAPTURE_STACK")]
     pub disable_memory_capture_stack: bool,
 
+    /// Disable valgrind's deterministic RNG in simulation mode.
+    #[arg(long, env = "CODSPEED_DISABLE_DETERMINISTIC_RNG")]
+    pub disable_deterministic_rng: bool,
+
     #[command(flatten)]
     pub profiler_run_args: ProfilerRunArgs,
 

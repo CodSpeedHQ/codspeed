@@ -74,6 +74,7 @@ impl RunArgs {
                 simulation_track_subprocess: false,
                 disable_memory_track_physical: false,
                 disable_memory_capture_stack: false,
+                disable_deterministic_rng: false,
                 profiler_run_args: ProfilerRunArgs {
                     enable_profiler: false,
                     enable_perf: None,
@@ -83,7 +84,6 @@ impl RunArgs {
                 },
                 experimental: ExperimentalArgs {
                     experimental_fair_sched: false,
-                    experimental_deterministic_rng: false,
                     experimental_memory_capture_stack: None,
                     experimental_cycle_estimation: false,
                     experimental_exclude_allocations: false,
@@ -142,7 +142,7 @@ fn build_orchestrator_config(
         poll_results_options,
         extra_env: HashMap::new(),
         fair_sched: args.shared.experimental.experimental_fair_sched,
-        deterministic_rng: args.shared.experimental.experimental_deterministic_rng,
+        deterministic_rng: !args.shared.disable_deterministic_rng,
         cycle_estimation,
         exclude_allocations,
         simulation_track_subprocess: args.shared.simulation_track_subprocess,
