@@ -112,10 +112,6 @@ jobs:
         with:
           submodules: true
       - uses: ./.github/actions/install-rust
-      - name: Install exec-harness
-        run: |
-          cargo install --path crates/exec-harness --locked
-
       - name: Run tests
         env:
           # Profiling system commands (e.g. `ls`) with samply is not yet supported on MacOS
