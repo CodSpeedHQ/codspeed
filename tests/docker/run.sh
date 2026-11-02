@@ -85,7 +85,9 @@ docker_flags=(
 in_container() {
   docker run --rm "${tty[@]}" "${docker_flags[@]}" "$run_image" "$@"
 }
-cargo_test=(cargo test -p codspeed-runner --features executor-tests --test executors)
+# Release: every memory run hashes the runner binary and runs the memtrack linked
+# into it, both slow unoptimized.
+cargo_test=(cargo test --release -p codspeed-runner --features executor-tests --test executors)
 
 tty=()
 run_image=$image:$flavor
@@ -107,7 +109,7 @@ if ! docker image inspect "$run_image" >/dev/null 2>&1; then
   setup_container=$image-setup-$flavor
   docker rm -f "$setup_container" >/dev/null 2>&1 || true
   docker run --name "$setup_container" "${docker_flags[@]}" "${setup_flags[@]}" "$image:$flavor" \
-    tests/docker/setup.sh /home/tester/target/debug/codspeed "${valgrind_source[@]}"
+    tests/docker/setup.sh /home/tester/target/release/codspeed "${valgrind_source[@]}"
   docker commit "$setup_container" "$run_image" >/dev/null
   docker rm "$setup_container" >/dev/null
   docker images --filter "reference=$image:$flavor-setup-*" --format '{{.Repository}}:{{.Tag}}' \
