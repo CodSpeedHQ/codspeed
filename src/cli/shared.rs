@@ -230,7 +230,7 @@ pub struct WalltimeRunArgs {
     /// - Java: `fp`
     /// - Go: `fp`
     /// - Python: `dwarf,32768`
-    /// - Others: `dwarf,8192`
+    /// - Others: `dwarf,32000` (samply), `dwarf,8192` (perf)
     #[arg(
         long,
         env = "CODSPEED_WALLTIME_UNWINDING_MODE",

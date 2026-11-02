@@ -3,10 +3,16 @@
 use crate::cli::InternalCommands;
 use crate::cli::samply::SamplyArgs;
 use crate::executor::ExecutorConfig;
+#[cfg(target_os = "linux")]
+use crate::executor::config::WalltimeUnwinding;
 use crate::executor::helpers::command::CommandBuilder;
+#[cfg(target_os = "linux")]
+use crate::executor::helpers::env::suppress_go_perf_unwinding_warning;
 use crate::executor::helpers::run_with_sudo::wrap_with_sudo;
 use crate::executor::shared::fifo::FifoBenchmarkData;
 use crate::executor::wall_time::profiler::Profiler;
+#[cfg(target_os = "linux")]
+use crate::executor::wall_time::profiler::unwinding::resolve_unwinding;
 use crate::prelude::*;
 use crate::system::SystemInfo;
 use async_trait::async_trait;
@@ -102,9 +108,11 @@ impl Profiler for SamplyProfiler {
         // Unwinding knobs are Linux-only in samply.
         #[cfg(target_os = "linux")]
         {
-            if let Some(unwinding) = config.walltime_unwinding {
-                args.extend(["--unwinding-mode".into(), unwinding.to_string().into()]);
+            let unwinding = resolve_unwinding(&config.command, config.walltime_unwinding);
+            if unwinding == WalltimeUnwinding::FramePointer {
+                suppress_go_perf_unwinding_warning();
             }
+            args.extend(["--unwinding-mode".into(), unwinding.to_string().into()]);
         }
         #[cfg(not(target_os = "linux"))]
         if config.walltime_unwinding.is_some() {

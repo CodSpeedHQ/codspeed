@@ -4,7 +4,6 @@ use crate::executor::ExecutorConfig;
 use crate::executor::ToolStatus;
 use crate::executor::config::WalltimeUnwinding;
 use crate::executor::helpers::command::CommandBuilder;
-use crate::executor::helpers::detect_executable::command_has_executable;
 use crate::executor::helpers::env::is_codspeed_debug_enabled;
 use crate::executor::helpers::env::suppress_go_perf_unwinding_warning;
 use crate::executor::helpers::harvest_perf_maps_for_pids::harvest_perf_maps_for_pids;
@@ -16,6 +15,7 @@ use crate::executor::wall_time::profiler::Profiler;
 use crate::executor::wall_time::profiler::SAMPLING_RATE_HZ;
 use crate::executor::wall_time::profiler::WALLTIME_METADATA_CURRENT_VERSION;
 use crate::executor::wall_time::profiler::perf::perf_executable::get_working_perf_executable;
+use crate::executor::wall_time::profiler::unwinding::resolve_unwinding;
 use crate::prelude::*;
 use crate::system::SystemInfo;
 use anyhow::Context;
@@ -38,40 +38,6 @@ pub mod fifo;
 pub mod perf_executable;
 
 const PERF_PIPEDATA_FILE_NAME: &str = "perf.pipedata";
-
-/// Unwinding suggested for the benchmarked runtime, if it has a known best setting.
-fn suggested_unwinding(command: &str) -> Option<WalltimeUnwinding> {
-    if command_has_executable(
-        command,
-        &["gradle", "gradlew", "java", "maven", "mvn", "mvnw"],
-    ) {
-        return Some(WalltimeUnwinding::FramePointer);
-    }
-    if command_has_executable(command, &["go"]) {
-        return Some(WalltimeUnwinding::FramePointer);
-    }
-    if command_has_executable(command, &["pytest", "uv", "python", "python3"]) {
-        return Some(WalltimeUnwinding::Dwarf {
-            stack_size: Some(32 * 1024),
-        });
-    }
-    None
-}
-
-fn resolve_unwinding(command: &str, explicit: Option<WalltimeUnwinding>) -> WalltimeUnwinding {
-    let suggested = suggested_unwinding(command);
-    let Some(explicit) = explicit else {
-        return suggested.unwrap_or(WalltimeUnwinding::Dwarf { stack_size: None });
-    };
-    if let Some(suggested) = suggested
-        && suggested != explicit
-    {
-        warn!(
-            "Overriding suggested unwinding `{suggested}` with `{explicit}`, call stacks may be incomplete"
-        );
-    }
-    explicit
-}
 
 pub struct PerfProfiler {
     /// Set by [`Profiler::wrap_command`]; used by the FIFO hooks to control event
@@ -323,34 +289,5 @@ impl BenchmarkData<'_> {
         metadata.save_to(path).unwrap();
 
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn explicit_unwinding_overrides_language_inference() {
-        let explicit = WalltimeUnwinding::Dwarf {
-            stack_size: Some(16 * 1024),
-        };
-        for (command, inferred) in [
-            (
-                "python bench.py",
-                WalltimeUnwinding::Dwarf {
-                    stack_size: Some(32 * 1024),
-                },
-            ),
-            ("cargo bench", WalltimeUnwinding::Dwarf { stack_size: None }),
-            ("go test -bench=.", WalltimeUnwinding::FramePointer),
-        ] {
-            assert_eq!(resolve_unwinding(command, None), inferred);
-            assert_eq!(resolve_unwinding(command, Some(explicit)), explicit);
-        }
-        assert_eq!(
-            resolve_unwinding("python bench.py", Some(WalltimeUnwinding::FramePointer)),
-            WalltimeUnwinding::FramePointer,
-        );
     }
 }

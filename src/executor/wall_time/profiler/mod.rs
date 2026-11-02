@@ -6,6 +6,7 @@
 
 pub mod perf;
 pub mod samply;
+mod unwinding;
 
 const WALLTIME_METADATA_CURRENT_VERSION: u64 = 1;
 
