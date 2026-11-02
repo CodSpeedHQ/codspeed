@@ -91,6 +91,8 @@ pub struct OrchestratorConfig {
     pub extra_env: HashMap<String, String>,
     /// Enable valgrind's --fair-sched option.
     pub fair_sched: bool,
+    /// Enable valgrind's --deterministic-rng option.
+    pub deterministic_rng: bool,
     /// Enable valgrind's --cycle-estimation option.
     pub cycle_estimation: bool,
     /// Signal the backend to exclude memory allocation time from simulation results.
@@ -138,6 +140,8 @@ pub struct ExecutorConfig {
     pub enable_introspection: bool,
     /// Enable valgrind's --fair-sched option.
     pub fair_sched: bool,
+    /// Enable valgrind's --deterministic-rng option.
+    pub deterministic_rng: bool,
     /// Enable valgrind's --cycle-estimation option.
     pub cycle_estimation: bool,
     /// Signal the backend to exclude memory allocation time from simulation results.
@@ -227,6 +231,7 @@ impl OrchestratorConfig {
             extra_env: self.extra_env.clone(),
             enable_introspection,
             fair_sched: self.fair_sched,
+            deterministic_rng: self.deterministic_rng,
             cycle_estimation: self.cycle_estimation,
             exclude_allocations: self.exclude_allocations,
             simulation_track_subprocess: self.simulation_track_subprocess,
@@ -265,6 +270,7 @@ impl OrchestratorConfig {
             poll_results_options: PollResultsOptions::new(false, None),
             extra_env: HashMap::new(),
             fair_sched: false,
+            deterministic_rng: false,
             cycle_estimation: true,
             exclude_allocations: false,
             simulation_track_subprocess: false,

@@ -68,6 +68,10 @@ fn get_valgrind_args(tool: &SimulationTool, config: &ExecutorConfig) -> Vec<Stri
         args.push("--fair-sched=yes".to_string());
     }
 
+    if config.deterministic_rng {
+        args.push("--deterministic-rng=yes".to_string());
+    }
+
     args
 }
 

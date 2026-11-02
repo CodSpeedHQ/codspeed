@@ -17,6 +17,16 @@ pub struct ExperimentalArgs {
     )]
     pub experimental_fair_sched: bool,
 
+    /// Enable valgrind's --deterministic-rng option (fixed AT_RANDOM, getrandom(),
+    /// /dev/urandom and hardware RNG instructions) in simulation mode.
+    #[arg(
+        long,
+        default_value_t = false,
+        help_heading = "Experimental",
+        env = "CODSPEED_EXPERIMENTAL_DETERMINISTIC_RNG"
+    )]
+    pub experimental_deterministic_rng: bool,
+
     /// Do not set PYTHONMALLOC for simulation runs.
     #[arg(
         long,
@@ -65,6 +75,9 @@ impl ExperimentalArgs {
         let mut flags = Vec::new();
         if self.experimental_fair_sched {
             flags.push("--experimental-fair-sched");
+        }
+        if self.experimental_deterministic_rng {
+            flags.push("--experimental-deterministic-rng");
         }
         if self.experimental_disable_pythonmalloc_override {
             flags.push("--experimental-disable-pythonmalloc-override");
