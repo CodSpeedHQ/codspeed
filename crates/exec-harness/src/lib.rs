@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::io::{self, BufRead};
 
 pub mod analysis;
+pub mod cli;
 pub mod constants;
 pub mod prelude;
 pub mod runtime_env;
