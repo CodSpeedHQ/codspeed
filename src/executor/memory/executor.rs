@@ -1,3 +1,5 @@
+use crate::cli::InternalCommands;
+use crate::cli::memtrack::MemtrackArgs;
 use crate::executor::ExecutorName;
 use crate::executor::ExecutorSupport;
 use crate::executor::PrivilegeStatus;
@@ -34,10 +36,7 @@ use std::rc::Rc;
 use tempfile::NamedTempFile;
 use tokio::time::{Duration, timeout};
 
-use super::setup::{
-    MEMTRACK_COMMAND, ensure_memtrack_capabilities, get_memtrack_status, has_memtrack_capabilities,
-    install_memtrack,
-};
+use super::setup::{ensure_memtrack_capabilities, has_memtrack_capabilities, memtrack_path};
 
 pub struct MemoryExecutor;
 
@@ -65,8 +64,8 @@ impl MemoryExecutor {
         let bench_command = get_bench_command(&execution_context.config)?;
         let (bench_command, env_file) = prefix_command_with_env(&bench_command, &extra_env)?;
 
-        // Build the memtrack command
-        let mut cmd_builder = CommandBuilder::new(MEMTRACK_COMMAND);
+        let mut cmd_builder = InternalCommands::Memtrack(MemtrackArgs { args: vec![] })
+            .command_builder_for(memtrack_path()?);
         if execution_context.config.memory_track_physical {
             cmd_builder.env("CODSPEED_MEMTRACK_TRACK_PHYSICAL", "1");
         }
@@ -104,7 +103,7 @@ impl MemoryExecutor {
         }
 
         bail!(
-            "{MEMTRACK_COMMAND} needs elevated privileges to load its eBPF programs, but the \
+            "codspeed needs elevated privileges to load its eBPF programs, but the \
              required capabilities could not be granted."
         );
     }
@@ -117,7 +116,7 @@ impl Executor for MemoryExecutor {
     }
 
     fn tool_status(&self) -> Option<ToolStatus> {
-        Some(get_memtrack_status())
+        None
     }
 
     fn privilege_status(&self) -> Option<PrivilegeStatus> {
@@ -154,7 +153,6 @@ impl Executor for MemoryExecutor {
         setup_cache_dir: Option<&Path>,
         _run_environment: &RunEnvironment,
     ) -> Result<()> {
-        install_memtrack().await?;
         // FIXME(COD-2794): resolve libc symbols through debuginfod once it is back up, instead
         // of installing libc6-dbg.
         ensure_libc_debug_symbols(system_info, setup_cache_dir).await;

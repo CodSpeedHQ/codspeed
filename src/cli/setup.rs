@@ -32,11 +32,20 @@ pub struct SetupArgs {
 enum SetupCommands {
     /// Show the installation status of CodSpeed tools
     Status,
+    /// Print the path of the binary that holds memtrack's capabilities
+    #[cfg(target_os = "linux")]
+    #[command(hide = true)]
+    MemtrackPath,
 }
 
 pub async fn run(args: SetupArgs, setup_cache_dir: Option<&Path>) -> Result<()> {
     match args.command {
         Some(SetupCommands::Status) => status(&args.mode),
+        #[cfg(target_os = "linux")]
+        Some(SetupCommands::MemtrackPath) => {
+            println!("{}", crate::executor::memtrack_path()?.display());
+            Ok(())
+        }
         None => setup(&args.mode, setup_cache_dir).await,
     }
 }
@@ -132,7 +141,7 @@ pub fn status(modes: &[RunnerMode]) -> Result<()> {
         if executor.support_level(&system_info) == ExecutorSupport::Unsupported {
             continue;
         }
-        match executor.tool_status() {
+        let installed = match executor.tool_status() {
             Some(tool_status) => match &tool_status.status {
                 ToolInstallStatus::Installed { version } => {
                     info!(
@@ -142,15 +151,7 @@ pub fn status(modes: &[RunnerMode]) -> Result<()> {
                         tool_status.tool_name,
                         version
                     );
-                    match executor.privilege_status() {
-                        Some(PrivilegeStatus::Satisfied { detail }) => {
-                            info!("    {} privileges: {}", check_mark(), detail);
-                        }
-                        Some(PrivilegeStatus::Missing { message }) => {
-                            info!("    {} privileges: {}", cross_mark(), message);
-                        }
-                        None => {}
-                    }
+                    true
                 }
                 ToolInstallStatus::IncorrectVersion { version, message } => {
                     info!(
@@ -161,6 +162,7 @@ pub fn status(modes: &[RunnerMode]) -> Result<()> {
                         version,
                         message
                     );
+                    false
                 }
                 ToolInstallStatus::NotInstalled => {
                     info!(
@@ -169,6 +171,7 @@ pub fn status(modes: &[RunnerMode]) -> Result<()> {
                         executor.name(),
                         tool_status.tool_name
                     );
+                    false
                 }
             },
             None => {
@@ -177,6 +180,19 @@ pub fn status(modes: &[RunnerMode]) -> Result<()> {
                     check_mark(),
                     executor.name()
                 );
+                true
+            }
+        };
+
+        if installed {
+            match executor.privilege_status() {
+                Some(PrivilegeStatus::Satisfied { detail }) => {
+                    info!("    {} privileges: {}", check_mark(), detail);
+                }
+                Some(PrivilegeStatus::Missing { message }) => {
+                    info!("    {} privileges: {}", cross_mark(), message);
+                }
+                None => {}
             }
         }
     }
