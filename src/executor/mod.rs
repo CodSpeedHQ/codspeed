@@ -24,6 +24,8 @@ pub use orchestrator::Orchestrator;
 
 #[cfg(target_os = "linux")]
 use memory::executor::MemoryExecutor;
+#[cfg(target_os = "linux")]
+pub(crate) use memory::setup::memtrack_path;
 use std::path::Path;
 use valgrind::executor::ValgrindExecutor;
 use wall_time::executor::WallTimeExecutor;
