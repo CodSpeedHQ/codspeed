@@ -1,6 +1,8 @@
 mod allocators;
 mod bpf_token;
 #[cfg(feature = "ebpf")]
+pub mod cli;
+#[cfg(feature = "ebpf")]
 mod ebpf;
 mod ipc;
 mod kernel;
