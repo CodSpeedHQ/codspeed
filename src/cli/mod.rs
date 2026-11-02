@@ -1,5 +1,6 @@
 mod auth;
 pub(crate) mod exec;
+pub(crate) mod exec_harness;
 pub(crate) mod experimental;
 mod profile;
 pub(crate) mod run;
@@ -108,8 +109,11 @@ enum Commands {
 #[derive(Subcommand, Debug)]
 pub(crate) enum InternalCommands {
     /// Run the bundled samply profiler. Args are forwarded to samply.
-    #[command(disable_help_flag = true, disable_help_subcommand = true)]
+    #[command(hide = true, disable_help_flag = true, disable_help_subcommand = true)]
     Samply(samply::SamplyArgs),
+    /// Run the bundled exec-harness. Args are forwarded to exec-harness.
+    #[command(hide = true, disable_help_flag = true, disable_help_subcommand = true)]
+    ExecHarness(exec_harness::ExecHarnessArgs),
 }
 
 /// Overrides the executable used to re-invoke internal subcommands.
@@ -134,13 +138,36 @@ impl InternalCommands {
                 builder.arg("samply");
                 builder.args(args.args.iter().cloned());
             }
+            InternalCommands::ExecHarness(args) => {
+                builder.arg("exec-harness");
+                builder.args(args.args.iter().cloned());
+            }
         }
         Ok(builder)
+    }
+
+    pub fn get_shell_command(&self) -> Result<String> {
+        Ok(self.get_command_builder()?.as_command_line())
+    }
+}
+
+/// Dispatch a bundled subcommand, before any runner setup: these run in the
+/// benchmark's working directory, where a stray `codspeed.yaml` would otherwise
+/// abort the measurement.
+fn run_internal(command: InternalCommands) -> Result<()> {
+    match command {
+        InternalCommands::Samply(args) => samply::run(args),
+        InternalCommands::ExecHarness(args) => exec_harness::run(args),
     }
 }
 
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
+
+    if let Commands::Internal(command) = cli.command {
+        return run_internal(command);
+    }
+
     let codspeed_config = load_config(&cli)?;
     let mut api_client = build_api_client(&cli, &codspeed_config);
 
@@ -158,7 +185,8 @@ pub async fn run() -> Result<()> {
     let setup_cache_dir = setup_cache_dir.as_deref();
 
     match cli.command {
-        Commands::Run(_) | Commands::Exec(_) | Commands::Internal(InternalCommands::Samply(_)) => {} // these are responsible for their own logger initialization
+        // These initialize their own logging.
+        Commands::Run(_) | Commands::Exec(_) => {}
         _ => {
             init_local_logger()?;
         }
@@ -210,7 +238,9 @@ pub async fn run() -> Result<()> {
         Commands::Use(args) => use_mode::run(args)?,
         Commands::Show => show::run()?,
         Commands::Update => update::run().await?,
-        Commands::Internal(InternalCommands::Samply(args)) => samply::run(args)?,
+        Commands::Internal(_) => {
+            unreachable!("internal subcommands are dispatched before runner setup")
+        }
     }
     Ok(())
 }
