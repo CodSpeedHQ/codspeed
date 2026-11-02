@@ -100,8 +100,6 @@ impl Tracker {
     }
 
     fn build(mut bpf: MemtrackBpf, options: TrackerOptions) -> Result<Self> {
-        Self::bump_memlock_rlimit()?;
-
         bpf.attach_tracepoints()?;
         if options.allocators {
             bpf.attach_exec_watcher()?;
@@ -241,24 +239,5 @@ impl Tracker {
     /// an Arc clone), in which case the kernel would close each link fd serially.
     pub fn detach(&self) {
         self.bpf.lock().detach_probes();
-    }
-
-    /// Bump RLIMIT_MEMLOCK for kernels older than 5.11. Newer kernels account BPF
-    /// memory against the cgroup, so a denied raise (no CAP_SYS_RESOURCE) is harmless.
-    fn bump_memlock_rlimit() -> Result<()> {
-        let rlimit = libc::rlimit {
-            rlim_cur: libc::RLIM_INFINITY,
-            rlim_max: libc::RLIM_INFINITY,
-        };
-
-        let ret = unsafe { libc::setrlimit(libc::RLIMIT_MEMLOCK, &rlimit) };
-        if ret != 0 {
-            let err = std::io::Error::last_os_error();
-            debug!(
-                "Could not raise RLIMIT_MEMLOCK ({err}); continuing since kernels >= 5.11 don't require it"
-            );
-        }
-
-        Ok(())
     }
 }
