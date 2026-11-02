@@ -23,7 +23,6 @@ pub use execution_context::ExecutionContext;
 pub use interfaces::ExecutorName;
 pub use orchestrator::Orchestrator;
 
-use crate::instruments::Instruments;
 use analysis::executor::AnalysisExecutor;
 #[cfg(target_os = "linux")]
 use memory::executor::MemoryExecutor;
@@ -60,12 +59,6 @@ pub fn get_executor_from_mode(
         #[cfg(target_os = "linux")]
         RunnerMode::Memory => Box::new(MemoryExecutor),
         RunnerMode::Telemetry => Box::new(AnalysisExecutor::new(RunnerMode::Telemetry)),
-    }
-}
-
-pub fn apply_mode_instruments(mode: &RunnerMode, instruments: &mut Instruments) {
-    if *mode == RunnerMode::Telemetry {
-        instruments.telemetry = true;
     }
 }
 

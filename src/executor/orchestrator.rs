@@ -1,6 +1,4 @@
-use super::{
-    ExecutionContext, ExecutorName, apply_mode_instruments, get_executor_from_mode, run_executor,
-};
+use super::{ExecutionContext, ExecutorName, get_executor_from_mode, run_executor};
 use crate::api_client::CodSpeedAPIClient;
 use crate::cli::exec::multi_targets;
 use crate::cli::run::logger::Logger;
@@ -150,7 +148,11 @@ impl Orchestrator {
             let mut config = self
                 .config
                 .executor_config_for_command(part.command, part.uses_exec_harness);
-            apply_mode_instruments(part.mode, &mut config.instruments);
+
+            if *part.mode == RunnerMode::Telemetry {
+                config.instruments.telemetry = true;
+            }
+
             let mut executor = get_executor_from_mode(part.mode, self.config.walltime_profiler);
             let profile_folder =
                 self.resolve_profile_folder(&executor.name(), run_part_index, total_parts)?;

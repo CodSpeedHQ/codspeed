@@ -17,7 +17,7 @@ mod tests {
 
     use serde_json::json;
 
-    use crate::executor::{ExecutorName, apply_mode_instruments, get_executor_from_mode};
+    use crate::executor::{ExecutorName, get_executor_from_mode};
     use crate::instruments::{InstrumentName, Instruments};
     use crate::run_environment::{
         LocalData, RepositoryProvider, RunEnvironment, RunEnvironmentMetadata, RunEvent, RunPart,
@@ -94,11 +94,10 @@ mod tests {
 
     #[test]
     fn test_telemetry_runs_upload_as_analysis_with_the_telemetry_instrument() {
-        let mut instruments = Instruments {
+        let instruments = Instruments {
             mongodb: None,
-            telemetry: false,
+            telemetry: true,
         };
-        apply_mode_instruments(&RunnerMode::Telemetry, &mut instruments);
         let runner = Runner {
             name: "codspeed-runner".into(),
             version: "5.5.0".into(),

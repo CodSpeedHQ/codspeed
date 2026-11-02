@@ -30,9 +30,6 @@ pub const SPANS_FILE: &str = "otel/spans.msgpack.zst";
 pub const LOGS_FILE: &str = "otel/logs.msgpack.zst";
 
 const ZSTD_LEVEL: i32 = 3;
-/// Rows repeat most of their content, such as their resource attributes, but the repeats can be
-/// far apart: a larger window lets zstd match them. Decoders need this much memory.
-const ZSTD_WINDOW_LOG: u32 = 24;
 
 pub type SpanRow = SpanRowV1;
 pub type SpanEventRow = SpanEventV1;
@@ -167,9 +164,7 @@ impl<R: TelemetryRow> TelemetryWriter<R> {
         }
         let file =
             File::create(path).with_context(|| format!("Failed to create {}", path.display()))?;
-        let mut encoder = zstd::Encoder::new(BufWriter::new(file), ZSTD_LEVEL)?;
-        encoder.long_distance_matching(true)?;
-        encoder.window_log(ZSTD_WINDOW_LOG)?;
+        let encoder = zstd::Encoder::new(BufWriter::new(file), ZSTD_LEVEL)?;
         Ok(Self {
             serializer: rmp_serde::Serializer::new(BufWriter::new(encoder)),
             _rows: PhantomData,
@@ -207,8 +202,7 @@ pub struct TelemetryReader<T: TelemetryRow, R: Read> {
 
 impl<T: TelemetryRow, R: Read> TelemetryReader<T, R> {
     pub fn new(reader: R) -> anyhow::Result<Self> {
-        let mut decoder = zstd::Decoder::new(reader)?;
-        decoder.window_log_max(ZSTD_WINDOW_LOG)?;
+        let decoder = zstd::Decoder::new(reader)?;
         Ok(Self {
             // The deserializer reads a few bytes at a time.
             deserializer: rmp_serde::Deserializer::new(BufReader::new(decoder)),
