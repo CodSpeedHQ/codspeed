@@ -94,7 +94,6 @@ fn build_orchestrator_config(
         poll_results_options,
         extra_env: HashMap::new(),
         fair_sched: args.shared.experimental.experimental_fair_sched,
-        deterministic_rng: !args.shared.disable_deterministic_rng,
         cycle_estimation,
         exclude_allocations,
         simulation_track_subprocess: args.shared.simulation_track_subprocess,
