@@ -10,6 +10,7 @@ use crate::executor::config::WalltimeProfiler;
 use crate::executor::helpers::command::CommandBuilder;
 use crate::executor::helpers::env::{build_path_env, get_base_injected_env};
 use crate::executor::helpers::get_bench_command::get_bench_command;
+use crate::executor::helpers::libc_debug_info::ensure_libc_debug_symbols;
 use crate::executor::helpers::linux_sysctl::{LinuxSysctl, ensure_linux_profiling_sysctls};
 use crate::executor::helpers::run_command_with_log_pipe::run_command_with_log_pipe;
 use crate::executor::helpers::run_command_with_log_pipe::run_command_with_log_pipe_and_callback;
@@ -122,6 +123,9 @@ impl Executor for WallTimeExecutor {
         };
 
         profiler.setup(system_info, setup_cache_dir).await?;
+        // FIXME(COD-2794): resolve libc symbols through debuginfod once it is back up, instead
+        // of installing libc6-dbg.
+        ensure_libc_debug_symbols(system_info, setup_cache_dir).await;
         if self.profiling_sysctls.get().is_none() {
             let sysctls = ensure_linux_profiling_sysctls()?;
             self.profiling_sysctls

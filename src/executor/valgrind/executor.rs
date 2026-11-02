@@ -3,6 +3,7 @@ use std::path::Path;
 
 use crate::executor::Executor;
 use crate::executor::ToolStatus;
+use crate::executor::helpers::libc_debug_info::ensure_libc_debug_symbols;
 use crate::executor::{ExecutionContext, ExecutorName, ExecutorSupport};
 use crate::instruments::mongo_tracer::MongoTracer;
 use crate::prelude::*;
@@ -61,6 +62,8 @@ impl Executor for ValgrindExecutor {
                 )
             }
         }
+
+        ensure_libc_debug_symbols(system_info, setup_cache_dir).await;
 
         if let Err(error) = venv_compat::symlink_libpython(None) {
             warn!(

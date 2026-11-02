@@ -32,6 +32,8 @@ pub fn is_system_compatible(system_info: &SystemInfo) -> bool {
 /// 4. Run the install closure to install and get package names
 /// 5. Save installed packages to cache (if cache_dir provided)
 ///
+/// Separate calls can share a cache directory: package files and metadata accumulate.
+///
 /// # Example
 ///
 /// ```rust,ignore
@@ -203,9 +205,26 @@ fn save_to_cache(system_info: &SystemInfo, cache_dir: &Path, packages: &[&str]) 
         bail!("Failed to save packages to cache");
     }
 
-    // Create metadata file containing the installed packages
+    // Separate installs share the cache, so retain previously cached package names.
     let metadata_path = cache_dir.join(METADATA_FILENAME);
-    let metadata_content = packages.join("\n"); // TODO: add package versions as well, by using the output of the install command for example
+    let existing_metadata = match std::fs::read_to_string(&metadata_path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => {
+            warn!(
+                "Failed to read cache metadata at {}: {error}",
+                metadata_path.display()
+            );
+            return Ok(());
+        }
+    };
+    let mut cached_packages: Vec<&str> = existing_metadata
+        .lines()
+        .chain(packages.iter().copied())
+        .collect();
+    cached_packages.sort_unstable();
+    cached_packages.dedup();
+    let metadata_content = cached_packages.join("\n");
     if let Ok(()) = std::fs::create_dir_all(metadata_path.parent().unwrap()) {
         if let Ok(()) = std::fs::write(&metadata_path, metadata_content)
             .context("Failed to write metadata file")
