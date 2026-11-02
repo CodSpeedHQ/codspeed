@@ -39,3 +39,7 @@ harness = false
 [[bench]]
 name = "memtrack_reader"
 harness = false
+
+[[bench]]
+name = "telemetry"
+harness = false
