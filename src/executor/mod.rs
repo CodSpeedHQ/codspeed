@@ -12,8 +12,8 @@ mod valgrind;
 mod wall_time;
 
 use crate::instruments::mongo_tracer::{MongoTracer, install_mongodb_tracer};
-use crate::local_logger::rolling_buffer::{activate_rolling_buffer, deactivate_rolling_buffer};
 use crate::prelude::*;
+use crate::run_environment::RunEnvironment;
 use crate::runner_mode::RunnerMode;
 use crate::system::SystemInfo;
 use async_trait::async_trait;
@@ -127,6 +127,7 @@ pub trait Executor {
         &self,
         _system_info: &SystemInfo,
         _setup_cache_dir: Option<&Path>,
+        _run_environment: &RunEnvironment,
     ) -> Result<()> {
         Ok(())
     }
@@ -156,8 +157,9 @@ pub async fn run_executor(
     orchestrator: &Orchestrator,
     execution_context: &ExecutionContext,
     setup_cache_dir: Option<&Path>,
-    rolling_buffer_label: Option<&str>,
+    display_label: Option<&str>,
 ) -> Result<()> {
+    let run_environment = orchestrator.provider.get_run_environment();
     match executor.support_level(&orchestrator.system_info) {
         ExecutorSupport::Unsupported => {
             bail!(
@@ -169,7 +171,7 @@ pub async fn run_executor(
         ExecutorSupport::RequiresManualInstallation | ExecutorSupport::FullySupported => {
             if !execution_context.config.skip_setup {
                 executor
-                    .setup(&orchestrator.system_info, setup_cache_dir)
+                    .setup(&orchestrator.system_info, setup_cache_dir, &run_environment)
                     .await?;
                 executor.grant_privileges()?;
             }
@@ -197,12 +199,11 @@ pub async fn run_executor(
                 None
             };
 
-        if let Some(label) = rolling_buffer_label {
-            activate_rolling_buffer(label);
-        }
+        let display_guard =
+            display_label.and_then(|label| run_environment.start_command_display(label));
         let run_result = executor.run(execution_context, &mongo_tracer).await;
-        if rolling_buffer_label.is_some() {
-            deactivate_rolling_buffer();
+        if let Some(guard) = display_guard {
+            guard.finish_with(run_result.is_ok());
         }
         run_result?;
 

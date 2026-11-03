@@ -16,7 +16,7 @@ use crate::prelude::*;
 use crate::run_environment::interfaces::{
     LocalData, RepositoryProvider, RunEnvironmentMetadata, RunEvent,
 };
-use crate::run_environment::provider::{RunEnvironmentDetector, RunEnvironmentProvider};
+use crate::run_environment::provider::RunEnvironmentProvider;
 use crate::run_environment::{RunEnvironment, RunPart};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -323,12 +323,6 @@ impl LocalProvider {
         };
 
         Ok((ref_, head_ref))
-    }
-}
-
-impl RunEnvironmentDetector for LocalProvider {
-    fn detect() -> bool {
-        true
     }
 }
 

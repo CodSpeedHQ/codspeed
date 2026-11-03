@@ -13,8 +13,8 @@ use crate::executor::helpers::command::CommandBuilder;
 use crate::executor::helpers::confirm::confirm_default_yes;
 use crate::executor::helpers::run_command_with_log_pipe::run_command_with_log_pipe;
 use crate::executor::helpers::run_with_sudo::wrap_with_sudo;
-use crate::local_logger::rolling_buffer::{activate_rolling_buffer, deactivate_rolling_buffer};
 use crate::prelude::*;
+use crate::run_environment::RunEnvironment;
 use std::env;
 use std::ffi::OsStr;
 use std::path::Path;
@@ -175,7 +175,7 @@ pub(super) fn is_wanted() -> bool {
 ///
 /// Returns an error describing the first failing step, leaving the caller free
 /// to fall back to instructions for a manual installation.
-pub(super) async fn build_and_install() -> Result<()> {
+pub(super) async fn build_and_install(run_environment: &RunEnvironment) -> Result<()> {
     let missing_dependencies = missing_build_dependencies();
     if !missing_dependencies.is_empty() {
         bail!(
@@ -186,9 +186,11 @@ pub(super) async fn build_and_install() -> Result<()> {
 
     info!("Building valgrind-codspeed from source, this can take a few minutes");
 
-    activate_rolling_buffer("Building valgrind from source");
+    let rolling_buffer = run_environment.start_command_display("Building valgrind from source");
     let compilation_result = fetch_and_compile().await;
-    deactivate_rolling_buffer();
+    if let Some(rolling_buffer) = rolling_buffer {
+        rolling_buffer.finish_with(compilation_result.is_ok());
+    }
 
     let source_dir = compilation_result?;
     install_build(source_dir.path()).await?;

@@ -23,30 +23,31 @@ mod github_actions;
 mod gitlab_ci;
 mod local;
 
+/// Detect the run environment from the process environment, without any configuration.
+pub fn detect() -> RunEnvironment {
+    if BuildkiteProvider::detect() {
+        RunEnvironment::Buildkite
+    } else if CircleCIProvider::detect() {
+        RunEnvironment::Circleci
+    } else if GitHubActionsProvider::detect() {
+        RunEnvironment::GithubActions
+    } else if GitLabCIProvider::detect() {
+        RunEnvironment::GitlabCi
+    } else {
+        RunEnvironment::Local
+    }
+}
+
 pub async fn get_provider(
     config: &OrchestratorConfig,
     api_client: &CodSpeedAPIClient,
 ) -> Result<Box<dyn RunEnvironmentProvider>> {
-    let mut provider: Box<dyn RunEnvironmentProvider> = {
-        if BuildkiteProvider::detect() {
-            let provider = BuildkiteProvider::try_from(config)?;
-            Box::new(provider)
-        } else if CircleCIProvider::detect() {
-            let provider = CircleCIProvider::try_from(config)?;
-            Box::new(provider)
-        } else if GitHubActionsProvider::detect() {
-            let provider = GitHubActionsProvider::try_from(config)?;
-            Box::new(provider)
-        } else if GitLabCIProvider::detect() {
-            let provider = GitLabCIProvider::try_from(config)?;
-            Box::new(provider)
-        } else if LocalProvider::detect() {
-            let provider = LocalProvider::new(config, api_client).await?;
-            Box::new(provider)
-        } else {
-            // By design, this should not happen as the `LocalProvider` is a fallback
-            bail!("No RunEnvironment provider detected")
-        }
+    let mut provider: Box<dyn RunEnvironmentProvider> = match detect() {
+        RunEnvironment::Buildkite => Box::new(BuildkiteProvider::try_from(config)?),
+        RunEnvironment::Circleci => Box::new(CircleCIProvider::try_from(config)?),
+        RunEnvironment::GithubActions => Box::new(GitHubActionsProvider::try_from(config)?),
+        RunEnvironment::GitlabCi => Box::new(GitLabCIProvider::try_from(config)?),
+        RunEnvironment::Local => Box::new(LocalProvider::new(config, api_client).await?),
     };
 
     provider.check_oidc_configuration(api_client)?;
