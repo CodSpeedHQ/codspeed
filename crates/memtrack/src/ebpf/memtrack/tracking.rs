@@ -13,8 +13,9 @@ impl MemtrackBpf {
         self.attach_sched_process_exec()?;
         self.attach_sched_process_exit()?;
         if self.physical {
-            if let Err(e) = self.attach_rss_stat() {
-                warn!("Failed to attach rss_stat tracepoint, RSS collection disabled: {e:#}");
+            let attached = crate::ebpf::libbpf_log::with_libbpf_demoted(|| self.attach_rss_stat());
+            if let Err(e) = attached {
+                debug!("Failed to attach rss_stat tracepoint, RSS collection disabled: {e:#}");
             }
         }
 

@@ -105,6 +105,27 @@ fn page_shift() -> Result<u32> {
     Ok((page_size as u32).trailing_zeros())
 }
 
+/// Bump RLIMIT_MEMLOCK for kernels older than 5.11. Newer kernels account BPF
+/// memory against the cgroup, so a denied raise (no CAP_SYS_RESOURCE) is harmless.
+/// libbpf's own attempt is disabled, as it warns on that same harmless denial.
+fn bump_memlock_rlimit() {
+    let rlimit = libc::rlimit {
+        rlim_cur: libc::RLIM_INFINITY,
+        rlim_max: libc::RLIM_INFINITY,
+    };
+
+    let ret = unsafe { libc::setrlimit(libc::RLIMIT_MEMLOCK, &rlimit) };
+    if ret != 0 {
+        let err = std::io::Error::last_os_error();
+        debug!(
+            "Could not raise RLIMIT_MEMLOCK ({err}); continuing since kernels >= 5.11 don't require it"
+        );
+    }
+
+    // Fails with EBUSY once libbpf has run its bump check, which is then moot.
+    let _ = unsafe { libbpf_rs::libbpf_sys::libbpf_set_memlock_rlim(0) };
+}
+
 /// Attach targets resolved from a library's symbol tables.
 pub struct ResolvedSymbols {
     offsets: HashMap<String, usize>,
@@ -132,6 +153,7 @@ pub struct MemtrackBpf {
 impl MemtrackBpf {
     pub fn new(options: &TrackerOptions) -> Result<Self> {
         crate::kernel::KernelBtf::ensure_available()?;
+        bump_memlock_rlimit();
 
         let variant = options.variant.unwrap_or_else(|| {
             if has_delegated_bpf_token() {

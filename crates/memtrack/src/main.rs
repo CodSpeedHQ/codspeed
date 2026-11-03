@@ -49,6 +49,7 @@ fn main() -> Result<()> {
         .parse_env(env_logger::Env::new().filter_or("CODSPEED_LOG", "info"))
         .format_timestamp(None)
         .init();
+    memtrack::init_libbpf_logging();
 
     let cli = Cli::parse();
 
