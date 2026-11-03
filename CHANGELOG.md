@@ -5,6 +5,16 @@
 
 
 
+## [5.6.3] - 2026-11-03
+
+### <!-- 0 -->🚀 Features
+- Always enable deterministic RNG (#600) by @not-matthias in [#600](https://github.com/CodSpeedHQ/runner/pull/600)
+
+### <!-- 1 -->🐛 Bug Fixes
+- Quiet expected libbpf warnings in a user namespace (#602) by @GuillaumeLagrange in [#602](https://github.com/CodSpeedHQ/runner/pull/602)
+- Bump go-runner to 1.4.0 (#605) by @adriencaccia in [#605](https://github.com/CodSpeedHQ/runner/pull/605)
+
+
 ## [5.6.2] - 2026-11-03
 
 ### <!-- 0 -->🚀 Features
@@ -1701,6 +1711,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[5.6.3]: https://github.com/CodSpeedHQ/runner/compare/v5.6.2..v5.6.3
 [5.6.2]: https://github.com/CodSpeedHQ/runner/compare/v5.6.1..v5.6.2
 [5.6.1]: https://github.com/CodSpeedHQ/runner/compare/v5.6.0..v5.6.1
 [5.6.0]: https://github.com/CodSpeedHQ/runner/compare/v5.5.0..v5.6.0
