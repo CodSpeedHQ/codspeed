@@ -1,3 +1,4 @@
+use crate::ebpf::stats::{self, RingSampler};
 use anyhow::{Context, Result};
 use libbpf_rs::{AsRawLibbpf, MapCore, RingBuffer, RingBufferBuilder, libbpf_sys};
 use parking_lot::Mutex;
@@ -8,6 +9,9 @@ use std::time::Duration;
 
 /// Ring-buffer poll interval shared by every poller.
 pub(crate) const POLL_INTERVAL_MS: u64 = 1;
+
+/// Called with the ring's map name each time the poller finds the ring empty.
+pub(crate) type OnDrained = Box<dyn Fn(&str) + Send>;
 
 /// Items buffered before a channel send. `std::sync::mpsc` allocates a block
 /// every 31 messages, so sending one item at a time makes that allocation
@@ -69,6 +73,11 @@ fn poll_iteration<T>(
     }
 }
 
+fn ring_of(ringbuf: &RingBuffer) -> *mut libbpf_sys::ring {
+    // SAFETY: a built `RingBuffer` holds exactly the one ring added in `new`.
+    unsafe { libbpf_sys::ring_buffer__ring(ringbuf.as_libbpf_object().as_ptr(), 0) }
+}
+
 /// Polls a BPF ring buffer in a background thread, parsing raw entries with a
 /// user-supplied closure and forwarding them to an mpsc channel in batches.
 ///
@@ -85,7 +94,7 @@ impl RingBufferPoller {
         parse: F,
         tx: Sender<Vec<T>>,
         poll_interval_ms: u64,
-        on_drained: Option<Box<dyn Fn() + Send>>,
+        on_drained: Option<OnDrained>,
     ) -> Result<Self>
     where
         M: MapCore,
@@ -114,32 +123,40 @@ impl RingBufferPoller {
             0
         })?;
         let ringbuf = builder.build()?;
+        let name = rb_map.name().to_string_lossy().into_owned();
 
         // The control channel doubles as the poll pacing: a received message is
         // a drain request (acked after a full consume), a timeout is a regular
         // poll tick, and disconnection is the shutdown signal.
         let (ctl, ctl_rx) = mpsc::channel::<Sender<()>>();
         let poll_thread = std::thread::spawn(move || {
-            // SAFETY: the built `RingBuffer` holds exactly the one ring added above.
-            let ring =
-                unsafe { libbpf_sys::ring_buffer__ring(ringbuf.as_libbpf_object().as_ptr(), 0) };
-            while poll_iteration(
-                ctl_rx.recv_timeout(Duration::from_millis(poll_interval_ms)),
-                || consume_all(&ringbuf, ring),
-                || {
-                    let _ = ringbuf.poll(Duration::ZERO);
-                },
-                &batch,
-                &tx,
-            ) {
+            let mut sampler = RingSampler::new(name.clone(), ring_of(&ringbuf));
+            loop {
+                let control = ctl_rx.recv_timeout(Duration::from_millis(poll_interval_ms));
+                let tick = sampler.as_ref().map(RingSampler::begin);
+                let running = poll_iteration(
+                    control,
+                    || consume_all(&ringbuf, ring_of(&ringbuf)),
+                    || {
+                        let _ = ringbuf.poll(Duration::ZERO);
+                    },
+                    &batch,
+                    &tx,
+                );
+                if let (Some(sampler), Some(tick)) = (&mut sampler, tick) {
+                    sampler.end(tick);
+                }
+                if !running {
+                    break;
+                }
                 if let Some(on_drained) = &on_drained
-                    && unsafe { libbpf_sys::ring__avail_data_size(ring) } == 0
+                    && unsafe { libbpf_sys::ring__avail_data_size(ring_of(&ringbuf)) } == 0
                 {
-                    on_drained();
+                    on_drained(&name);
                 }
             }
             if let Some(on_drained) = &on_drained {
-                on_drained();
+                on_drained(&name);
             }
         });
 
@@ -192,7 +209,7 @@ impl ThreadedRingBufferPoller {
         resolve: R,
         tx: Sender<Vec<U>>,
         poll_interval_ms: u64,
-        on_drained: Option<Box<dyn Fn() + Send>>,
+        on_drained: Option<OnDrained>,
     ) -> Result<Self>
     where
         M: MapCore,
@@ -204,8 +221,18 @@ impl ThreadedRingBufferPoller {
         let (parsed_tx, parsed_rx) = mpsc::channel::<Vec<T>>();
         let ring = RingBufferPoller::new(rb_map, parse, parsed_tx, poll_interval_ms, on_drained)?;
         let resolver = std::thread::spawn(move || {
+            let record_stats = stats::enabled();
             for batch in parsed_rx {
+                let t0 = record_stats.then(stats::now_ns);
+                let n = batch.len();
                 let resolved = batch.into_iter().map(&resolve).collect();
+                if let Some(t0) = t0 {
+                    stats::emit(&stats::Record::Resolve {
+                        t0,
+                        t1: stats::now_ns(),
+                        n,
+                    });
+                }
                 let _ = tx.send(resolved);
             }
         });

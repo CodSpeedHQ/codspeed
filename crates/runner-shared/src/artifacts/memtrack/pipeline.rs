@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::io::{BufWriter, Write};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
@@ -15,9 +16,29 @@ const FRAME_EVENTS: usize = 64 * 1024;
 /// oldest frame, bounding memory to about `cap + 1` frames.
 const MAX_IN_FLIGHT_PER_WORKER: usize = 2;
 
-/// A self-contained compressed zstd frame, plus the event buffer it was built
-/// from so the reader can reuse it for the next frame instead of reallocating.
-type CompressedFrame = (anyhow::Result<Vec<u8>>, Vec<MemtrackEvent>);
+/// A self-contained compressed zstd frame with its uncompressed msgpack size,
+/// plus the event buffer it was built from so the reader can reuse it for the
+/// next frame instead of reallocating.
+type CompressedFrame = (anyhow::Result<(Vec<u8>, u64)>, Vec<MemtrackEvent>);
+
+/// Reader-thread time and output size of one encoder step, reported through
+/// `encode_events`' `on_step` callback. A step pulls events until a frame is
+/// full, submits it, then writes every finished frame; the last step also
+/// drains the frames still in flight. Steps run back to back, so
+/// `wait + encode + write` is the wall time each one covers.
+#[derive(Default)]
+pub struct EncodeStats {
+    /// Events submitted in this step.
+    pub events: usize,
+    /// Blocked on the input iterator, i.e. waiting for events.
+    pub wait: Duration,
+    /// Blocked on the workers, i.e. the in-flight queue was at the cap.
+    pub encode: Duration,
+    pub write: Duration,
+    /// Sizes of the frames written in this step.
+    pub msgpack_bytes: u64,
+    pub zstd_bytes: u64,
+}
 
 /// Encode a stream of events into a single compressed artifact stream,
 /// compressing frames in parallel across a Rayon pool of `n_workers` threads.
@@ -30,7 +51,12 @@ type CompressedFrame = (anyhow::Result<Vec<u8>>, Vec<MemtrackEvent>);
 ///
 /// Blocks the calling thread until `events` is exhausted. Returns the total
 /// number of events written.
-pub fn encode_events<S, W>(events: S, out: W, n_workers: usize) -> anyhow::Result<u64>
+pub fn encode_events<S, W>(
+    events: S,
+    out: W,
+    n_workers: usize,
+    mut on_step: impl FnMut(&EncodeStats),
+) -> anyhow::Result<u64>
 where
     S: IntoIterator<Item = MemtrackEvent>,
     W: Write,
@@ -59,20 +85,30 @@ where
         rx
     };
     let mut collect = |(encoded, mut frame): CompressedFrame,
-                       spare: &mut Vec<Vec<MemtrackEvent>>| {
-        out.write_all(&encoded?)?;
+                       spare: &mut Vec<Vec<MemtrackEvent>>,
+                       step: &mut EncodeStats| {
+        let (bytes, msgpack_bytes) = encoded?;
+        let writing = Instant::now();
+        out.write_all(&bytes)?;
+        step.write += writing.elapsed();
+        step.msgpack_bytes += msgpack_bytes;
+        step.zstd_bytes += bytes.len() as u64;
         wrote_any = true;
         frame.clear();
         spare.push(frame);
         anyhow::Ok(())
     };
 
+    let mut step = EncodeStats::default();
+    let mut filling = Instant::now();
     let mut frame: Vec<MemtrackEvent> = Vec::with_capacity(FRAME_EVENTS);
     for event in events {
         frame.push(event);
         if frame.len() < FRAME_EVENTS {
             continue;
         }
+        step.wait = filling.elapsed();
+        step.events = frame.len();
         total += frame.len() as u64;
         let next = spare
             .pop()
@@ -87,25 +123,38 @@ where
                 Ok(result) => result,
                 Err(TryRecvError::Empty) if !at_cap => break,
                 // Blocks at the cap; fails at once if the worker is gone.
-                Err(_) => recv_frame(rx)?,
+                Err(_) => {
+                    let blocked = Instant::now();
+                    let result = recv_frame(rx)?;
+                    step.encode += blocked.elapsed();
+                    result
+                }
             };
             in_flight.pop_front();
-            collect(result, &mut spare)?;
+            collect(result, &mut spare, &mut step)?;
         }
+        on_step(&std::mem::take(&mut step));
+        filling = Instant::now();
     }
 
+    step.wait = filling.elapsed();
+    step.events = frame.len();
     if !frame.is_empty() {
         total += frame.len() as u64;
         in_flight.push_back(submit(frame));
     }
     for rx in in_flight.drain(..) {
-        collect(recv_frame(&rx)?, &mut spare)?;
+        let blocked = Instant::now();
+        let result = recv_frame(&rx)?;
+        step.encode += blocked.elapsed();
+        collect(result, &mut spare, &mut step)?;
     }
+    on_step(&step);
 
     // Always emit at least one (possibly empty) frame so the artifact stream is
     // valid and decodable even when no events were recorded.
     if !wrote_any {
-        out.write_all(&encode_frame(&[])?)?;
+        out.write_all(&encode_frame(&[])?.0)?;
     }
 
     out.flush()?;
@@ -139,12 +188,13 @@ thread_local! {
     static FRAME_ENCODER: RefCell<Option<FrameEncoder>> = const { RefCell::new(None) };
 }
 
-/// Encode one batch as a single self-contained zstd frame.
+/// Encode one batch as a single self-contained zstd frame, returned together
+/// with its uncompressed msgpack size.
 ///
 /// The batch is serialized with `rmp_serde` into a reused buffer, then
 /// compressed in one shot with a reused zstd context. The decoded bytes are the
 /// same msgpack stream `MemtrackWriter` produces.
-fn encode_frame(batch: &[MemtrackEvent]) -> anyhow::Result<Vec<u8>> {
+fn encode_frame(batch: &[MemtrackEvent]) -> anyhow::Result<(Vec<u8>, u64)> {
     FRAME_ENCODER.with(|cell| {
         let mut slot = cell.borrow_mut();
         let enc = match slot.as_mut() {
@@ -167,7 +217,7 @@ fn encode_frame(batch: &[MemtrackEvent]) -> anyhow::Result<Vec<u8>> {
         // Trim the worst-case compression bound so in-flight frames only hold
         // their actual size.
         compressed.shrink_to_fit();
-        Ok(compressed)
+        Ok((compressed, enc.msgpack.len() as u64))
     })
 }
 
@@ -200,7 +250,7 @@ mod tests {
         let events = malloc_events(0..(FRAME_EVENTS as u64 * 3 + 7));
 
         let mut out = Vec::new();
-        let total = encode_events(events.clone(), &mut out, 4)?;
+        let total = encode_events(events.clone(), &mut out, 4, |_| {})?;
         assert_eq!(total, events.len() as u64);
 
         let decoded: Vec<_> = MemtrackArtifact::decode_streamed(Cursor::new(out))?.collect();
@@ -214,7 +264,7 @@ mod tests {
         let events = malloc_events(0..(FRAME_EVENTS as u64 * 5 + 3));
 
         let mut out = Vec::new();
-        let total = encode_events(events.clone(), &mut out, 1)?;
+        let total = encode_events(events.clone(), &mut out, 1, |_| {})?;
         assert_eq!(total, events.len() as u64);
 
         let decoded: Vec<_> = MemtrackArtifact::decode_streamed(Cursor::new(out))?.collect();
@@ -235,8 +285,10 @@ mod tests {
 
         // Encode twice to also exercise the reused per-thread buffers.
         for _ in 0..2 {
-            let frame = zstd::decode_all(Cursor::new(encode_frame(&events)?))?;
+            let (frame, msgpack_bytes) = encode_frame(&events)?;
+            let frame = zstd::decode_all(Cursor::new(frame))?;
             assert_eq!(frame, reference);
+            assert_eq!(msgpack_bytes, reference.len() as u64);
         }
 
         Ok(())
@@ -247,7 +299,7 @@ mod tests {
         let events: Vec<MemtrackEvent> = Vec::new();
 
         let mut out = Vec::new();
-        let total = encode_events(events, &mut out, 4)?;
+        let total = encode_events(events, &mut out, 4, |_| {})?;
         assert_eq!(total, 0);
 
         assert!(MemtrackArtifact::is_empty(Cursor::new(out)));
