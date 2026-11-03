@@ -3,7 +3,10 @@ pub mod rolling_buffer;
 
 use std::{
     env,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex, PoisonError,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 
@@ -36,6 +39,35 @@ static CURRENT_GROUP_NAME: LazyLock<Arc<Mutex<Option<String>>>> =
 /// Log records deferred while the rolling buffer owns the terminal.
 /// Flushed in `draw_frame` before each redraw.
 static DEFERRED_LOGS: LazyLock<Mutex<Vec<DeferredLog>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+
+/// Set while a rolling buffer owns the terminal region; `LocalLogger` then
+/// defers its records to [`DEFERRED_LOGS`].
+static ROLLING_BUFFER_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+fn activate_log_deferral() {
+    ROLLING_BUFFER_ACTIVE.store(true, Ordering::Relaxed);
+}
+
+/// Stop deferring records and print those queued since the last frame. The flag
+/// is cleared under the `DEFERRED_LOGS` lock so no record can be queued after
+/// this final flush.
+fn deactivate_log_deferral(term: &console::Term) {
+    let logs = {
+        let mut deferred = DEFERRED_LOGS.lock().unwrap_or_else(PoisonError::into_inner);
+        ROLLING_BUFFER_ACTIVE.store(false, Ordering::Relaxed);
+        std::mem::take(&mut *deferred)
+    };
+    write_deferred_logs(term, &logs);
+}
+
+/// Write a chunk of benchmark command output to the terminal: into the rolling
+/// buffer when one is active, otherwise verbatim to `writer`.
+pub(crate) fn write_command_output(text: &str, raw_bytes: &[u8], writer: &mut impl Write) {
+    if rolling_buffer::try_push(text) {
+        return;
+    }
+    suspend_progress_bar(|| writer.write_all(raw_bytes).unwrap());
+}
 
 /// A snapshot of a log record that can be stored across the rolling-buffer
 /// lifetime (the original `log::Record` borrows data and cannot be kept).
@@ -143,19 +175,16 @@ impl Log for LocalLogger {
         // When the rolling buffer is active it owns the terminal region and uses
         // cursor manipulation to redraw.  Any direct stderr output would corrupt
         // the display, so we defer log records and flush them before each redraw.
-        {
-            use rolling_buffer::ROLLING_BUFFER;
-            if let Ok(guard) = ROLLING_BUFFER.try_lock() {
-                if guard.as_ref().is_some_and(|rb| rb.is_active()) {
-                    if let Ok(mut deferred) = DEFERRED_LOGS.try_lock() {
-                        deferred.push(DeferredLog {
-                            level: record.level(),
-                            message: format!("{}", record.args()),
-                            target: record.target().to_string(),
-                        });
-                    }
-                    return;
-                }
+        if ROLLING_BUFFER_ACTIVE.load(Ordering::Relaxed) {
+            let mut deferred = DEFERRED_LOGS.lock().unwrap_or_else(PoisonError::into_inner);
+            // Re-checked under the lock, which deactivation holds while clearing the flag
+            if ROLLING_BUFFER_ACTIVE.load(Ordering::Relaxed) {
+                deferred.push(DeferredLog {
+                    level: record.level(),
+                    message: format!("{}", record.args()),
+                    target: record.target().to_string(),
+                });
+                return;
             }
         }
 
@@ -186,6 +215,15 @@ pub(crate) fn format_checkmark(label: &str, dim: bool) -> String {
     format!(
         "  {}  {}",
         style(Icon::Checkmark.to_string()).green().bold(),
+        label
+    )
+}
+
+/// Format a failure cross with a label.
+pub(crate) fn format_cross(label: &str) -> String {
+    format!(
+        "  {}  {}",
+        style(Icon::Error.to_string()).red().bold(),
         label
     )
 }
@@ -278,12 +316,16 @@ pub(crate) fn flush_deferred_logs(term: &console::Term) {
             Err(_) => return,
         }
     };
+    write_deferred_logs(term, &logs);
+}
+
+fn write_deferred_logs(term: &console::Term, logs: &[DeferredLog]) {
     if !logs.is_empty() {
         // Clear from cursor to end of screen so that wrapped lines from the
         // rolling buffer frame don't leave artifacts behind deferred log output.
         term.clear_to_end_of_screen().ok();
     }
-    for log in &logs {
+    for log in logs {
         let formatted = format_log(log.level, &log.message, &log.target);
         term.write_line(&formatted).ok();
     }

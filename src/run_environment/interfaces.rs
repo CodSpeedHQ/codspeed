@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
+use crate::local_logger::rolling_buffer::RollingBufferGuard;
+
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Default)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum RepositoryProvider {
@@ -43,6 +45,23 @@ impl fmt::Display for RunEnvironment {
             RunEnvironment::Local => "Local",
         };
         write!(f, "{name}")
+    }
+}
+
+impl RunEnvironment {
+    /// Start the live display of a command's output, titled `label`.
+    ///
+    /// This only affects the on-screen rendering: the raw output is always
+    /// persisted to the runner log file. Returning `None` displays the output
+    /// verbatim, which is what CI job logs expect.
+    pub fn start_command_display(&self, label: &str) -> Option<RollingBufferGuard> {
+        match self {
+            RunEnvironment::Local => RollingBufferGuard::activate(label),
+            RunEnvironment::GithubActions
+            | RunEnvironment::GitlabCi
+            | RunEnvironment::Buildkite
+            | RunEnvironment::Circleci => None,
+        }
     }
 }
 

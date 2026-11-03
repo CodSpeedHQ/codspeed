@@ -3,6 +3,7 @@ use crate::executor::{
     get_executor_from_mode,
 };
 use crate::prelude::*;
+use crate::run_environment::{self, RunEnvironment};
 use crate::runner_mode::RunnerMode;
 use crate::system::SystemInfo;
 use clap::{Args, Subcommand};
@@ -56,10 +57,17 @@ fn get_executors_from_modes(modes: &[RunnerMode]) -> Vec<Box<dyn Executor>> {
 
 async fn setup(modes: &[RunnerMode], setup_cache_dir: Option<&Path>) -> Result<()> {
     let system_info = SystemInfo::new()?;
+    let run_environment = run_environment::detect();
     let executors = get_executors_from_modes(modes);
     start_group!("Setting up the environment");
     for executor in executors {
-        setup_executor(executor.as_ref(), &system_info, setup_cache_dir).await?;
+        setup_executor(
+            executor.as_ref(),
+            &system_info,
+            setup_cache_dir,
+            &run_environment,
+        )
+        .await?;
     }
     info!("Environment setup completed");
     end_group!();
@@ -71,6 +79,7 @@ async fn setup_executor(
     executor: &dyn Executor,
     system_info: &SystemInfo,
     setup_cache_dir: Option<&Path>,
+    run_environment: &RunEnvironment,
 ) -> Result<()> {
     let support_level = executor.support_level(system_info);
     if support_level == ExecutorSupport::Unsupported {
@@ -86,7 +95,7 @@ async fn setup_executor(
         "Setting up the environment for the executor: {}",
         executor.name()
     );
-    let result = setup_and_grant(executor, system_info, setup_cache_dir).await;
+    let result = setup_and_grant(executor, system_info, setup_cache_dir, run_environment).await;
 
     match result {
         // We publish no tooling for this host, so the executor could only try. Leave the
@@ -107,8 +116,11 @@ async fn setup_and_grant(
     executor: &dyn Executor,
     system_info: &SystemInfo,
     setup_cache_dir: Option<&Path>,
+    run_environment: &RunEnvironment,
 ) -> Result<()> {
-    executor.setup(system_info, setup_cache_dir).await?;
+    executor
+        .setup(system_info, setup_cache_dir, run_environment)
+        .await?;
     executor.grant_privileges()
 }
 

@@ -14,6 +14,7 @@ use crate::executor::shared::fifo::RunnerFifo;
 use crate::executor::{ExecutionContext, Executor};
 use crate::instruments::mongo_tracer::MongoTracer;
 use crate::prelude::*;
+use crate::run_environment::RunEnvironment;
 use crate::runner_mode::RunnerMode;
 use crate::system::{SupportedOs, SystemInfo};
 use async_trait::async_trait;
@@ -150,6 +151,7 @@ impl Executor for MemoryExecutor {
         &self,
         _system_info: &SystemInfo,
         _setup_cache_dir: Option<&Path>,
+        _run_environment: &RunEnvironment,
     ) -> Result<()> {
         install_memtrack().await
     }

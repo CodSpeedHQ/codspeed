@@ -8,6 +8,7 @@ use crate::executor::helpers::apt;
 use crate::executor::helpers::debug_file;
 use crate::executor::{ToolInstallStatus, ToolStatus};
 use crate::prelude::*;
+use crate::run_environment::RunEnvironment;
 use crate::system::{LinuxDistribution, SupportedOs, SystemInfo};
 use semver::Version;
 use std::{
@@ -266,7 +267,10 @@ fn warn_on_missing_libc_debug_symbols(system_info: &SystemInfo) {
 
 /// Provide valgrind on the systems we publish no package for: take the installation the
 /// user brings, or build one from source, and otherwise ask for a manual installation.
-pub(super) async fn try_install_from_source(system_info: &SystemInfo) -> Result<()> {
+pub(super) async fn try_install_from_source(
+    system_info: &SystemInfo,
+    run_environment: &RunEnvironment,
+) -> Result<()> {
     if is_valgrind_installed() {
         debug!(
             "Using the valgrind installation already present on {}",
@@ -286,7 +290,7 @@ pub(super) async fn try_install_from_source(system_info: &SystemInfo) -> Result<
     if build_from_source::is_wanted() {
         // A best effort: the toolchain may be missing or the build may fail, in which case
         // the user is pointed to a manual installation like a declined build would be.
-        match build_from_source::build_and_install().await {
+        match build_from_source::build_and_install(run_environment).await {
             Ok(()) if is_valgrind_installed() => {
                 info!("valgrind-codspeed has been built and installed from source");
                 warn_on_missing_libc_debug_symbols(system_info);

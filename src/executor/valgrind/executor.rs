@@ -6,6 +6,7 @@ use crate::executor::ToolStatus;
 use crate::executor::{ExecutionContext, ExecutorName, ExecutorSupport};
 use crate::instruments::mongo_tracer::MongoTracer;
 use crate::prelude::*;
+use crate::run_environment::RunEnvironment;
 use crate::system::{SupportedOs, SystemInfo};
 
 use super::setup::get_valgrind_status;
@@ -39,14 +40,19 @@ impl Executor for ValgrindExecutor {
         }
     }
 
-    async fn setup(&self, system_info: &SystemInfo, setup_cache_dir: Option<&Path>) -> Result<()> {
+    async fn setup(
+        &self,
+        system_info: &SystemInfo,
+        setup_cache_dir: Option<&Path>,
+        run_environment: &RunEnvironment,
+    ) -> Result<()> {
         match self.support_level(system_info) {
             ExecutorSupport::FullySupported => {
                 install_valgrind_from_package(system_info, setup_cache_dir).await?
             }
             // No package exists for this system, so there is nothing to install automatically.
             ExecutorSupport::RequiresManualInstallation => {
-                try_install_from_source(system_info).await?
+                try_install_from_source(system_info, run_environment).await?
             }
             ExecutorSupport::Unsupported => {
                 bail!(
