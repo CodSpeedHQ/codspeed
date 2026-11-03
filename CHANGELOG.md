@@ -5,6 +5,15 @@
 
 
 
+## [5.6.2] - 2026-11-03
+
+### <!-- 0 -->🚀 Features
+- Seed Go's global math/rand deterministically (#596) by @not-matthias in [#596](https://github.com/CodSpeedHQ/runner/pull/596)
+
+### <!-- 7 -->⚙️ Internals
+- Bump pinned valgrind-codspeed to 3.26.0-0codspeed12 (#604) by @adriencaccia in [#604](https://github.com/CodSpeedHQ/runner/pull/604)
+
+
 ## [5.6.1] - 2026-10-30
 
 ### <!-- 1 -->🐛 Bug Fixes
@@ -1692,6 +1701,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[5.6.2]: https://github.com/CodSpeedHQ/runner/compare/v5.6.1..v5.6.2
 [5.6.1]: https://github.com/CodSpeedHQ/runner/compare/v5.6.0..v5.6.1
 [5.6.0]: https://github.com/CodSpeedHQ/runner/compare/v5.5.0..v5.6.0
 [5.5.0]: https://github.com/CodSpeedHQ/runner/compare/v5.4.2..v5.5.0
