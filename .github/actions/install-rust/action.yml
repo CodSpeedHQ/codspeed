@@ -6,9 +6,13 @@ inputs:
     required: false
     default: ""
   cache-key:
-    description: Extra value appended to the rust-cache key, used to give matrix shards distinct caches and avoid concurrent save races.
+    description: Extra value appended to the rust-cache key, used to give matrix jobs distinct caches.
     required: false
     default: ""
+  save-cache:
+    description: Whether this job saves the rust-cache entry. Matrix jobs sharing a key should let only one of them save.
+    required: false
+    default: "true"
 runs:
   using: composite
   steps:
@@ -22,5 +26,6 @@ runs:
     - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
       with:
         key: ${{ inputs.cache-key }}
+        save-if: ${{ inputs.save-cache }}
         # https://github.com/Swatinem/rust-cache/issues/341
         cache-bin: ${{ runner.os != 'macOS' }}

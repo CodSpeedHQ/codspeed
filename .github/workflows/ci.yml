@@ -156,7 +156,9 @@ jobs:
           submodules: true
       - uses: ./.github/actions/install-rust
         with:
-          cache-key: ${{ matrix.os }}-${{ matrix.test }}
+          # Test shards share their dependencies, so one cache per OS is enough.
+          cache-key: ${{ matrix.os }}
+          save-cache: ${{ matrix.test == 'c_tests' }}
       - uses: ./.github/actions/install-bpf-deps
 
       - name: Install additional allocators
