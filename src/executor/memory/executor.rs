@@ -5,6 +5,7 @@ use crate::executor::ToolStatus;
 use crate::executor::helpers::command::CommandBuilder;
 use crate::executor::helpers::env::{build_path_env, get_base_injected_env};
 use crate::executor::helpers::get_bench_command::get_bench_command;
+use crate::executor::helpers::libc_debug_info::ensure_libc_debug_symbols;
 use crate::executor::helpers::run_command_with_log_pipe::run_command_with_log_pipe_and_callback;
 use crate::executor::helpers::run_with_env::prefix_command_with_env;
 use crate::executor::helpers::run_with_sudo::is_root_user;
@@ -149,11 +150,15 @@ impl Executor for MemoryExecutor {
 
     async fn setup(
         &self,
-        _system_info: &SystemInfo,
-        _setup_cache_dir: Option<&Path>,
+        system_info: &SystemInfo,
+        setup_cache_dir: Option<&Path>,
         _run_environment: &RunEnvironment,
     ) -> Result<()> {
-        install_memtrack().await
+        install_memtrack().await?;
+        // FIXME(COD-2794): resolve libc symbols through debuginfod once it is back up, instead
+        // of installing libc6-dbg.
+        ensure_libc_debug_symbols(system_info, setup_cache_dir).await;
+        Ok(())
     }
 
     fn grant_privileges(&self) -> Result<()> {

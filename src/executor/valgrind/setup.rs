@@ -5,17 +5,12 @@ use crate::binary_pins::{
 };
 use crate::cli::run::helpers::download_pinned_file;
 use crate::executor::helpers::apt;
-use crate::executor::helpers::debug_file;
 use crate::executor::{ToolInstallStatus, ToolStatus};
 use crate::prelude::*;
 use crate::run_environment::RunEnvironment;
 use crate::system::{LinuxDistribution, SupportedOs, SystemInfo};
 use semver::Version;
-use std::{
-    env,
-    path::{Path, PathBuf},
-    process::Command,
-};
+use std::{env, path::Path, process::Command};
 
 fn get_codspeed_valgrind_target(system_info: &SystemInfo) -> Result<ValgrindTarget> {
     let SupportedOs::Linux(distro) = &system_info.os else {
@@ -186,83 +181,12 @@ fn classify_valgrind_version(version: String) -> ToolInstallStatus {
     ToolInstallStatus::Installed { version }
 }
 
-/// Path of the system libc, following the Debian multiarch layout.
-fn system_libc_path(system_info: &SystemInfo) -> Option<PathBuf> {
-    let triplet = match system_info.arch.as_str() {
-        "x86_64" => "x86_64-linux-gnu",
-        "aarch64" => "aarch64-linux-gnu",
-        arch => {
-            debug!("No known multiarch triplet for {arch}");
-            return None;
-        }
-    };
-    Some(PathBuf::from(format!("/lib/{triplet}/libc.so.6")))
-}
-
-/// Whether a separate debug file can be resolved for `binary`, through the same
-/// build-id and `.gnu_debuglink` lookup that GDB and valgrind perform.
-fn has_debug_symbols(binary: &Path) -> bool {
-    let data = match std::fs::read(binary) {
-        Ok(data) => data,
-        Err(e) => {
-            debug!("Failed to read {}: {e}", binary.display());
-            return false;
-        }
-    };
-    let object = match object::File::parse(data.as_slice()) {
-        Ok(object) => object,
-        Err(e) => {
-            debug!("Failed to parse {} as ELF: {e}", binary.display());
-            return false;
-        }
-    };
-
-    match debug_file::find_debug_file(&object, binary) {
-        Some(debug_path) => {
-            debug!(
-                "Resolved debug file for {}: {}",
-                binary.display(),
-                debug_path.display()
-            );
-            true
-        }
-        None => {
-            debug!("No debug file found for {}", binary.display());
-            false
-        }
-    }
-}
-
 /// Whether a valgrind-codspeed recent enough for this runner is on `PATH`.
 fn is_valgrind_installed() -> bool {
     matches!(
         get_valgrind_status().status,
         ToolInstallStatus::Installed { .. }
     )
-}
-
-/// Whether the system libc has the separate debug file `libc6-dbg` provides.
-///
-/// Probed by file rather than through dpkg, because the setup cache restores package
-/// files without touching dpkg's database.
-fn has_libc_debug_symbols(system_info: &SystemInfo) -> bool {
-    system_libc_path(system_info).is_some_and(|libc| has_debug_symbols(&libc))
-}
-
-/// Warn when valgrind will run against a libc it has no debug symbols for: they sharpen
-/// its output but are not needed to run it.
-fn warn_on_missing_libc_debug_symbols(system_info: &SystemInfo) {
-    if !apt::is_system_compatible(system_info) {
-        debug!("Skipping the libc debug symbol check on a non-apt-based system");
-        return;
-    }
-
-    if !has_libc_debug_symbols(system_info) {
-        warn!(
-            "Debug info for the system libc not found. Install libc6-dbg (Debian/Ubuntu) \
-             or glibc-debuginfo (Fedora/RHEL) for more accurate valgrind results"
-        );
-    }
 }
 
 /// Provide valgrind on the systems we publish no package for: take the installation the
@@ -276,7 +200,6 @@ pub(super) async fn try_install_from_source(
             "Using the valgrind installation already present on {}",
             system_info.os
         );
-        warn_on_missing_libc_debug_symbols(system_info);
         return Ok(());
     }
 
@@ -293,7 +216,6 @@ pub(super) async fn try_install_from_source(
         match build_from_source::build_and_install(run_environment).await {
             Ok(()) if is_valgrind_installed() => {
                 info!("valgrind-codspeed has been built and installed from source");
-                warn_on_missing_libc_debug_symbols(system_info);
                 return Ok(());
             }
             Ok(()) => warn!("The freshly built valgrind is not usable, see the logs above"),
@@ -316,21 +238,16 @@ pub(super) async fn install_valgrind_from_package(
     apt::install_cached(
         system_info,
         setup_cache_dir,
-        // The libc debug symbols are part of what this path installs, so a cache restore that
-        // brought back only valgrind must still count as incomplete.
-        || is_valgrind_installed() && has_libc_debug_symbols(system_info),
+        is_valgrind_installed,
         || async {
             debug!("Installing valgrind");
             let binary = get_codspeed_valgrind_binary(system_info)?;
             let deb_path = env::temp_dir().join("valgrind-codspeed.deb");
             download_pinned_file(binary, &deb_path).await?;
 
-            // Install libc debug symbols alongside valgrind, as GitHub runners
-            // do not include them by default. Keeping them in the same install
-            // call puts them under the same caching and idempotency logic.
-            apt::install(system_info, &[deb_path.to_str().unwrap(), "libc6-dbg"])?;
+            apt::install(system_info, &[deb_path.to_str().unwrap()])?;
 
-            // Return package names for caching
+            // Include libc6-dbg, which the Valgrind package installs as a dependency.
             Ok(vec!["valgrind".to_string(), "libc6-dbg".to_string()])
         },
     )
