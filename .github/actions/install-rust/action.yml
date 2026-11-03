@@ -9,10 +9,18 @@ inputs:
     description: Extra value appended to the rust-cache key, used to give matrix jobs distinct caches.
     required: false
     default: ""
+  shared-key:
+    description: Cache key shared across jobs, replacing the per-job key. Jobs using it should restore only, leaving the save to the job that primes it.
+    required: false
+    default: ""
   save-cache:
-    description: Whether this job saves the rust-cache entry. Matrix jobs sharing a key should let only one of them save.
+    description: Whether this job saves the rust-cache entry. Jobs sharing a key should let only one of them save.
     required: false
     default: "true"
+outputs:
+  cache-hit:
+    description: Whether rust-cache restored an exact key match.
+    value: ${{ steps.rust-cache.outputs.cache-hit }}
 runs:
   using: composite
   steps:
@@ -23,9 +31,11 @@ runs:
       if: inputs.components != ''
       shell: bash
       run: echo "${{ inputs.components }}" | tr ',' '\n' | xargs rustup component add
-    - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
+    - id: rust-cache
+      uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
       with:
         key: ${{ inputs.cache-key }}
+        shared-key: ${{ inputs.shared-key }}
         save-if: ${{ inputs.save-cache }}
         # https://github.com/Swatinem/rust-cache/issues/341
         cache-bin: ${{ runner.os != 'macOS' }}

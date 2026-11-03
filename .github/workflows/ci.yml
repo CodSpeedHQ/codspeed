@@ -15,12 +15,38 @@ env:
   CODSPEED_VALGRIND_BUILD_FROM_SOURCE: "false"
 
 jobs:
+  # Builds the dependencies of every ubuntu-26.04 x64 job into one rust-cache
+  # entry. Those jobs restore it and save nothing; each command below mirrors
+  # one of theirs, since package selection changes dependency features.
+  prime-rust-cache:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+      - id: rust
+        uses: ./.github/actions/install-rust
+        with:
+          components: clippy
+          shared-key: ubuntu-26.04
+      - if: steps.rust.outputs.cache-hit != 'true'
+        uses: ./.github/actions/install-bpf-deps
+      - name: Build dependencies
+        if: steps.rust.outputs.cache-hit != 'true'
+        run: |
+          cargo clippy --all-targets
+          cargo build --bin codspeed --bin generate_config_schema
+          cargo test --all --exclude memtrack --exclude exec-harness --no-run
+          cargo test -p exec-harness --no-run
+          (cd crates/memtrack && cargo test --lib --test c_tests --no-run)
+
   lint:
+    needs: prime-rust-cache
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-26.04, macos-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -28,17 +54,20 @@ jobs:
       - uses: ./.github/actions/install-rust
         with:
           components: rustfmt, clippy
+          shared-key: ${{ matrix.os == 'ubuntu-26.04' && 'ubuntu-26.04' || '' }}
+          save-cache: ${{ matrix.os != 'ubuntu-26.04' }}
       # Building the runner builds memtrack's vendored libbpf-sys with it.
       - uses: ./.github/actions/install-bpf-deps
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-26.04'
       - uses: j178/prek-action@4e14d07f9231acabce116ccfca13b13dd9755ece # v3.0.0
         with:
           extra-args: --all-files
       - name: Check config schema is up to date
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-26.04'
         run: cargo run --bin generate_config_schema && git diff --exit-code schemas/codspeed.schema.json
 
   tests:
+    needs: prime-rust-cache
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -47,6 +76,9 @@ jobs:
           submodules: true
 
       - uses: ./.github/actions/install-rust
+        with:
+          shared-key: ubuntu-26.04
+          save-cache: false
 
       - uses: ./.github/actions/install-bpf-deps
 
@@ -79,16 +111,21 @@ jobs:
           # CODSPEED_VALGRIND_REF: my-valgrind-branch
 
   exec-harness-tests:
-    runs-on: ubuntu-latest
+    needs: prime-rust-cache
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
       - uses: ./.github/actions/install-rust
+        with:
+          shared-key: ubuntu-26.04
+          save-cache: false
       - name: Run tests
         run: cargo test -p exec-harness
 
   basic-run-test:
+    needs: prime-rust-cache
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -105,6 +142,8 @@ jobs:
       - uses: ./.github/actions/install-rust
         with:
           cache-key: ${{ matrix.os }}
+          shared-key: ${{ matrix.os == 'ubuntu-26.04' && 'ubuntu-26.04' || '' }}
+          save-cache: ${{ matrix.os != 'ubuntu-26.04' }}
       - uses: ./.github/actions/install-bpf-deps
       - name: Run tests
         run: cargo run -- exec ${{ matrix.extra-args }} -m simulation,walltime,memory --warmup-time 0s --max-rounds 5 -- sleep 1
@@ -123,6 +162,7 @@ jobs:
         run: cargo run -- exec -m walltime --skip-upload --warmup-time 0s --max-rounds 5 -- ls -la
 
   bpf-tests:
+    needs: prime-rust-cache
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -158,7 +198,8 @@ jobs:
         with:
           # Test shards share their dependencies, so one cache per OS is enough.
           cache-key: ${{ matrix.os }}
-          save-cache: ${{ matrix.test == 'c_tests' }}
+          shared-key: ${{ matrix.os == 'ubuntu-26.04' && 'ubuntu-26.04' || '' }}
+          save-cache: ${{ matrix.os != 'ubuntu-26.04' && matrix.test == 'c_tests' }}
       - uses: ./.github/actions/install-bpf-deps
 
       - name: Install additional allocators
@@ -299,6 +340,7 @@ jobs:
     runs-on: ubuntu-latest
     if: always()
     needs:
+      - prime-rust-cache
       - lint
       - tests
       - executor-tests
