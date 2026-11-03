@@ -247,8 +247,8 @@ pub(super) async fn install_valgrind_from_package(
 
             apt::install(system_info, &[deb_path.to_str().unwrap()])?;
 
-            // Return package names for caching
-            Ok(vec!["valgrind".to_string()])
+            // Include libc6-dbg, which the Valgrind package installs as a dependency.
+            Ok(vec!["valgrind".to_string(), "libc6-dbg".to_string()])
         },
     )
     .await
