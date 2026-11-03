@@ -318,9 +318,7 @@ fn bundled_samply_launches_command_with_explicit_unwinding() {
             "--save-only",
             "--no-open",
             "--unwinding-mode",
-            "dwarf",
-            "--unwinding-stack-size",
-            "16384",
+            "dwarf,16384",
             "-o",
         ])
         .arg(profile)
@@ -330,9 +328,9 @@ fn bundled_samply_launches_command_with_explicit_unwinding() {
             "-c",
             "printf '%s\\n' \"$1\"",
             "profiled-command",
-            "--unwinding-stack-size=application-value",
+            "--unwinding-mode=application-value",
         ])
         .assert()
         .success()
-        .stdout("--unwinding-stack-size=application-value\n");
+        .stdout("--unwinding-mode=application-value\n");
 }

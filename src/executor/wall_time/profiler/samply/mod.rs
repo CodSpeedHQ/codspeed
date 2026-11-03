@@ -3,8 +3,6 @@
 use crate::cli::InternalCommands;
 use crate::cli::samply::SamplyArgs;
 use crate::executor::ExecutorConfig;
-#[cfg(target_os = "linux")]
-use crate::executor::config::WalltimeUnwinding;
 use crate::executor::helpers::command::CommandBuilder;
 use crate::executor::helpers::run_with_sudo::wrap_with_sudo;
 use crate::executor::shared::fifo::FifoBenchmarkData;
@@ -104,17 +102,8 @@ impl Profiler for SamplyProfiler {
         // Unwinding knobs are Linux-only in samply.
         #[cfg(target_os = "linux")]
         {
-            match config.walltime_unwinding {
-                Some(WalltimeUnwinding::FramePointer) => {
-                    args.extend(["--unwinding-mode".into(), "fp".into()]);
-                }
-                Some(WalltimeUnwinding::Dwarf { stack_size }) => {
-                    args.extend(["--unwinding-mode".into(), "dwarf".into()]);
-                    if let Some(size) = stack_size {
-                        args.extend(["--unwinding-stack-size".into(), size.to_string().into()]);
-                    }
-                }
-                None => {}
+            if let Some(unwinding) = config.walltime_unwinding {
+                args.extend(["--unwinding-mode".into(), unwinding.to_string().into()]);
             }
         }
         #[cfg(not(target_os = "linux"))]
