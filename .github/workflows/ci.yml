@@ -234,25 +234,10 @@ jobs:
       - uses: ./.github/actions/install-rust
       - uses: ./.github/actions/install-bpf-deps
 
-      - name: Install memtrack
-        uses: baptiste0928/cargo-install@8195d4f734a149db85385bb4102b42efcd373759 # v3.5.0
-        with:
-          crate: memtrack
-          git: https://github.com/CodSpeedHQ/codspeed
-          commit: ${{ env.CODSPEED_REV }}
-
-      - name: Install codspeed-runner
-        uses: baptiste0928/cargo-install@8195d4f734a149db85385bb4102b42efcd373759 # v3.5.0
-        with:
-          crate: codspeed-runner
-          git: https://github.com/CodSpeedHQ/codspeed
-          commit: ${{ env.CODSPEED_REV }}
-
-      # The CodSpeed action reinstalls the runner into CARGO_INSTALL_ROOT; pointing
-      # it at the cached install root makes cargo see the same revision as already
-      # installed and skip the rebuild.
-      - name: Reuse the cached runner install
-        run: echo "CARGO_INSTALL_ROOT=$HOME/.cargo-install/codspeed-runner" >> "$GITHUB_ENV"
+      - name: Install memtrack and codspeed-runner
+        run: |
+          cargo install --locked --path crates/memtrack
+          cargo install --locked --path .
 
       - name: Verify installed binaries
         run: |
