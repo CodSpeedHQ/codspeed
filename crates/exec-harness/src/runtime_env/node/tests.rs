@@ -44,6 +44,7 @@ fn expected_flags(mode: &str, major: u32, v8_log: Option<&str>) -> Vec<String> {
             "--hash-seed=1",
             "--random-seed=1",
             "--no-opt",
+            "--always-sparkplug",
             "--predictable",
             "--predictable-gc-schedule",
             "--expose-gc",
