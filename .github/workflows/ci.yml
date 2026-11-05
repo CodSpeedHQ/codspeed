@@ -234,7 +234,7 @@ jobs:
         run: sudo chown -R $USER:$USER . ~/.cargo
 
   benchmarks:
-    runs-on: ${{ matrix.mode == 'walltime' && 'codspeed-macro' || 'ubuntu-latest' }}
+    runs-on: ${{ matrix.mode == 'walltime' && 'codspeed-macro-x64-ryzen-9950x-ubuntu-24-04' || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -246,9 +246,11 @@ jobs:
 
       - uses: ./.github/actions/install-rust
       - name: Install cargo codspeed
-        uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2
-        with:
-          tool: cargo-codspeed
+        run: |
+          curl -fsSL -o ~/.cargo/bin/cargo-codspeed \
+            https://github.com/CodSpeedHQ/codspeed-rust/releases/download/v6.0.0/cargo-codspeed-x86_64-unknown-linux-musl
+          echo "99b4ada4e00a0b4e153f5fe50f70844898cbd6f77274cbe29e44bf671e5f85d8  $HOME/.cargo/bin/cargo-codspeed" | sha256sum -c
+          chmod +x ~/.cargo/bin/cargo-codspeed
 
       - name: Build benchmarks
         run: cargo codspeed build -p runner-shared -m ${{ matrix.mode }}
@@ -259,7 +261,9 @@ jobs:
           run: cargo codspeed run -p runner-shared
 
   memtrack-benchmarks:
-    runs-on: codspeed-macro
+    # memtrack built from this revision loads eBPF programs, which needs a
+    # runner without eBPF restrictions.
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
