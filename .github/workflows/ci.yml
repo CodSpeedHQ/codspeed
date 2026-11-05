@@ -234,7 +234,7 @@ jobs:
         run: sudo chown -R $USER:$USER . ~/.cargo
 
   benchmarks:
-    runs-on: ${{ matrix.mode == 'walltime' && 'codspeed-macro' || 'ubuntu-latest' }}
+    runs-on: ${{ matrix.mode == 'walltime' && 'codspeed-macro-x64-ryzen-9950x-ubuntu-24-04' || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -259,7 +259,7 @@ jobs:
           run: cargo codspeed run -p runner-shared
 
   memtrack-benchmarks:
-    runs-on: codspeed-macro
+    runs-on: codspeed-macro-x64-ryzen-9950x-ubuntu-24-04
     strategy:
       fail-fast: false
       matrix:
