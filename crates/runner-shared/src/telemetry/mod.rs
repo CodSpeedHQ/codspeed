@@ -98,11 +98,12 @@ pub struct SpanRowV1 {
     /// Span end on the monotonic clock of the benchmark markers, in nanoseconds, `None` when the
     /// span didn't carry it.
     pub monotonic_end_ns: Option<u64>,
-    /// Lowercase hex.
-    pub trace_id: String,
-    pub span_id: String,
-    /// Empty for a root span.
-    pub parent_span_id: String,
+    /// The OTLP id bytes, read as a big-endian integer, so its `{:032x}` is the usual hex id.
+    pub trace_id: u128,
+    /// The OTLP id bytes, read as a big-endian integer, so its `{:016x}` is the usual hex id.
+    pub span_id: u64,
+    /// `None` for a root span.
+    pub parent_span_id: Option<u64>,
     pub span_name: String,
     /// `Unspecified`, `Internal`, `Server`, `Client`, `Producer` or `Consumer`.
     pub span_kind: String,
@@ -135,9 +136,10 @@ pub struct LogRowV1 {
     /// The log time on the monotonic clock of the benchmark markers, in nanoseconds, `None` when
     /// the log didn't carry it.
     pub monotonic_time_ns: Option<u64>,
-    /// Lowercase hex, empty when the log was emitted outside of a span.
-    pub trace_id: String,
-    pub span_id: String,
+    /// The ids of the span the log was emitted in, as in [`SpanRowV1`], `None` outside of a
+    /// span.
+    pub trace_id: Option<u128>,
+    pub span_id: Option<u64>,
     pub severity_text: String,
     pub severity_number: u8,
     pub service_name: String,

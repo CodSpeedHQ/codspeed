@@ -19,6 +19,8 @@ pub struct TelemetryStats {
     pub logs: u64,
     /// Spans and logs without their time on the monotonic clock of the benchmark markers.
     pub without_monotonic_time: u64,
+    /// Spans left out for an invalid trace or span id.
+    pub invalid_spans: u64,
     /// Requests that failed to decode.
     pub skipped_requests: u64,
 }
@@ -50,8 +52,15 @@ fn write_artifacts_blocking(
     for request in requests.list()? {
         let written = match request.signal {
             Signal::Traces => decode::<ExportTraceServiceRequest>(&request).map(|request| {
+                let span_count = request
+                    .resource_spans
+                    .iter()
+                    .flat_map(|resource_spans| &resource_spans.scope_spans)
+                    .map(|scope_spans| scope_spans.spans.len() as u64)
+                    .sum::<u64>();
                 let rows = span_rows(request);
                 stats.spans += rows.len() as u64;
+                stats.invalid_spans += span_count - rows.len() as u64;
                 stats.without_monotonic_time += rows
                     .iter()
                     .filter(|row| row.monotonic_start_ns.is_none())
@@ -139,7 +148,7 @@ mod tests {
 
     use super::super::OtelReceiver;
     use super::super::receiver::tests::post;
-    use super::super::rows::tests::{START, logs_request, trace_request};
+    use super::super::rows::tests::{START, TRACE_ID, logs_request, trace_request};
     use super::*;
 
     fn read<R: TelemetryRow>(path: &Path) -> Vec<R> {
@@ -202,6 +211,7 @@ mod tests {
                 spans: 2,
                 logs: 2,
                 without_monotonic_time: 2,
+                invalid_spans: 0,
                 skipped_requests: 1,
             }
         );
@@ -215,13 +225,13 @@ mod tests {
         assert_eq!(
             (
                 logs[1].body.as_str(),
-                logs[1].trace_id.as_str(),
+                logs[1].trace_id,
                 logs[1].timestamp,
                 &logs[1].log_attributes,
             ),
             (
                 "skipped invalid fields",
-                "ab".repeat(16).as_str(),
+                Some(TRACE_ID),
                 (START + 70) as i64,
                 &vec![("skipped".to_string(), "1".to_string())],
             )

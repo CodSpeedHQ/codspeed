@@ -48,6 +48,12 @@ impl AnalysisInstrument for TelemetryInstrument {
                 stats.spans, stats.logs
             );
         }
+        if stats.invalid_spans > 0 {
+            warn!(
+                "Left out {} spans with an invalid trace or span id",
+                stats.invalid_spans
+            );
+        }
         if stats.without_monotonic_time > 0 {
             warn!(
                 "{} spans and logs carry no time on the clock of the benchmarks, they won't be \

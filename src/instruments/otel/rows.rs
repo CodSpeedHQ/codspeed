@@ -17,6 +17,7 @@ pub const MONOTONIC_START_ATTRIBUTE: &str = "codspeed.monotonic_start_ns";
 pub const MONOTONIC_END_ATTRIBUTE: &str = "codspeed.monotonic_end_ns";
 pub const MONOTONIC_TIME_ATTRIBUTE: &str = "codspeed.monotonic_time_ns";
 
+/// The rows of the spans of `request`, without those whose trace or span id is invalid.
 pub fn span_rows(request: ExportTraceServiceRequest) -> Vec<SpanRow> {
     let mut rows = Vec::new();
     for resource_spans in request.resource_spans {
@@ -24,6 +25,12 @@ pub fn span_rows(request: ExportTraceServiceRequest) -> Vec<SpanRow> {
         for scope_spans in resource_spans.scope_spans {
             let (scope_name, scope_version) = scope_name_and_version(scope_spans.scope);
             for mut span in scope_spans.spans {
+                let (Some(trace_id), Some(span_id)) = (
+                    trace_id_from_bytes(&span.trace_id),
+                    span_id_from_bytes(&span.span_id),
+                ) else {
+                    continue;
+                };
                 let monotonic_start_ns =
                     take_monotonic_time(&mut span.attributes, MONOTONIC_START_ATTRIBUTE);
                 let monotonic_end_ns =
@@ -32,9 +39,9 @@ pub fn span_rows(request: ExportTraceServiceRequest) -> Vec<SpanRow> {
                     timestamp: unix_nanos(span.start_time_unix_nano),
                     monotonic_start_ns,
                     monotonic_end_ns,
-                    trace_id: hex_id(&span.trace_id),
-                    span_id: hex_id(&span.span_id),
-                    parent_span_id: hex_id(&span.parent_span_id),
+                    trace_id,
+                    span_id,
+                    parent_span_id: span_id_from_bytes(&span.parent_span_id),
                     span_name: span.name,
                     span_kind: span_kind(span.kind).into(),
                     service_name: resource.service_name.clone(),
@@ -80,8 +87,8 @@ pub fn log_rows(request: ExportLogsServiceRequest) -> Vec<LogRow> {
                 rows.push(LogRow {
                     timestamp: unix_nanos(timestamp),
                     monotonic_time_ns,
-                    trace_id: hex_id(&record.trace_id),
-                    span_id: hex_id(&record.span_id),
+                    trace_id: trace_id_from_bytes(&record.trace_id),
+                    span_id: span_id_from_bytes(&record.span_id),
                     severity_text: record.severity_text,
                     severity_number: u8::try_from(record.severity_number).unwrap_or_default(),
                     service_name: resource.service_name.clone(),
@@ -157,12 +164,16 @@ fn unix_nanos(timestamp: u64) -> i64 {
     i64::try_from(timestamp).unwrap_or(i64::MAX)
 }
 
-/// Lowercase hex, or empty for an empty or all-zero (invalid) id.
-fn hex_id(id: &[u8]) -> String {
-    if id.iter().all(|byte| *byte == 0) {
-        return String::new();
-    }
-    id.iter().map(|byte| format!("{byte:02x}")).collect()
+/// A trace id, `None` unless it is 16 bytes and not all zero, which OTLP uses for no trace.
+fn trace_id_from_bytes(id: &[u8]) -> Option<u128> {
+    let id = u128::from_be_bytes(id.try_into().ok()?);
+    (id != 0).then_some(id)
+}
+
+/// A span id, `None` unless it is 8 bytes and not all zero, which OTLP uses for no span.
+fn span_id_from_bytes(id: &[u8]) -> Option<u64> {
+    let id = u64::from_be_bytes(id.try_into().ok()?);
+    (id != 0).then_some(id)
 }
 
 fn span_kind(kind: i32) -> &'static str {
@@ -247,6 +258,8 @@ pub(super) mod tests {
     pub const START: u64 = 1_700_000_000_000_001_000;
     /// [`START`] on the monotonic clock.
     pub const MONOTONIC_START: u64 = 1_000;
+    /// The trace of the requests, `ab` repeated as bytes.
+    pub const TRACE_ID: u128 = 0xabab_abab_abab_abab_abab_abab_abab_abab;
 
     pub fn string_value(value: &str) -> AnyValue {
         AnyValue {
@@ -405,9 +418,9 @@ pub(super) mod tests {
                     timestamp: timestamp + 10,
                     monotonic_start_ns: Some(MONOTONIC_START + 10),
                     monotonic_end_ns: Some(MONOTONIC_START + 110),
-                    trace_id: "ab".repeat(16),
-                    span_id: "01".repeat(8),
-                    parent_span_id: String::new(),
+                    trace_id: TRACE_ID,
+                    span_id: 0x0101_0101_0101_0101,
+                    parent_span_id: None,
                     span_name: "parse".into(),
                     span_kind: "Internal".into(),
                     service_name: "example".into(),
@@ -428,9 +441,9 @@ pub(super) mod tests {
                     timestamp: timestamp + 20,
                     monotonic_start_ns: None,
                     monotonic_end_ns: None,
-                    trace_id: "ab".repeat(16),
-                    span_id: "02".repeat(8),
-                    parent_span_id: "01".repeat(8),
+                    trace_id: TRACE_ID,
+                    span_id: 0x0202_0202_0202_0202,
+                    parent_span_id: Some(0x0101_0101_0101_0101),
                     span_name: "tokenize".into(),
                     span_kind: "Unspecified".into(),
                     service_name: "example".into(),
@@ -456,8 +469,8 @@ pub(super) mod tests {
             vec![LogRow {
                 timestamp: (START + 60) as i64,
                 monotonic_time_ns: Some(MONOTONIC_START + 60),
-                trace_id: "ab".repeat(16),
-                span_id: "01".repeat(8),
+                trace_id: Some(TRACE_ID),
+                span_id: Some(0x0101_0101_0101_0101),
                 severity_text: "INFO".into(),
                 severity_number: 9,
                 service_name: "example".into(),
@@ -469,6 +482,28 @@ pub(super) mod tests {
                 log_attributes: strings(&[("count", "3")]),
             }]
         );
+    }
+
+    #[test]
+    fn leaves_out_the_spans_with_an_invalid_id() {
+        let mut request = trace_request();
+        let spans = &mut request.resource_spans[0].scope_spans[0].spans;
+        spans[0].span_id = vec![0; 8];
+        spans[1].trace_id = vec![0xab; 8];
+
+        assert_eq!(span_rows(request), []);
+    }
+
+    #[test]
+    fn has_no_ids_for_a_log_emitted_outside_of_a_span() {
+        let mut request = logs_request();
+        let record = &mut request.resource_logs[0].scope_logs[0].log_records[0];
+        record.trace_id = Vec::new();
+        record.span_id = vec![0; 8];
+
+        let rows = log_rows(request);
+
+        assert_eq!((rows[0].trace_id, rows[0].span_id), (None, None));
     }
 
     #[test]

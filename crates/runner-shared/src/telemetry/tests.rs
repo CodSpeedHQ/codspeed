@@ -7,6 +7,8 @@ fn strings(attributes: &[(&str, &str)]) -> Attributes {
         .collect()
 }
 
+const TRACE_ID: u128 = 0xabab_abab_abab_abab_abab_abab_abab_abab;
+
 /// The rows of the version 1 fixtures.
 fn v1_spans() -> Vec<SpanRow> {
     let resource_attributes = strings(&[
@@ -18,9 +20,9 @@ fn v1_spans() -> Vec<SpanRow> {
             timestamp: 1_700_000_000_000_001_010,
             monotonic_start_ns: Some(1_010),
             monotonic_end_ns: Some(1_110),
-            trace_id: "ab".repeat(16),
-            span_id: "01".repeat(8),
-            parent_span_id: String::new(),
+            trace_id: TRACE_ID,
+            span_id: 0x0101_0101_0101_0101,
+            parent_span_id: None,
             span_name: "parse".into(),
             span_kind: "Internal".into(),
             service_name: "example".into(),
@@ -41,9 +43,9 @@ fn v1_spans() -> Vec<SpanRow> {
             timestamp: 1_700_000_000_000_001_020,
             monotonic_start_ns: None,
             monotonic_end_ns: None,
-            trace_id: "ab".repeat(16),
-            span_id: "02".repeat(8),
-            parent_span_id: "01".repeat(8),
+            trace_id: TRACE_ID,
+            span_id: 0x0202_0202_0202_0202,
+            parent_span_id: Some(0x0101_0101_0101_0101),
             span_name: "tokenize".into(),
             span_kind: "Unspecified".into(),
             service_name: "example".into(),
@@ -63,8 +65,8 @@ fn v1_logs() -> Vec<LogRow> {
     vec![LogRow {
         timestamp: 1_700_000_000_000_001_060,
         monotonic_time_ns: Some(1_060),
-        trace_id: "ab".repeat(16),
-        span_id: "01".repeat(8),
+        trace_id: Some(TRACE_ID),
+        span_id: Some(0x0101_0101_0101_0101),
         severity_text: "INFO".into(),
         severity_number: 9,
         service_name: "example".into(),
