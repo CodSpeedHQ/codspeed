@@ -19,6 +19,7 @@ pub enum Icon {
     ExecutorValgrind,
     ExecutorWallTime,
     ExecutorMemory,
+    ExecutorAnalysis,
 
     // Box-drawing (used by rolling buffer)
     BoxTopLeft,
@@ -60,6 +61,7 @@ impl fmt::Display for Icon {
             Icon::ExecutorValgrind => "\u{2699}", // ⚙
             Icon::ExecutorWallTime => "\u{23f1}", // ⏱
             Icon::ExecutorMemory => "\u{25a4}",   // ▤
+            Icon::ExecutorAnalysis => "\u{2234}", // ∴
             Icon::BoxTopLeft => "\u{256d}",       // ╭
             Icon::BoxTopRight => "\u{256e}",      // ╮
             Icon::BoxBottomLeft => "\u{2570}",    // ╰
