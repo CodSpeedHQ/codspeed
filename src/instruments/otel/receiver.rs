@@ -238,6 +238,14 @@ async fn handle(request: Request<Incoming>, store: &RequestStore) -> Response<Fu
         }
     };
 
+    if let Endpoint::Metrics = endpoint {
+        // Logged to see in the runner logs how much the benchmarks export metrics.
+        debug!(
+            "OTLP receiver dropped a metrics request of {} bytes ({})",
+            body.len(),
+            encoding.content_type()
+        );
+    }
     if let Endpoint::Signal(signal) = endpoint {
         let received_bytes = body.len() as u64;
         let body = if is_gzipped {
