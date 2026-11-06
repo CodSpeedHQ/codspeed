@@ -1,11 +1,11 @@
-//! The received spans and logs, written as the telemetry files of the profile folder.
+//! The received spans and logs, written as the telemetry artifacts of the profile folder.
 
 use std::path::Path;
 
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use prost::Message;
-use runner_shared::telemetry::{LOGS_FILE, SPANS_FILE, TelemetryRow, TelemetryWriter};
+use runner_shared::telemetry::{LOGS_ARTIFACT, SPANS_ARTIFACT, TelemetryRow, TelemetryWriter};
 use serde::de::DeserializeOwned;
 
 use super::ReceivedRequests;
@@ -23,27 +23,28 @@ pub struct TelemetryStats {
     pub skipped_requests: u64,
 }
 
-/// Decodes `requests` into the [`SPANS_FILE`] and [`LOGS_FILE`] of `profile_folder`, then removes
-/// them. A file is only written when it has rows, and the files of a previous run are removed.
-pub async fn write_telemetry_files(
+/// Decodes `requests` into the [`SPANS_ARTIFACT`] and [`LOGS_ARTIFACT`] of `profile_folder`, then
+/// removes them. An artifact is only written when it has rows, and the artifacts of a previous run
+/// are removed.
+pub async fn write_telemetry_artifacts(
     requests: ReceivedRequests,
     profile_folder: &Path,
 ) -> Result<TelemetryStats> {
     let profile_folder = profile_folder.to_path_buf();
     tokio::task::spawn_blocking(move || {
-        let stats = write_files_blocking(&requests, &profile_folder)?;
+        let stats = write_artifacts_blocking(&requests, &profile_folder)?;
         requests.remove()?;
         Ok(stats)
     })
     .await?
 }
 
-fn write_files_blocking(
+fn write_artifacts_blocking(
     requests: &ReceivedRequests,
     profile_folder: &Path,
 ) -> Result<TelemetryStats> {
-    let mut spans = LazyWriter::new(profile_folder.join(SPANS_FILE))?;
-    let mut logs = LazyWriter::new(profile_folder.join(LOGS_FILE))?;
+    let mut spans = LazyWriter::new(profile_folder.join(SPANS_ARTIFACT))?;
+    let mut logs = LazyWriter::new(profile_folder.join(LOGS_ARTIFACT))?;
     let mut stats = TelemetryStats::default();
 
     for request in requests.list()? {
@@ -92,7 +93,7 @@ fn decode<M: Message + Default + DeserializeOwned>(request: &StoredRequest) -> R
     })
 }
 
-/// Removes the file already at its path, and only creates its file on the first rows.
+/// Removes the artifact already at its path, and only creates its artifact on the first rows.
 struct LazyWriter<R: TelemetryRow> {
     path: std::path::PathBuf,
     writer: Option<TelemetryWriter<R>>,
@@ -191,7 +192,7 @@ mod tests {
             assert!(response.status().is_success());
         }
 
-        let stats = write_telemetry_files(receiver.stop().await, profile_folder.path())
+        let stats = write_telemetry_artifacts(receiver.stop().await, profile_folder.path())
             .await
             .unwrap();
 
@@ -206,10 +207,10 @@ mod tests {
         );
         assert!(!profile_folder.path().join("otel-requests").exists());
         assert_eq!(
-            read::<SpanRow>(&profile_folder.path().join(SPANS_FILE)),
+            read::<SpanRow>(&profile_folder.path().join(SPANS_ARTIFACT)),
             span_rows(trace_request())
         );
-        let logs = read::<LogRow>(&profile_folder.path().join(LOGS_FILE));
+        let logs = read::<LogRow>(&profile_folder.path().join(LOGS_ARTIFACT));
         assert_eq!(logs[..1], log_rows(logs_request()));
         assert_eq!(
             (
@@ -232,7 +233,7 @@ mod tests {
         let profile_folder = tempfile::tempdir().unwrap();
         let receiver = OtelReceiver::start(profile_folder.path()).await.unwrap();
 
-        let stats = write_telemetry_files(receiver.stop().await, profile_folder.path())
+        let stats = write_telemetry_artifacts(receiver.stop().await, profile_folder.path())
             .await
             .unwrap();
 
@@ -243,7 +244,7 @@ mod tests {
     #[tokio::test]
     async fn replaces_the_output_of_a_previous_run() {
         let profile_folder = tempfile::tempdir().unwrap();
-        let logs_path = profile_folder.path().join(LOGS_FILE);
+        let logs_path = profile_folder.path().join(LOGS_ARTIFACT);
         std::fs::create_dir_all(logs_path.parent().unwrap()).unwrap();
         std::fs::write(&logs_path, b"previous logs").unwrap();
         let spool_dir = profile_folder.path().join("otel-requests");
@@ -263,14 +264,14 @@ mod tests {
         )
         .await;
         assert!(response.status().is_success());
-        let stats = write_telemetry_files(receiver.stop().await, profile_folder.path())
+        let stats = write_telemetry_artifacts(receiver.stop().await, profile_folder.path())
             .await
             .unwrap();
 
         assert_eq!((stats.spans, stats.logs), (2, 0));
         assert!(!logs_path.exists());
         assert_eq!(
-            read::<SpanRow>(&profile_folder.path().join(SPANS_FILE)),
+            read::<SpanRow>(&profile_folder.path().join(SPANS_ARTIFACT)),
             span_rows(trace_request())
         );
     }

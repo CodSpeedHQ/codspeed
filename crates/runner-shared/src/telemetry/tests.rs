@@ -92,8 +92,8 @@ fn write<R: TelemetryRow + Clone>(path: &Path, batches: &[&[R]]) {
     writer.close().unwrap();
 }
 
-fn read<R: TelemetryRow>(file: &[u8]) -> anyhow::Result<Vec<R>> {
-    TelemetryReader::<R, _>::new(file)?.collect()
+fn read<R: TelemetryRow>(artifact: &[u8]) -> anyhow::Result<Vec<R>> {
+    TelemetryReader::<R, _>::new(artifact)?.collect()
 }
 
 fn read_path<R: TelemetryRow>(path: &Path) -> Vec<R> {
@@ -104,15 +104,15 @@ fn encode(record: &impl Serialize) -> Vec<u8> {
     rmp_serde::to_vec(record).unwrap()
 }
 
-fn file_with(records: &[Vec<u8>]) -> Vec<u8> {
+fn artifact_with(records: &[Vec<u8>]) -> Vec<u8> {
     zstd::encode_all(records.concat().as_slice(), ZSTD_LEVEL).unwrap()
 }
 
 #[test]
 fn reads_back_the_written_rows() {
     let dir = tempfile::tempdir().unwrap();
-    let spans_path = dir.path().join(SPANS_FILE);
-    let logs_path = dir.path().join(LOGS_FILE);
+    let spans_path = dir.path().join(SPANS_ARTIFACT);
+    let logs_path = dir.path().join(LOGS_ARTIFACT);
     let spans = v1_spans();
 
     write(&spans_path, &[&spans[..1], &[], &spans[1..]]);
@@ -123,9 +123,9 @@ fn reads_back_the_written_rows() {
 }
 
 #[test]
-fn reads_a_file_without_rows() {
+fn reads_an_artifact_without_rows() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join(SPANS_FILE);
+    let path = dir.path().join(SPANS_ARTIFACT);
 
     write::<SpanRow>(&path, &[]);
 
@@ -133,17 +133,17 @@ fn reads_a_file_without_rows() {
 }
 
 #[test]
-fn rejects_a_truncated_file() {
+fn rejects_a_truncated_artifact() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join(SPANS_FILE);
+    let path = dir.path().join(SPANS_ARTIFACT);
     write(&path, &[&v1_spans()]);
-    let file = std::fs::read(&path).unwrap();
+    let artifact = std::fs::read(&path).unwrap();
 
-    for length in [0, file.len() / 2, file.len() - 1] {
+    for length in [0, artifact.len() / 2, artifact.len() - 1] {
         assert!(
-            read::<SpanRow>(&file[..length]).is_err(),
+            read::<SpanRow>(&artifact[..length]).is_err(),
             "{length} of {} bytes",
-            file.len()
+            artifact.len()
         );
     }
 }
@@ -180,18 +180,18 @@ enum NewerSpanRecord {
 
 #[test]
 fn rejects_a_row_of_a_newer_version() {
-    let file = file_with(&[
+    let artifact = artifact_with(&[
         encode(&NewerSpanRecord::V1(Box::new(v1_spans()[0].clone()))),
         encode(&NewerSpanRecord::V2("parse".into())),
         encode(&NewerSpanRecord::V1(Box::new(v1_spans()[1].clone()))),
     ]);
 
-    let mut reader = TelemetryReader::<SpanRow, _>::new(file.as_slice()).unwrap();
+    let mut reader = TelemetryReader::<SpanRow, _>::new(artifact.as_slice()).unwrap();
     assert_eq!(reader.next().unwrap().unwrap(), v1_spans()[0]);
     let error = reader.next().unwrap().unwrap_err();
     assert_eq!(
         error.to_string(),
-        "Failed to decode a row of the telemetry file"
+        "Failed to decode a row of the telemetry artifact"
     );
     assert!(reader.next().is_none());
 }

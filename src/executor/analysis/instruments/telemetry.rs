@@ -1,13 +1,13 @@
 use super::AnalysisInstrument;
-use crate::instruments::otel::{OTEL_ENDPOINT_ENV, OtelReceiver, write_telemetry_files};
+use crate::instruments::otel::{OTEL_ENDPOINT_ENV, OtelReceiver, write_telemetry_artifacts};
 use crate::prelude::*;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Receives the OpenTelemetry data the benchmarks export, through an OTLP/HTTP receiver whose
-/// URL is passed in [`OTEL_ENDPOINT_ENV`], and writes its spans and logs as telemetry files in the
-/// profile folder.
+/// URL is passed in [`OTEL_ENDPOINT_ENV`], and writes its spans and logs as telemetry artifacts in
+/// the profile folder.
 #[derive(Default)]
 pub struct TelemetryInstrument {
     started: Option<(OtelReceiver, PathBuf)>,
@@ -32,7 +32,7 @@ impl AnalysisInstrument for TelemetryInstrument {
         };
         let requests = receiver.stop().await;
         let (request_count, received_bytes) = (requests.count, requests.received_bytes);
-        let stats = write_telemetry_files(requests, &profile_folder)
+        let stats = write_telemetry_artifacts(requests, &profile_folder)
             .await
             .context("Failed to write the OpenTelemetry data")?;
 

@@ -1,7 +1,7 @@
-//! The OpenTelemetry spans and logs the benchmarks emitted, as files in the profile folder:
-//! [`SPANS_FILE`] and [`LOGS_FILE`].
+//! The OpenTelemetry spans and logs the benchmarks emitted, as artifacts in the profile folder:
+//! [`SPANS_ARTIFACT`] and [`LOGS_ARTIFACT`].
 //!
-//! Each file is a zstd-compressed stream of MessagePack records, one per span or log. It is read
+//! Each artifact is a zstd-compressed stream of MessagePack records, one per span or log. It is read
 //! front to back, so it decodes as its bytes arrive: see [`TelemetryReader`].
 //!
 //! [`SpanRow`] and [`LogRow`] alias the current versions. Each row is stored wrapped in its
@@ -26,8 +26,8 @@ use anyhow::Context;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-pub const SPANS_FILE: &str = "otel/spans.msgpack.zst";
-pub const LOGS_FILE: &str = "otel/logs.msgpack.zst";
+pub const SPANS_ARTIFACT: &str = "otel/spans.msgpack.zst";
+pub const LOGS_ARTIFACT: &str = "otel/logs.msgpack.zst";
 
 const ZSTD_LEVEL: i32 = 3;
 
@@ -45,7 +45,7 @@ pub enum LogRecord {
     V1(LogRowV1),
 }
 
-/// A row type stored in its own telemetry file, as a versioned record.
+/// A row type stored in its own telemetry artifact, as a versioned record.
 pub trait TelemetryRow: Sized {
     type Record: Serialize + DeserializeOwned + From<Self>;
 
@@ -150,7 +150,7 @@ pub struct LogRowV1 {
     pub log_attributes: Attributes,
 }
 
-/// Writes rows to a telemetry file, as records of the current version.
+/// Writes rows to a telemetry artifact, as records of the current version.
 pub struct TelemetryWriter<R: TelemetryRow> {
     serializer: rmp_serde::Serializer<BufWriter<zstd::Encoder<'static, BufWriter<File>>>>,
     _rows: PhantomData<fn(R)>,
@@ -189,7 +189,7 @@ impl<R: TelemetryRow> TelemetryWriter<R> {
     }
 }
 
-/// Reads the rows of a telemetry file as its bytes are read from `R`, such as an archive entry,
+/// Reads the rows of a telemetry artifact as its bytes are read from `R`, such as an archive entry,
 /// upgraded to the current version.
 pub struct TelemetryReader<T: TelemetryRow, R: Read> {
     deserializer: rmp_serde::Deserializer<
@@ -215,7 +215,7 @@ impl<T: TelemetryRow, R: Read> TelemetryReader<T, R> {
 impl<T: TelemetryRow, R: Read> Iterator for TelemetryReader<T, R> {
     type Item = anyhow::Result<T>;
 
-    /// Ends at the end of the file, or after the first error, such as a file cut in the middle
+    /// Ends at the end of the artifact, or after the first error, such as an artifact cut in the middle
     /// of a row.
     fn next(&mut self) -> Option<Self::Item> {
         if self.failed {
@@ -224,10 +224,10 @@ impl<T: TelemetryRow, R: Read> Iterator for TelemetryReader<T, R> {
         let row = match self.deserializer.get_mut().fill_buf() {
             Ok([]) => return None,
             Ok(_) => T::Record::deserialize(&mut self.deserializer)
-                .context("Failed to decode a row of the telemetry file")
+                .context("Failed to decode a row of the telemetry artifact")
                 .and_then(T::from_record),
             Err(error) => {
-                Err(anyhow::Error::from(error).context("Failed to read the telemetry file"))
+                Err(anyhow::Error::from(error).context("Failed to read the telemetry artifact"))
             }
         };
         self.failed = row.is_err();
