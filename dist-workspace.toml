@@ -13,8 +13,8 @@ ci = "github"
 installers = ["shell"]
 # The archive format to use for non-windows builds (defaults .tar.xz)
 unix-archive = ".tar.gz"
-# Which actions to run on pull requests
-pr-run-mode = "plan"
+# Builds every artifact on PRs and keeps them on the workflow run; only a tag push publishes
+pr-run-mode = "upload"
 # Post-announce jobs to run in CI
 post-announce-jobs = ["./post-announce"]
 # Path that installers should place binaries in

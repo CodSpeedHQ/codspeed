@@ -9,6 +9,7 @@ on:
 
 jobs:
   main:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     env:
       PLAN: ${{ inputs.plan }}
