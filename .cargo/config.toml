@@ -20,10 +20,10 @@ CPATH = { value = "crates/memtrack/musl", relative = true }
 # have to be added back, last so they never shadow the toolchain's own. Scoped
 # per target: cc-rs looks up `CFLAGS_<target>` before `CFLAGS`, and libbpf-sys
 # builds zlib, elfutils and libbpf from `cc::Tool::cflags_env()`.
+#
+# rustc links with `-nodefaultlibs`, so libgcc's outline-atomic helpers that
+# gcc calls by default on aarch64 are missing: inline the atomics instead. A
+# `-lgcc` in `target.<triple>.rustflags` would be dropped whenever `RUSTFLAGS`
+# is set in the environment.
 CFLAGS_x86_64_unknown_linux_musl = "-idirafter /usr/include/x86_64-linux-gnu -idirafter /usr/include"
-CFLAGS_aarch64_unknown_linux_musl = "-idirafter /usr/include/aarch64-linux-gnu -idirafter /usr/include"
-
-# rustc links with `-nodefaultlibs`; libbpf's C code needs the outline-atomic
-# helpers from libgcc on aarch64.
-[target.aarch64-unknown-linux-musl]
-rustflags = ["-C", "link-arg=-lgcc"]
+CFLAGS_aarch64_unknown_linux_musl = "-mno-outline-atomics -idirafter /usr/include/aarch64-linux-gnu -idirafter /usr/include"
