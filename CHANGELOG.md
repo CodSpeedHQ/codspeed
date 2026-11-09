@@ -5,6 +5,44 @@
 
 
 
+## [5.7.0] - 2026-11-09
+
+### <!-- 0 -->🚀 Features
+- Collect the OTLP data exported by the benchmarks (#589) by @lvaroqui in [#589](https://github.com/CodSpeedHQ/runner/pull/589)
+- Declare benchmarks run in another process by @lvaroqui in [#531](https://github.com/CodSpeedHQ/runner/pull/531)
+- Bundle memtrack into the runner binary by @GuillaumeLagrange
+- Bundle exec-harness into the runner binary by @GuillaumeLagrange
+- Track subprocesses instead of preloading a library by @GuillaumeLagrange
+- Add --walltime-unwinding-mode with DWARF stack size by @not-matthias
+
+### <!-- 1 -->🐛 Bug Fixes
+- Compile node analysis workloads eagerly with sparkplug (#595) by @not-matthias in [#595](https://github.com/CodSpeedHQ/runner/pull/595)
+- Infer Go and Java unwinding for both profilers by @not-matthias in [#603](https://github.com/CodSpeedHQ/runner/pull/603)
+- Bump merged sampler and align unwinding arguments by @not-matthias in [#586](https://github.com/CodSpeedHQ/runner/pull/586)
+- Pass stack sample size as --unwinding-stack-size by @not-matthias
+- Install libc6-dbg during memory and walltime setup (#601) by @not-matthias in [#601](https://github.com/CodSpeedHQ/runner/pull/601)
+
+### <!-- 10 -->💼 Other
+- Support building against musl by @GuillaumeLagrange
+- Bump rustls-webpki and webpki root certs (#607) by @GuillaumeLagrange in [#607](https://github.com/CodSpeedHQ/runner/pull/607)
+- Bump j178/prek-action from 2.0.4 to 3.0.0 (#495) by @dependabot[bot] in [#495](https://github.com/CodSpeedHQ/runner/pull/495)
+
+### <!-- 2 -->🏗️ Refactor
+- Move the CLI into the library by @GuillaumeLagrange
+- Scope the rolling buffer display to the run environment (#506) by @GuillaumeLagrange in [#506](https://github.com/CodSpeedHQ/runner/pull/506)
+
+### <!-- 4 -->⚡ Performance
+- Read the memtrack event stream through a 1 MiB buffer (#616) by @not-matthias in [#616](https://github.com/CodSpeedHQ/runner/pull/616)
+
+### <!-- 6 -->🧪 Testing
+- Run the executor tests in release by @GuillaumeLagrange
+
+### <!-- 7 -->⚙️ Internals
+- Bump pinned valgrind-codspeed to 3.26.0-0codspeed13 (#618) by @adriencaccia in [#618](https://github.com/CodSpeedHQ/runner/pull/618)
+- Prime one shared rust-cache for the ubuntu-26.04 x64 jobs by @GuillaumeLagrange in [#608](https://github.com/CodSpeedHQ/runner/pull/608)
+- Share one rust-cache entry per os across bpf-tests shards by @GuillaumeLagrange
+
+
 ## [5.6.3] - 2026-11-03
 
 ### <!-- 0 -->🚀 Features
@@ -1711,6 +1749,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[5.7.0]: https://github.com/CodSpeedHQ/runner/compare/v5.6.3..v5.7.0
 [5.6.3]: https://github.com/CodSpeedHQ/runner/compare/v5.6.2..v5.6.3
 [5.6.2]: https://github.com/CodSpeedHQ/runner/compare/v5.6.1..v5.6.2
 [5.6.1]: https://github.com/CodSpeedHQ/runner/compare/v5.6.0..v5.6.1
