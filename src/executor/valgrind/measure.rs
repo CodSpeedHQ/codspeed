@@ -53,6 +53,12 @@ fn get_valgrind_args(tool: &SimulationTool, config: &ExecutorConfig) -> Vec<Stri
             args.push("--compress-strings=no".to_string());
             args.push("--combine-dumps=yes".to_string());
             args.push("--dump-line=no".to_string());
+            // Separate every function by its whole call stack, so shared
+            // native code (e.g. V8 builtins between JS functions) doesn't join
+            // unrelated call chains. Tail jumps replace the jumping frame
+            // instead of nesting, which keeps those stacks shallow.
+            args.push("--separate-callers=all".to_string());
+            args.push("--pop-on-jump".to_string());
         }
         SimulationTool::Tracegrind => {
             args.push("--tool=tracegrind".to_string());
