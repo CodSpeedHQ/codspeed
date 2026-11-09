@@ -8,6 +8,7 @@ pub enum MeasurementMode {
     Memory,
     #[value(alias = "instrumentation")]
     Simulation,
+    Telemetry,
 }
 
 impl MeasurementMode {
@@ -19,6 +20,7 @@ impl MeasurementMode {
             Self::Simulation => "instrumentation",
             Self::Walltime => "walltime",
             Self::Memory => "memory",
+            Self::Telemetry => "telemetry",
         }
     }
 }

@@ -7,6 +7,7 @@ use crate::cli::run::RunArgs;
 use crate::prelude::*;
 
 pub mod mongo_tracer;
+pub mod otel;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MongoDBConfig {
@@ -16,11 +17,13 @@ pub struct MongoDBConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Instruments {
     pub mongodb: Option<MongoDBConfig>,
+    pub telemetry: bool,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum InstrumentName {
     MongoDB,
+    Telemetry,
 }
 
 impl Instruments {
@@ -33,6 +36,10 @@ impl Instruments {
 
         if self.is_mongodb_enabled() {
             names.push(InstrumentName::MongoDB);
+        }
+
+        if self.telemetry {
+            names.push(InstrumentName::Telemetry);
         }
 
         names
@@ -64,7 +71,10 @@ impl TryFrom<&RunArgs> for Instruments {
             None
         };
 
-        Ok(Self { mongodb })
+        Ok(Self {
+            mongodb,
+            telemetry: false,
+        })
     }
 }
 
@@ -76,6 +86,7 @@ impl Instruments {
             mongodb: Some(MongoDBConfig {
                 uri_env_name: Some("MONGODB_URI".into()),
             }),
+            telemetry: false,
         }
     }
 }

@@ -43,6 +43,13 @@ impl Orchestrator {
             );
         }
 
+        if config.modes.contains(&RunnerMode::Telemetry) {
+            warn!(
+                "The 'telemetry' runner mode is experimental and may change or be removed without \
+                notice."
+            );
+        }
+
         Ok(Orchestrator {
             config,
             system_info,
@@ -138,9 +145,14 @@ impl Orchestrator {
         }
 
         for (run_part_index, part) in run_parts.into_iter().enumerate() {
-            let config = self
+            let mut config = self
                 .config
                 .executor_config_for_command(part.command, part.uses_exec_harness);
+
+            if *part.mode == RunnerMode::Telemetry {
+                config.instruments.telemetry = true;
+            }
+
             let mut executor = get_executor_from_mode(part.mode, self.config.walltime_profiler);
             let profile_folder =
                 self.resolve_profile_folder(&executor.name(), run_part_index, total_parts)?;
