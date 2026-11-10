@@ -1,6 +1,6 @@
 ---
 name: codspeed-setup-harness
-description: "Set up performance benchmarks and CodSpeed harness for a project. Use this skill whenever the user wants to create benchmarks, add performance tests, set up CodSpeed, configure codspeed.yml, integrate a benchmarking framework (criterion, divan, pytest-benchmark, vitest bench, go test -bench, google benchmark), or when the user says 'add benchmarks', 'set up perf tests', 'create a benchmark', 'benchmark this', or wants to measure performance of their code for the first time. Also trigger when the optimize skill needs benchmarks that don't exist yet."
+description: "Set up performance benchmarks and CodSpeed harness for a project. Use this skill whenever the user wants to set up CodSpeed, configure codspeed.yml, integrate a benchmarking framework (criterion, divan, pytest-benchmark, vitest bench, go test -bench, google benchmark), or when the user says 'set up perf tests', 'add CodSpeed', or wants to measure performance of a project that has no benchmarks yet. Also trigger when the optimize skill needs benchmarks that don't exist yet. To write, fix, or maintain benchmarks in a project that already runs CodSpeed, use codspeed-write-benchmarks instead."
 ---
 
 # Setup Harness
@@ -281,19 +281,7 @@ codspeed exec -m walltime -- ./my_binary --input data.txt
 
 ## Step 4: Write good benchmarks
 
-Good benchmarks are representative, isolated, and stable. Here are guidelines:
-
-- **Benchmark real workloads**: Use realistic input data and sizes. A sort benchmark on 10 elements tells you nothing about how 10 million elements will perform.
-
-- **Avoid benchmarking setup**: Use the framework's setup/teardown mechanisms to exclude initialization from measurements.
-
-- **Prevent dead code elimination**: Use `black_box()` (Rust), `benchmark::DoNotOptimize` (C++), or `Blackhole.consume` (JMH) so the compiler doesn't optimize away unused results.
-
-- **Cover the critical path**: Benchmark the functions that matter most to your users — the ones called frequently or on the hot path.
-
-- **Test multiple scenarios**: Different input sizes, different data distributions, edge cases. Performance characteristics often change with scale.
-
-- **Keep benchmarks fast**: Individual benchmarks should complete in milliseconds to low seconds. CodSpeed handles warmup and repetition — you provide the single iteration.
+Pick representative workloads: the functions on the hot path, with realistic input sizes and a few scenarios (different sizes, data distributions). Then follow the `codspeed-write-benchmarks` skill to keep each benchmark valid: measure only the code under test, keep the result alive, and size it for each instrument.
 
 ## Step 5: Verify and run
 
