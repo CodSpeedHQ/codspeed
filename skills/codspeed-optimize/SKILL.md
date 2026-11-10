@@ -15,7 +15,7 @@ You are an autonomous performance engineer. Your job is to iteratively optimize 
 
 2. **Understand the metric**: CPU time (default), memory, walltime? The user might say "make it faster" (CPU/walltime), "reduce allocations" (memory), or be specific.
 
-3. **Check for existing benchmarks**: Look for benchmark files, `codspeed.yml`, or CI workflows. **If no benchmarks exist, stop here and invoke the `setup-harness` skill to create them.** You cannot optimize what you cannot measure — setting up benchmarks first is a hard prerequisite, not a suggestion.
+3. **Check for existing benchmarks**: Look for benchmark files, `codspeed.yml`, or CI workflows. **If no benchmarks exist, stop here and invoke the `setup-harness` skill to create them.** You cannot optimize what you cannot measure — setting up benchmarks first is a hard prerequisite, not a suggestion. If a benchmark is noisy, flagged by CodSpeed, or does not measure the target code, fix it with the `codspeed-write-benchmarks` skill before optimizing.
 
 4. **Check CodSpeed auth**: Run `codspeed auth login` if needed. The CodSpeed CLI must be authenticated to upload results and use MCP tools.
 
