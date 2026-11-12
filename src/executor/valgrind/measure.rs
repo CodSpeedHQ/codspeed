@@ -47,6 +47,9 @@ fn get_valgrind_args(tool: &SimulationTool, config: &ExecutorConfig) -> Vec<Stri
         SimulationTool::Callgrind => {
             if config.cycle_estimation {
                 args.push("--cycle-estimation=yes".to_string());
+                if config.rep_bulk_cost {
+                    args.push("--rep-bulk-cost=yes".to_string());
+                }
             }
 
             args.push("--tool=callgrind".to_string());

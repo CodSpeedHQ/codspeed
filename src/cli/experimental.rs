@@ -17,6 +17,16 @@ pub struct ExperimentalArgs {
     )]
     pub experimental_fair_sched: bool,
 
+    /// Enable valgrind's calibrated `rep movs`/`rep stos` cost model (--rep-bulk-cost).
+    /// Only applies with --cycle-estimation.
+    #[arg(
+        long,
+        default_value_t = false,
+        help_heading = "Experimental",
+        env = "CODSPEED_EXPERIMENTAL_REP_BULK_COST"
+    )]
+    pub experimental_rep_bulk_cost: bool,
+
     /// Do not set PYTHONMALLOC for simulation runs.
     #[arg(
         long,
@@ -65,6 +75,9 @@ impl ExperimentalArgs {
         let mut flags = Vec::new();
         if self.experimental_fair_sched {
             flags.push("--experimental-fair-sched");
+        }
+        if self.experimental_rep_bulk_cost {
+            flags.push("--experimental-rep-bulk-cost");
         }
         if self.experimental_disable_pythonmalloc_override {
             flags.push("--experimental-disable-pythonmalloc-override");

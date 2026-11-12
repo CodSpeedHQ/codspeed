@@ -113,6 +113,8 @@ pub struct OrchestratorConfig {
     pub extra_env: HashMap<String, String>,
     /// Enable valgrind's --fair-sched option.
     pub fair_sched: bool,
+    /// Enable valgrind's --rep-bulk-cost option.
+    pub rep_bulk_cost: bool,
     /// Enable valgrind's --cycle-estimation option.
     pub cycle_estimation: bool,
     /// Signal the backend to exclude memory allocation time from simulation results.
@@ -160,6 +162,8 @@ pub struct ExecutorConfig {
     pub enable_introspection: bool,
     /// Enable valgrind's --fair-sched option.
     pub fair_sched: bool,
+    /// Enable valgrind's --rep-bulk-cost option.
+    pub rep_bulk_cost: bool,
     /// Enable valgrind's --cycle-estimation option.
     pub cycle_estimation: bool,
     /// Signal the backend to exclude memory allocation time from simulation results.
@@ -246,6 +250,7 @@ impl OrchestratorConfig {
             extra_env: self.extra_env.clone(),
             enable_introspection: !uses_exec_harness,
             fair_sched: self.fair_sched,
+            rep_bulk_cost: self.rep_bulk_cost,
             cycle_estimation: self.cycle_estimation,
             exclude_allocations: self.exclude_allocations,
             simulation_track_subprocess: self.simulation_track_subprocess || uses_exec_harness,
@@ -284,6 +289,7 @@ impl OrchestratorConfig {
             poll_results_options: PollResultsOptions::new(false, None),
             extra_env: HashMap::new(),
             fair_sched: false,
+            rep_bulk_cost: false,
             cycle_estimation: true,
             exclude_allocations: false,
             simulation_track_subprocess: false,
