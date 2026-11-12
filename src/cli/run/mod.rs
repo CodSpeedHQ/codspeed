@@ -203,7 +203,7 @@ pub async fn run(
         RunTarget::SingleCommand(args) => {
             // SingleCommand: working_directory comes from --working-directory CLI flag only.
             // Config file's working-directory is NOT used.
-            let command = args.command.join(" ");
+            let command = shell_command_from_args(&args.command);
             let poll_opts = PollResultsOptions::new(output_json, base_run_id);
             let config = build_orchestrator_config(
                 args,
@@ -276,6 +276,17 @@ pub async fn run(
     Ok(())
 }
 
+/// Build the shell command run for `codspeed run -- <command>`.
+///
+/// A single argument is kept as raw shell (e.g. `"cargo bench && echo done"`). Multiple arguments
+/// were already split by the user's shell, so each one is quoted to run exactly as given.
+fn shell_command_from_args(args: &[String]) -> String {
+    match args {
+        [single] => single.clone(),
+        parts => shell_words::join(parts),
+    }
+}
+
 // We have to implement this manually, because deriving the trait makes the CLI values `git-hub`
 // and `git-lab`
 impl clap::ValueEnum for RepositoryProvider {
@@ -288,5 +299,24 @@ impl clap::ValueEnum for RepositoryProvider {
             Self::GitHub => Some(clap::builder::PossibleValue::new("github").aliases(["gh"])),
             Self::Project => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rstest::rstest;
+
+    #[rstest]
+    #[case::single_arg_is_raw_shell(&["cargo bench && echo done"], "cargo bench && echo done")]
+    #[case::plain_args(&["cargo", "bench", "--bench", "foo"], "cargo bench --bench foo")]
+    #[case::pipe(&["cargo", "codspeed", "run", "a|b"], "cargo codspeed run 'a|b'")]
+    #[case::and(&["echo", "a", "&&", "echo", "b"], "echo a '&&' echo b")]
+    #[case::space(&["echo", "a b"], "echo 'a b'")]
+    #[case::dollar(&["echo", "$HOME"], "echo '$HOME'")]
+    #[case::quote(&["echo", "it's"], "echo 'it'\\''s'")]
+    fn test_shell_command_from_args(#[case] args: &[&str], #[case] expected: &str) {
+        let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        assert_eq!(shell_command_from_args(&args), expected);
     }
 }
