@@ -31,10 +31,10 @@ jobs:
 
           if [ "${IS_PRE_RELEASE}" == "true" ]; then
             echo "runner_released=false" >> "$GITHUB_OUTPUT"
-            echo "Pre-release detected, cargo-dist has already undrafted this release, nothing more to do"
+            echo "Pre-release detected, cargo-dist has already published this release, nothing more to do"
           elif [ -z "${NEW_VERSION}" ] || [ "${NEW_VERSION}" == "null" ]; then
             echo "runner_released=false" >> "$GITHUB_OUTPUT"
-            echo "A package other than the runner has been released, cargo-dist has already undrafted this release, nothing more to do"
+            echo "A package other than the runner has been released, cargo-dist has already published this release, nothing more to do"
           else
             echo "runner_released=true" >> "$GITHUB_OUTPUT"
             echo "Runner version ${NEW_VERSION} was released"

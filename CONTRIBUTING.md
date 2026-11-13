@@ -89,8 +89,7 @@ When you run `cargo release --execute <version>`, the following happens:
 
 1. **cargo-release** bumps the version, creates a commit and a git tag, then pushes them to GitHub
 2. **GitHub Actions release workflow** triggers on the tag:
-   - Custom `cargo-dist` job creates a draft GitHub release
-   - `cargo-dist` builds artifacts for all platforms, uploads them to the draft release, and then publishes it
+   - `cargo-dist` builds artifacts for all platforms, then creates the GitHub release with them, without marking it as "latest"
 3. Only if it is a runner release:
    - Custom post announce job marks it as "latest" and triggers action repo workflow
 
