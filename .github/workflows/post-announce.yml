@@ -31,10 +31,7 @@ jobs:
 
           if [ "${IS_PRE_RELEASE}" == "true" ]; then
             echo "runner_released=false" >> "$GITHUB_OUTPUT"
-            echo "Pre-release detected, cargo-dist has already undrafted this release, nothing more to do"
-          elif [ -z "${NEW_VERSION}" ] || [ "${NEW_VERSION}" == "null" ]; then
-            echo "runner_released=false" >> "$GITHUB_OUTPUT"
-            echo "A package other than the runner has been released, cargo-dist has already undrafted this release, nothing more to do"
+            echo "Pre-release detected, nothing more to do"
           else
             echo "runner_released=true" >> "$GITHUB_OUTPUT"
             echo "Runner version ${NEW_VERSION} was released"
@@ -82,15 +79,6 @@ jobs:
           # Rebuild it now rather than on the first runner's request.
           curl -fsS --retry 3 -o /dev/null \
             https://app.codspeed.io/api/ebpf-allowlist
-
-      - name: Mark release as latest
-        if: steps.check_runner.outputs.runner_released == 'true'
-        run: |
-          RELEASE_TAG="${{ steps.check_runner.outputs.release_tag }}"
-          REPO_OWNER=$(echo ${PLAN} | jq -r '.releases[0].hosting.github.owner')
-          REPO_NAME=$(echo ${PLAN} | jq -r '.releases[0].hosting.github.repo')
-          echo "Marking release ${RELEASE_TAG} as latest"
-          gh release edit "${RELEASE_TAG}" -R "${REPO_OWNER}/${REPO_NAME}" --latest
 
       - name: Trigger action runner version bump workflow
         if: steps.check_runner.outputs.runner_released == 'true'
