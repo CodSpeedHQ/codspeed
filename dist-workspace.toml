@@ -24,9 +24,9 @@ install-updater = false
 # Build only the required packages, and individually
 precise-builds = true
 # Comment this out to rerun `dist generate`, then redo these hand edits to release.yml:
-# - `--latest=false` is appended to the `gh release create` call in `host`, post-announce
-#   marks the release as latest only for runner releases
-#   (https://github.com/axodotdev/cargo-dist/issues/2244)
+# - the `gh release create` call in `host` creates a draft, then a PATCH with only
+#   `draft=false` publishes it so it is not marked as latest; post-announce marks runner
+#   releases as latest (https://github.com/axodotdev/cargo-dist/issues/2244)
 # - the `swatinem/rust-cache` step in `build-local-artifacts` is removed
 allow-dirty = ["ci"]
 
