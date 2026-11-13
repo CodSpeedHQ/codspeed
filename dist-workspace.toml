@@ -23,17 +23,10 @@ install-path = "CARGO_HOME"
 install-updater = false
 # Build only the required packages, and individually
 precise-builds = true
-# Don't create GitHub releases, we handle that manually to manually control which release is marked as latest
-create-release = false
-# Use the stage just after plan because we need its output to create the draft release
-local-artifacts-jobs = ["./create-draft-release"]
-# Comment this out to rerun `dist generate`, then redo these hand edits to release.yml:
-# - the `gh release edit` call in `host` is replaced so the release is not marked as latest
-#   (https://github.com/axodotdev/cargo-dist/issues/2244)
-# - the `swatinem/rust-cache` step in `build-local-artifacts` is removed
-allow-dirty = ["ci"]
+# `pr-run-mode = "upload"` would otherwise turn on a rust-cache step in every build job
+cache-builds = false
 
-# Dependabot bumps the pins in release.yml: copy them here before regenerating
+# Pins for the generated release.yml, which dependabot skips: bump them here, then run `dist generate`
 [dist.github-action-commits]
 "actions/checkout" = "3d3c42e5aac5ba805825da76410c181273ba90b1"          # v7.0.1
 "actions/upload-artifact" = "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"   # v7.0.1
