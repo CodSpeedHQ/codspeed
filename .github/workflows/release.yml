@@ -276,21 +276,7 @@ jobs:
           # Write and read notes from a file to avoid quoting breaking things
           echo "$ANNOUNCEMENT_BODY" > $RUNNER_TEMP/notes.txt
 
-          # ⚠️ MANUAL EDIT
-          # Replacement for the generated line
-          # gh release create "${{ needs.plan.outputs.tag }}" --target "$RELEASE_COMMIT" $PRERELEASE_FLAG --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" artifacts/*
-          #
-          # Publishing with `make_latest=false` (`--latest=false`) still marks the release as latest,
-          # a PATCH with only `draft=false` does not. Post-announce marks runner releases as latest.
-          # https://github.com/axodotdev/cargo-dist/issues/2244
-          gh release create "${{ needs.plan.outputs.tag }}" --target "$RELEASE_COMMIT" $PRERELEASE_FLAG --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" --draft artifacts/*
-          RELEASE_ID=$(gh api repos/{owner}/{repo}/releases --jq '.[] | select(.tag_name == "${{ needs.plan.outputs.tag }}") | .id')
-          if [ -z "$RELEASE_ID" ]; then
-            echo "Error: Could not find release ID for tag"
-            exit 1
-          fi
-          gh api repos/{owner}/{repo}/releases/$RELEASE_ID --method PATCH -f draft=false
-          # ⚠️ END OF MANUAL EDIT
+          gh release create "${{ needs.plan.outputs.tag }}" --target "$RELEASE_COMMIT" $PRERELEASE_FLAG --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" artifacts/*
 
   announce:
     needs:

@@ -23,11 +23,10 @@ install-path = "CARGO_HOME"
 install-updater = false
 # Build only the required packages, and individually
 precise-builds = true
-# Comment this out to rerun `dist generate`, then redo these hand edits to release.yml:
-# - the `gh release create` call in `host` creates a draft, then a PATCH with only
-#   `draft=false` publishes it so it is not marked as latest; post-announce marks runner
-#   releases as latest (https://github.com/axodotdev/cargo-dist/issues/2244)
-# - the `swatinem/rust-cache` step in `build-local-artifacts` is removed
+# Don't cache release builds, `pr-run-mode = "upload"` turns caching on by default
+cache-builds = false
+# release.yml has no hand edits, this only lets dependabot bump its action pins without failing
+# `dist plan`. Comment it out to rerun `dist generate`
 allow-dirty = ["ci"]
 
 # Dependabot bumps the pins in release.yml: copy them here before regenerating
