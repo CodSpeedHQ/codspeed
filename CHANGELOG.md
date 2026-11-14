@@ -5,6 +5,58 @@
 
 
 
+## [5.7.0] - 2026-11-14
+
+### <!-- 0 -->🚀 Features
+- Add --experimental-rep-bulk-cost flag (#620) by @not-matthias in [#620](https://github.com/CodSpeedHQ/runner/pull/620)
+- Add codspeed-write-benchmarks skill by @not-matthias
+- Collect the OTLP data exported by the benchmarks (#589) by @lvaroqui in [#589](https://github.com/CodSpeedHQ/runner/pull/589)
+- Declare benchmarks run in another process by @lvaroqui in [#531](https://github.com/CodSpeedHQ/runner/pull/531)
+- Bundle memtrack into the runner binary by @GuillaumeLagrange
+- Bundle exec-harness into the runner binary by @GuillaumeLagrange
+- Track subprocesses instead of preloading a library by @GuillaumeLagrange
+- Add --walltime-unwinding-mode with DWARF stack size by @not-matthias
+
+### <!-- 1 -->🐛 Bug Fixes
+- Quote each argument of a multi-argument command (#622) by @not-matthias in [#622](https://github.com/CodSpeedHQ/runner/pull/622)
+- Compile node analysis workloads eagerly with sparkplug (#595) by @not-matthias in [#595](https://github.com/CodSpeedHQ/runner/pull/595)
+- Infer Go and Java unwinding for both profilers by @not-matthias in [#603](https://github.com/CodSpeedHQ/runner/pull/603)
+- Bump merged sampler and align unwinding arguments by @not-matthias in [#586](https://github.com/CodSpeedHQ/runner/pull/586)
+- Pass stack sample size as --unwinding-stack-size by @not-matthias
+- Install libc6-dbg during memory and walltime setup (#601) by @not-matthias in [#601](https://github.com/CodSpeedHQ/runner/pull/601)
+
+### <!-- 10 -->💼 Other
+- Inline aarch64 atomics in musl C code instead of linking libgcc by @adriencaccia
+- Support building against musl by @GuillaumeLagrange
+- Bump rustls-webpki and webpki root certs (#607) by @GuillaumeLagrange in [#607](https://github.com/CodSpeedHQ/runner/pull/607)
+- Bump j178/prek-action from 2.0.4 to 3.0.0 (#495) by @dependabot[bot] in [#495](https://github.com/CodSpeedHQ/runner/pull/495)
+
+### <!-- 2 -->🏗️ Refactor
+- Move the CLI into the library by @GuillaumeLagrange
+- Scope the rolling buffer display to the run environment (#506) by @GuillaumeLagrange in [#506](https://github.com/CodSpeedHQ/runner/pull/506)
+
+### <!-- 3 -->📚 Documentation
+- Mention benchmark writing in the plugin description by @not-matthias in [#621](https://github.com/CodSpeedHQ/runner/pull/621)
+- Point optimize at codspeed-write-benchmarks by @not-matthias
+- Point setup-harness at codspeed-write-benchmarks by @not-matthias
+
+### <!-- 4 -->⚡ Performance
+- Read the memtrack event stream through a 1 MiB buffer (#616) by @not-matthias in [#616](https://github.com/CodSpeedHQ/runner/pull/616)
+
+### <!-- 6 -->🧪 Testing
+- Run the executor tests in release by @GuillaumeLagrange
+
+### <!-- 7 -->⚙️ Internals
+- Bump pinned valgrind-codspeed to 3.26.0-0codspeed14 (#626) by @adriencaccia in [#626](https://github.com/CodSpeedHQ/runner/pull/626)
+- Release the runner with dist's defaults (#625) by @adriencaccia in [#625](https://github.com/CodSpeedHQ/runner/pull/625)
+- Bump cargo-dist to 0.34.0 by @GuillaumeLagrange in [#623](https://github.com/CodSpeedHQ/runner/pull/623)
+- Build the macOS release on macos-latest by @adriencaccia
+- Run the release build on pull requests by @adriencaccia
+- Bump pinned valgrind-codspeed to 3.26.0-0codspeed13 (#618) by @adriencaccia in [#618](https://github.com/CodSpeedHQ/runner/pull/618)
+- Prime one shared rust-cache for the ubuntu-26.04 x64 jobs by @GuillaumeLagrange in [#608](https://github.com/CodSpeedHQ/runner/pull/608)
+- Share one rust-cache entry per os across bpf-tests shards by @GuillaumeLagrange
+
+
 ## [5.6.3] - 2026-11-03
 
 ### <!-- 0 -->🚀 Features
@@ -1711,6 +1763,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[5.7.0]: https://github.com/CodSpeedHQ/runner/compare/v5.6.3..v5.7.0
 [5.6.3]: https://github.com/CodSpeedHQ/runner/compare/v5.6.2..v5.6.3
 [5.6.2]: https://github.com/CodSpeedHQ/runner/compare/v5.6.1..v5.6.2
 [5.6.1]: https://github.com/CodSpeedHQ/runner/compare/v5.6.0..v5.6.1
