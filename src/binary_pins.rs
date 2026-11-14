@@ -13,7 +13,7 @@ pub const VALGRIND_CODSPEED_VERSION: Version = Version::new(3, 26, 0);
 /// the .deb is repackaged without a new upstream valgrind release. Appears in
 /// the .deb package version (`3.26.0-0codspeed3`) and in `valgrind --version`
 /// output (`valgrind-3.26.0.codspeed3`).
-pub const VALGRIND_CODSPEED_ITERATION: u32 = 13;
+pub const VALGRIND_CODSPEED_ITERATION: u32 = 14;
 /// Suffix appended to `VALGRIND_CODSPEED_VERSION` to form the .deb package version.
 static VALGRIND_DEB_REV: LazyLock<String> =
     LazyLock::new(|| format!("0codspeed{VALGRIND_CODSPEED_ITERATION}"));
@@ -95,22 +95,22 @@ impl ValgrindTarget {
     fn sha256(self) -> &'static str {
         match (self.distro_version, self.arch) {
             (DistroVersion::Ubuntu2204, Arch::Amd64) => {
-                "8d960436723bffb450d9616bff54a5696347462c98563ac6a6d1b859b1ff1a92"
+                "5ba403fa40aa6fc901c4bd94dd758fb57d3b838b799b1043b0f903adb5d2917c"
             }
             (DistroVersion::Ubuntu2204, Arch::Arm64) => {
-                "cfac9174e0c54ac56560d68b3c91090abae4daf47d8dd208439efd6829fd483a"
+                "13bbea64d30b749c2d46101c217cb71bb0ff5c0e95b1bc9fafbc4678db50e38e"
             }
             (DistroVersion::Ubuntu2404, Arch::Amd64) => {
-                "11ade92f0eaf93528209c056f506aef9e151863ecccc057589b4adcd25998c07"
+                "1e9ddd9f6e5b331e2b24754cdf164e8a6c63b5b61de4e8e169f204527391ee19"
             }
             (DistroVersion::Ubuntu2404, Arch::Arm64) => {
-                "d8d0826a4932fc58af7617fae4c80977fc3dbd79f801fc1f64778cbe7952fc5b"
+                "d17958652ede7cc8d46da883c058cdd414805ee5b67b1d0da13fb1857a4da24c"
             }
             (DistroVersion::Ubuntu2604, Arch::Amd64) => {
-                "32da2cb4be9521589c754969436c46761f8df00e2d56e4384fcdd4568e9f3486"
+                "956b0d0d9cac8e02fb32eb72aebe3c31946dde68e6f4cd89c004cb05734035ac"
             }
             (DistroVersion::Ubuntu2604, Arch::Arm64) => {
-                "819332a16884f5d3c7beb541bcf5b4ba0e53f47c4fe306b8a0333b7e3129e78b"
+                "a8a7b3fc9fabb3971c34fa2802c2d5738a298e87ea2d9f866a2bc7edfb4008ee"
             }
         }
     }
