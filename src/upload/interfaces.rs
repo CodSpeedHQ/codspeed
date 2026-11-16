@@ -55,6 +55,10 @@ pub struct Runner {
     /// byte-identical to legacy runs that predate this field.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub exclude_allocations: bool,
+    /// Isolation level of the machine running the benchmarks, as reported by
+    /// the environment through `CODSPEED_RUNNER_ISOLATION`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub isolation: Option<String>,
     #[serde(flatten)]
     pub system_info: SystemInfo,
 }

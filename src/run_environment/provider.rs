@@ -145,6 +145,7 @@ pub trait RunEnvironmentProvider {
                 instruments: config.instruments.get_active_instrument_names(),
                 executor: executor_name,
                 exclude_allocations: config.exclude_allocations,
+                isolation: get_runner_isolation(),
                 system_info: system_info.clone(),
             },
             run_environment: self.get_run_environment(),
@@ -156,6 +157,13 @@ pub trait RunEnvironmentProvider {
     fn get_commit_hash(&self, repository_root_path: &str) -> Result<String> {
         get_commit_hash_default_impl(repository_root_path)
     }
+}
+
+fn get_runner_isolation() -> Option<String> {
+    std::env::var("CODSPEED_RUNNER_ISOLATION")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 fn get_commit_hash_default_impl(repository_root_path: &str) -> Result<String> {
@@ -181,5 +189,18 @@ mod tests {
         let commit_hash = get_commit_hash_default_impl(env!("CARGO_MANIFEST_DIR")).unwrap();
         // ensure that the commit hash is correct, thus it has 40 characters
         assert_eq!(commit_hash.len(), 40);
+    }
+
+    #[test]
+    fn test_get_runner_isolation() {
+        temp_env::with_var("CODSPEED_RUNNER_ISOLATION", Some(" strict "), || {
+            assert_eq!(get_runner_isolation(), Some("strict".into()));
+        });
+        temp_env::with_var("CODSPEED_RUNNER_ISOLATION", Some("  "), || {
+            assert_eq!(get_runner_isolation(), None);
+        });
+        temp_env::with_var_unset("CODSPEED_RUNNER_ISOLATION", || {
+            assert_eq!(get_runner_isolation(), None);
+        });
     }
 }
