@@ -12,9 +12,27 @@ use crate::system::{LinuxDistribution, SupportedOs, SystemInfo};
 use semver::Version;
 use std::{env, path::Path, process::Command};
 
+/// Error for a system we publish no valgrind package for. It names the detected system and
+/// points to the fixes, since an outdated CodSpeed is the usual reason for hitting it.
+fn unsupported_system_error(system_info: &SystemInfo) -> Error {
+    anyhow!(
+        "Unsupported system: {} ({}). Supported systems are Ubuntu 22.04, 24.04 and 26.04, \
+        and Debian 12, on x86_64 and aarch64.\n\
+        \n\
+        Make sure you are running the latest version of CodSpeed first:\n\
+        - On GitHub Actions, update `CodSpeedHQ/action` to its latest release (e.g. `CodSpeedHQ/action@v5`).\n\
+        - Elsewhere, run `codspeed update`, or re-run `curl -fsSL https://codspeed.io/install.sh | bash`.\n\
+        \n\
+        If the error persists, reach out on Discord (https://codspeed.io/discord) \
+        or by email (support@codspeed.io).",
+        system_info.os,
+        system_info.arch,
+    )
+}
+
 fn get_codspeed_valgrind_target(system_info: &SystemInfo) -> Result<ValgrindTarget> {
     let SupportedOs::Linux(distro) = &system_info.os else {
-        bail!("Unsupported system");
+        return Err(unsupported_system_error(system_info));
     };
 
     let (distro_version, arch) = match (distro, system_info.arch.as_str()) {
@@ -42,7 +60,7 @@ fn get_codspeed_valgrind_target(system_info: &SystemInfo) -> Result<ValgrindTarg
         (LinuxDistribution::Ubuntu { version }, "aarch64") if version == "26.04" => {
             (DistroVersion::Ubuntu2604, Arch::Arm64)
         }
-        _ => bail!("Unsupported system"),
+        _ => return Err(unsupported_system_error(system_info)),
     };
 
     Ok(ValgrindTarget {
@@ -385,6 +403,29 @@ mod tests {
             ..SystemInfo::test()
         };
         assert!(get_codspeed_valgrind_binary(&system_info).is_err());
+    }
+
+    #[test]
+    fn test_codspeed_valgrind_unsupported_system_error_is_actionable() {
+        let system_info = SystemInfo {
+            os: SupportedOs::Linux(LinuxDistribution::Ubuntu {
+                version: "20.04".into(),
+            }),
+            arch: "x86_64".to_string(),
+            ..SystemInfo::test()
+        };
+        let message = get_codspeed_valgrind_target(&system_info)
+            .unwrap_err()
+            .to_string();
+
+        // The detected system and the supported ones
+        assert!(message.contains("Unsupported system: ubuntu 20.04 (x86_64)"));
+        assert!(message.contains("Ubuntu 22.04, 24.04 and 26.04, and Debian 12"));
+        // How to update, then where to get help
+        assert!(message.contains("`CodSpeedHQ/action`"));
+        assert!(message.contains("`codspeed update`"));
+        assert!(message.contains("https://codspeed.io/discord"));
+        assert!(message.contains("support@codspeed.io"));
     }
 
     #[test]
