@@ -24,6 +24,14 @@ expression: upload_metadata
       "MongoDB"
     ],
     "executor": "valgrind",
+    "macroRunnerConfig": {
+      "macroAgentVersion": "0.4.0",
+      "hostImageName": "packer-ubuntu24-x86-post-20261120093416",
+      "guestImageName": "packer-ubuntu24-x86-post-20261120093416",
+      "runtimeConfig": {
+        "isolation": "strict"
+      }
+    },
     "os": "ubuntu",
     "osVersion": "20.04",
     "arch": "x86_64",

@@ -3,6 +3,7 @@ use git2::Repository;
 use serde_json::Value;
 use simplelog::SharedLogger;
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use crate::api_client::CodSpeedAPIClient;
 use crate::executor::{ExecutorConfig, ExecutorName};
@@ -145,6 +146,7 @@ pub trait RunEnvironmentProvider {
                 instruments: config.instruments.get_active_instrument_names(),
                 executor: executor_name,
                 exclude_allocations: config.exclude_allocations,
+                macro_runner_config: read_macro_runner_config(Path::new(MACRO_RUNNER_CONFIG_PATH)),
                 system_info: system_info.clone(),
             },
             run_environment: self.get_run_environment(),
@@ -155,6 +157,29 @@ pub trait RunEnvironmentProvider {
     /// Returns the HEAD commit hash of the repository at the given path.
     fn get_commit_hash(&self, repository_root_path: &str) -> Result<String> {
         get_commit_hash_default_impl(repository_root_path)
+    }
+}
+
+/// Where a CodSpeed Macro Runner writes the JSON object describing its configuration.
+const MACRO_RUNNER_CONFIG_PATH: &str = "/etc/codspeed/macro-runner-config.json";
+
+/// The JSON object at `path`, or `None` outside a macro runner. An unreadable or malformed file is
+/// ignored so it never fails the upload.
+fn read_macro_runner_config(path: &Path) -> Option<serde_json::Map<String, Value>> {
+    let raw = match std::fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(error) => {
+            warn!("Ignoring {}, could not read it: {error}", path.display());
+            return None;
+        }
+    };
+    match serde_json::from_str(&raw) {
+        Ok(config) => Some(config),
+        Err(error) => {
+            warn!("Ignoring {}, not a JSON object: {error}", path.display());
+            None
+        }
     }
 }
 
@@ -181,5 +206,27 @@ mod tests {
         let commit_hash = get_commit_hash_default_impl(env!("CARGO_MANIFEST_DIR")).unwrap();
         // ensure that the commit hash is correct, thus it has 40 characters
         assert_eq!(commit_hash.len(), 40);
+    }
+
+    #[test]
+    fn test_read_macro_runner_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("macro-runner-config.json");
+        assert_eq!(read_macro_runner_config(&path), None);
+        assert_eq!(read_macro_runner_config(dir.path()), None);
+
+        std::fs::write(
+            &path,
+            r#"{"macroAgentVersion":"0.4.0","runtimeConfig":{"isolation":"strict"}}"#,
+        )
+        .unwrap();
+        let config = read_macro_runner_config(&path).unwrap();
+        assert_eq!(config["macroAgentVersion"], "0.4.0");
+        assert_eq!(config["runtimeConfig"]["isolation"], "strict");
+
+        for malformed in ["", "not json", r#"["0.4.0"]"#, r#""0.4.0""#] {
+            std::fs::write(&path, malformed).unwrap();
+            assert_eq!(read_macro_runner_config(&path), None);
+        }
     }
 }
