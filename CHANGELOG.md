@@ -5,6 +5,15 @@
 
 
 
+## [5.8.0] - 2026-11-21
+
+### <!-- 0 -->🚀 Features
+- Report the macro runner configuration in the upload metadata (#631) by @GuillaumeLagrange in [#631](https://github.com/CodSpeedHQ/runner/pull/631)
+
+### <!-- 1 -->🐛 Bug Fixes
+- Make the unsupported system error actionable (#628) by @claude[bot] in [#628](https://github.com/CodSpeedHQ/runner/pull/628)
+
+
 ## [5.7.0] - 2026-11-14
 
 ### <!-- 0 -->🚀 Features
@@ -287,7 +296,7 @@
 
 ### <!-- 0 -->🚀 Features
 - Collect RSS via rss_stat and folio-rmap reconstruction (#453) by @not-matthias in [#453](https://github.com/CodSpeedHQ/runner/pull/453)
-- Add opt-in per-thread dumps and subprocess measurement by @GuillaumeLagrange
+- Add opt-in per-thread dumps and subprocess measurement
 
 ### <!-- 1 -->🐛 Bug Fixes
 - Detect cached libc debug symbols by file, not dpkg state (#509) by @GuillaumeLagrange in [#509](https://github.com/CodSpeedHQ/runner/pull/509)
@@ -1763,6 +1772,7 @@
 - Add linting components to the toolchain by @art049
 
 
+[5.8.0]: https://github.com/CodSpeedHQ/runner/compare/v5.7.0..v5.8.0
 [5.7.0]: https://github.com/CodSpeedHQ/runner/compare/v5.6.3..v5.7.0
 [5.6.3]: https://github.com/CodSpeedHQ/runner/compare/v5.6.2..v5.6.3
 [5.6.2]: https://github.com/CodSpeedHQ/runner/compare/v5.6.1..v5.6.2
