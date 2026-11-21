@@ -20,13 +20,9 @@ serde = { workspace = true }
 humantime = "2.3"
 runner-shared = { path = "../runner-shared" }
 tempfile = { workspace = true }
-object = { workspace = true }
 
 [dev-dependencies]
 rstest = { workspace = true }
-
-[build-dependencies]
-cc = "1"
 
 # Bundled in the runner binary, not released on its own.
 [package.metadata.dist]
