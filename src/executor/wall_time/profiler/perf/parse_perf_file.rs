@@ -124,8 +124,8 @@ pub fn parse_for_memmap2<P: AsRef<Path>>(
     // Retrieve the set of PIDs we ended up tracking after processing all records
     let tracked_pids: HashSet<pid_t> = match pid_filter {
         PidFilter::All => loaded_modules_by_path
-            .iter()
-            .flat_map(|(_, loaded)| loaded.pids())
+            .values()
+            .flat_map(|loaded| loaded.pids())
             .collect(),
         PidFilter::TrackedPids(tracked) => tracked,
     };

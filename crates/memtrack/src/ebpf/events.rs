@@ -164,8 +164,10 @@ pub fn fp_chain(stack_traces: &impl MapCore, stackid: i64) -> Vec<u64> {
 
     // The map value is a fixed-depth array zero-padded past the last frame.
     value
-        .chunks_exact(8)
-        .map(|word| u64::from_ne_bytes(word.try_into().expect("chunks_exact yields 8 bytes")))
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|word| u64::from_ne_bytes(*word))
         .take_while(|&address| address != 0)
         .collect()
 }

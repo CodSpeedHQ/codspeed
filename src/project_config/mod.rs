@@ -32,10 +32,10 @@ impl ProjectConfig {
     ///
     /// Checks for invalid combinations of options, particularly in walltime config
     fn validate(&self) -> Result<()> {
-        if let Some(options) = &self.options {
-            if let Some(walltime) = &options.walltime {
-                Self::validate_walltime_options(walltime, "root options")?;
-            }
+        if let Some(options) = &self.options
+            && let Some(walltime) = &options.walltime
+        {
+            Self::validate_walltime_options(walltime, "root options")?;
         }
         Ok(())
     }

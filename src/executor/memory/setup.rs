@@ -93,13 +93,14 @@ fn prune_stale_copies(cache_dir: &Path, current: &Path) {
             .metadata()
             .and_then(|metadata| metadata.modified())
             .is_ok_and(|modified| modified.elapsed().is_ok_and(|age| age > STALE_COPY_AGE));
-        if dir != current && is_stale {
-            if let Err(e) = std::fs::remove_dir_all(&dir) {
-                debug!(
-                    "Failed to remove stale memtrack copy {}: {e}",
-                    dir.display()
-                );
-            }
+        if dir != current
+            && is_stale
+            && let Err(e) = std::fs::remove_dir_all(&dir)
+        {
+            debug!(
+                "Failed to remove stale memtrack copy {}: {e}",
+                dir.display()
+            );
         }
     }
 }

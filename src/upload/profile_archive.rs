@@ -203,10 +203,10 @@ impl ProfileArchiveContent {
 
 impl Drop for ProfileArchiveContent {
     fn drop(&mut self) {
-        if let ProfileArchiveContent::UncompressedOnDisk { path } = self {
-            if path.exists() {
-                let _ = std::fs::remove_file(path);
-            }
+        if let ProfileArchiveContent::UncompressedOnDisk { path } = self
+            && path.exists()
+        {
+            let _ = std::fs::remove_file(path);
         }
     }
 }

@@ -135,10 +135,10 @@ impl Orchestrator {
             // Install memtrack's copy before any run under sudo, which may create
             // a root-owned `~/.cache` (e.g. samply's symbol cache in walltime).
             #[cfg(target_os = "linux")]
-            if modes.contains(&RunnerMode::Memory) {
-                if let Err(e) = super::memtrack_path() {
-                    debug!("Failed to install memtrack: {e:#}");
-                }
+            if modes.contains(&RunnerMode::Memory)
+                && let Err(e) = super::memtrack_path()
+            {
+                debug!("Failed to install memtrack: {e:#}");
             }
 
             start_opened_group!("Running the benchmarks");

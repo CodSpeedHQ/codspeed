@@ -410,7 +410,7 @@ pub fn build_comparison_table(results: &[CompareRunsBenchmarkResult]) -> String 
                         ResultComparisonCategory::Untouched => {
                             format!("{}", style("No Change").dim())
                         }
-                        _ => format!("{}", &result.status),
+                        _ => format!("{}", result.status),
                     };
 
                     ComparisonRow {
