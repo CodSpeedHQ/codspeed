@@ -55,6 +55,10 @@ pub struct Runner {
     /// byte-identical to legacy runs that predate this field.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub exclude_allocations: bool,
+    /// Configuration of the CodSpeed Macro Runner executing the job, as the JSON object the
+    /// machine writes to `/etc/codspeed/macro-runner-config.json`. Forwarded as is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub macro_runner_config: Option<serde_json::Map<String, serde_json::Value>>,
     #[serde(flatten)]
     pub system_info: SystemInfo,
 }

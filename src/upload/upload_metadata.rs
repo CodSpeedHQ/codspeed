@@ -52,6 +52,14 @@ mod tests {
                 instruments: vec![InstrumentName::MongoDB],
                 executor: ExecutorName::Valgrind,
                 exclude_allocations: false,
+                macro_runner_config: json!({
+                    "macroAgentVersion": "0.4.0",
+                    "hostImageName": "packer-ubuntu24-x86-post-20261120093416",
+                    "guestImageName": "packer-ubuntu24-x86-post-20261120093416",
+                    "runtimeConfig": { "isolation": "strict" },
+                })
+                .as_object()
+                .cloned(),
                 system_info: SystemInfo::test(),
             },
             run_environment: RunEnvironment::GithubActions,
@@ -87,7 +95,7 @@ mod tests {
             hash,
             // Caution: when changing this value, we need to ensure that
             // the related backend snapshot remains the same
-            @"75a9b81695bbea8934d88e221dd3dd98392170904d4775a84145767117555a60"
+            @"cd04217a89681d057c73e78a651ac8e7dba5f01133679df0637f4f68022d0223"
         );
         assert_json_snapshot!(upload_metadata);
     }
@@ -104,6 +112,7 @@ mod tests {
             instruments: instruments.get_active_instrument_names(),
             executor: get_executor_from_mode(&RunnerMode::Telemetry, None).name(),
             exclude_allocations: false,
+            macro_runner_config: None,
             system_info: SystemInfo::test(),
         };
 
@@ -131,6 +140,7 @@ mod tests {
                 instruments: vec![],
                 executor: ExecutorName::Valgrind,
                 exclude_allocations: false,
+                macro_runner_config: None,
                 system_info: SystemInfo {
                     os: crate::system::SupportedOs::Linux(
                         crate::system::LinuxDistribution::Other {
