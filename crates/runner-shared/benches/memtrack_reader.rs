@@ -109,7 +109,7 @@ fn write_artifact(n: usize, payload: Payload, out: impl Write) -> usize {
                 len: 0x8_0000,
             }
         } else if i % LIFECYCLE_INTERVAL == 0 {
-            if (i / LIFECYCLE_INTERVAL) % 2 == 0 {
+            if (i / LIFECYCLE_INTERVAL).is_multiple_of(2) {
                 MemtrackEventKind::Fork { parent_pid: PID }
             } else {
                 MemtrackEventKind::Exec

@@ -84,10 +84,10 @@ pub fn suspend_progress_bar<F: FnOnce() -> R, R>(f: F) -> R {
     // If the output is a TTY, and there is a spinner, suspend it
     if *IS_TTY {
         // Use try_lock to avoid deadlock on reentrant calls
-        if let Ok(mut spinner) = SPINNER.try_lock() {
-            if let Some(spinner) = spinner.as_mut() {
-                return spinner.suspend(f);
-            }
+        if let Ok(mut spinner) = SPINNER.try_lock()
+            && let Some(spinner) = spinner.as_mut()
+        {
+            return spinner.suspend(f);
         }
     }
 
@@ -149,15 +149,15 @@ impl Log for LocalLogger {
                             pb.finish_and_clear();
 
                             // Show completion message with checkmark
-                            if let Ok(mut current) = CURRENT_GROUP_NAME.lock() {
-                                if let Some(name) = current.take() {
-                                    let elapsed_str = format_elapsed(elapsed);
-                                    eprintln!(
-                                        "{} {}",
-                                        format_checkmark(&name, true),
-                                        style(elapsed_str).dim(),
-                                    );
-                                }
+                            if let Ok(mut current) = CURRENT_GROUP_NAME.lock()
+                                && let Some(name) = current.take()
+                            {
+                                let elapsed_str = format_elapsed(elapsed);
+                                eprintln!(
+                                    "{} {}",
+                                    format_checkmark(&name, true),
+                                    style(elapsed_str).dim(),
+                                );
                             }
                         }
                     }
@@ -396,10 +396,10 @@ pub fn start_spinner(message: &str) {
 
 /// Stop and clear the current standalone spinner.
 pub fn stop_spinner() {
-    if let Ok(mut spinner) = SPINNER.lock() {
-        if let Some(pb) = spinner.take() {
-            pb.finish_and_clear();
-        }
+    if let Ok(mut spinner) = SPINNER.lock()
+        && let Some(pb) = spinner.take()
+    {
+        pb.finish_and_clear();
     }
 }
 

@@ -180,22 +180,21 @@ impl TryFrom<WalltimeExecutionArgs> for ExecutionOptions {
             .context("Invalid min_time")?;
 
         // Validation: min_xxx cannot be greater than max_xxx (for same dimension)
-        if max_time_ns > 0 {
-            if let Some(min) = min_time_ns {
-                if min > max_time_ns {
-                    bail!(
-                        "min_time ({:.2}s) cannot be greater than max_time ({:.2}s)",
-                        min as f64 / 1_000_000_000.0,
-                        max_time_ns as f64 / 1_000_000_000.0
-                    );
-                }
-            }
+        if max_time_ns > 0
+            && let Some(min) = min_time_ns
+            && min > max_time_ns
+        {
+            bail!(
+                "min_time ({:.2}s) cannot be greater than max_time ({:.2}s)",
+                min as f64 / 1_000_000_000.0,
+                max_time_ns as f64 / 1_000_000_000.0
+            );
         }
 
-        if let (Some(min), Some(max)) = (args.min_rounds, args.max_rounds) {
-            if min > max {
-                bail!("min_rounds ({min}) cannot be greater than max_rounds ({max})");
-            }
+        if let (Some(min), Some(max)) = (args.min_rounds, args.max_rounds)
+            && min > max
+        {
+            bail!("min_rounds ({min}) cannot be greater than max_rounds ({max})");
         }
 
         // Build min/max using RoundOrTime enum

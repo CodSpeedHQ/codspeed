@@ -142,7 +142,7 @@ impl Profiler for PerfProfiler {
 
         let raw_command = format!(
             "set -o pipefail && {} | cat > {}",
-            &cmd_builder.as_command_line(),
+            cmd_builder.as_command_line(),
             perf_file_path.to_string_lossy()
         );
 

@@ -131,10 +131,10 @@ impl ModuleSymbols {
 
             // Reject ARM ELF "mapping symbols" as does perf
             let name = symbol.name.as_str();
-            if let [b'$', b'a' | b'd' | b't' | b'x', rest @ ..] = name.as_bytes() {
-                if rest.is_empty() || rest.starts_with(b".") {
-                    return false;
-                }
+            if let [b'$', b'a' | b'd' | b't' | b'x', rest @ ..] = name.as_bytes()
+                && (rest.is_empty() || rest.starts_with(b"."))
+            {
+                return false;
             }
 
             true

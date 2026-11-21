@@ -207,21 +207,21 @@ impl Executor for MemoryExecutor {
         }
 
         let data = fifo_data.borrow_mut().take();
-        if let Some(data) = data {
-            if let Some(integration) = data.integration {
-                let results_folder = execution_context.profile_folder.join("results");
-                if let Err(e) = save_module_artifacts(
-                    &execution_context.profile_folder,
-                    &results_folder,
-                    integration,
-                    &data.bench_pids,
-                )
-                .await
-                {
-                    // The memory results are complete without them; only offline
-                    // stack attribution is lost.
-                    error!("Failed to save memtrack module artifacts: {e:#}");
-                }
+        if let Some(data) = data
+            && let Some(integration) = data.integration
+        {
+            let results_folder = execution_context.profile_folder.join("results");
+            if let Err(e) = save_module_artifacts(
+                &execution_context.profile_folder,
+                &results_folder,
+                integration,
+                &data.bench_pids,
+            )
+            .await
+            {
+                // The memory results are complete without them; only offline
+                // stack attribution is lost.
+                error!("Failed to save memtrack module artifacts: {e:#}");
             }
         }
 
