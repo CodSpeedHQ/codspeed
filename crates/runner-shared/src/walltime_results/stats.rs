@@ -91,6 +91,7 @@ impl WalltimeBenchmark {
                 q1_ns,
                 median_ns,
                 q3_ns,
+                percentiles_ns: None,
                 rounds: rounds as u64,
                 total_time: total_time_s,
                 iqr_outlier_rounds,
@@ -194,6 +195,26 @@ mod tests {
             benchmark.stats.total_time,
             42. * total_rounds / 1_000_000_000.0
         );
+    }
+
+    #[test]
+    fn test_percentiles_are_optional_in_results_files() {
+        let benchmark = WalltimeBenchmark::from_runtime_data(
+            NAME.to_string(),
+            URI.to_string(),
+            vec![1],
+            vec![42],
+            None,
+        );
+        let mut json = serde_json::to_value(&benchmark).unwrap();
+        assert!(json["stats"].get("percentiles_ns").is_none());
+
+        let parsed: WalltimeBenchmark = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(parsed.stats.percentiles_ns, None);
+
+        json["stats"]["percentiles_ns"] = serde_json::json!([41.0, 42.0, 43.0]);
+        let parsed: WalltimeBenchmark = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.stats.percentiles_ns, Some(vec![41.0, 42.0, 43.0]));
     }
 
     #[test]
