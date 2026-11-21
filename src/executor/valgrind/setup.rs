@@ -12,9 +12,44 @@ use crate::system::{LinuxDistribution, SupportedOs, SystemInfo};
 use semver::Version;
 use std::{env, path::Path, process::Command};
 
+/// What to try when the system is not supported. An outdated CodSpeed is the usual reason for
+/// hitting it. The supported systems are listed in the documentation rather than here, so
+/// they stay accurate as support evolves.
+const UNSUPPORTED_SYSTEM_ADVICE: &str = "\
+Make sure you are running the latest version of CodSpeed first:\n\
+- On GitHub Actions, update `CodSpeedHQ/action` to its latest release.\n\
+- Elsewhere, run `codspeed update`.\n\
+\n\
+The supported systems are listed in the documentation: https://codspeed.io/docs/cli#installation\n\
+\n\
+If the error persists, reach out on Discord (https://codspeed.io/discord) \
+or by email (support@codspeed.io).";
+
+/// Error for a system we publish no valgrind package for. It names the detected system and
+/// points to the fixes.
+fn unsupported_system_error(system_info: &SystemInfo) -> Error {
+    anyhow!(
+        "Unsupported system: {} ({}).\n\n{UNSUPPORTED_SYSTEM_ADVICE}",
+        system_info.os,
+        system_info.arch,
+    )
+}
+
+/// Error for a system without a package, where valgrind could not be provided either.
+fn manual_installation_error(system_info: &SystemInfo) -> Error {
+    anyhow!(
+        "valgrind-codspeed {} or higher is required and could not be installed automatically \
+        on {} ({}). Install it manually, see https://github.com/CodSpeedHQ/valgrind-codspeed\n\n\
+        {UNSUPPORTED_SYSTEM_ADVICE}",
+        VALGRIND_CODSPEED_VERSION_STRING.as_str(),
+        system_info.os,
+        system_info.arch,
+    )
+}
+
 fn get_codspeed_valgrind_target(system_info: &SystemInfo) -> Result<ValgrindTarget> {
     let SupportedOs::Linux(distro) = &system_info.os else {
-        bail!("Unsupported system");
+        return Err(unsupported_system_error(system_info));
     };
 
     let (distro_version, arch) = match (distro, system_info.arch.as_str()) {
@@ -42,7 +77,7 @@ fn get_codspeed_valgrind_target(system_info: &SystemInfo) -> Result<ValgrindTarg
         (LinuxDistribution::Ubuntu { version }, "aarch64") if version == "26.04" => {
             (DistroVersion::Ubuntu2604, Arch::Arm64)
         }
-        _ => bail!("Unsupported system"),
+        _ => return Err(unsupported_system_error(system_info)),
     };
 
     Ok(ValgrindTarget {
@@ -223,11 +258,7 @@ pub(super) async fn try_install_from_source(
         }
     }
 
-    bail!(
-        "valgrind-codspeed {} or higher is required and could not be installed automatically. \
-        Install it manually, see https://github.com/CodSpeedHQ/valgrind-codspeed",
-        VALGRIND_CODSPEED_VERSION_STRING.as_str()
-    );
+    Err(manual_installation_error(system_info))
 }
 
 /// Install the valgrind-codspeed package we publish for this system, from apt.
@@ -385,6 +416,54 @@ mod tests {
             ..SystemInfo::test()
         };
         assert!(get_codspeed_valgrind_binary(&system_info).is_err());
+    }
+
+    #[test]
+    fn test_codspeed_valgrind_unsupported_system_error_is_actionable() {
+        let system_info = SystemInfo {
+            os: SupportedOs::Linux(LinuxDistribution::Ubuntu {
+                version: "20.04".into(),
+            }),
+            arch: "x86_64".to_string(),
+            ..SystemInfo::test()
+        };
+        let message = get_codspeed_valgrind_target(&system_info)
+            .unwrap_err()
+            .to_string();
+
+        // The detected system, without a hard-coded list of the supported ones
+        assert!(message.starts_with("Unsupported system: ubuntu 20.04 (x86_64)."));
+        assert!(!message.contains("22.04"));
+        // How to update, then where to read about the supported systems and get help
+        assert!(message.contains("`CodSpeedHQ/action`"));
+        assert!(message.contains("`codspeed update`"));
+        assert!(!message.contains("curl"));
+        assert!(message.contains("https://codspeed.io/docs/cli#installation"));
+        assert!(message.contains("https://codspeed.io/discord"));
+        assert!(message.contains("support@codspeed.io"));
+    }
+
+    #[test]
+    fn test_manual_installation_error_is_actionable() {
+        let system_info = SystemInfo {
+            os: SupportedOs::Linux(LinuxDistribution::Ubuntu {
+                version: "20.04".into(),
+            }),
+            arch: "x86_64".to_string(),
+            ..SystemInfo::test()
+        };
+        let message = manual_installation_error(&system_info).to_string();
+
+        // The error users get on a system without a package keeps the manual installation
+        // pointer and carries the same advice as the unsupported system error
+        assert!(message.contains("ubuntu 20.04 (x86_64)"));
+        assert!(message.contains("https://github.com/CodSpeedHQ/valgrind-codspeed"));
+        assert!(message.contains("`CodSpeedHQ/action`"));
+        assert!(message.contains("`codspeed update`"));
+        assert!(!message.contains("curl"));
+        assert!(message.contains("https://codspeed.io/docs/cli#installation"));
+        assert!(message.contains("https://codspeed.io/discord"));
+        assert!(message.contains("support@codspeed.io"));
     }
 
     #[test]
