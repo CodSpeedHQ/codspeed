@@ -138,7 +138,7 @@ impl PerfEvent {
 fn is_genuine_intel() -> bool {
     use std::arch::x86_64::__cpuid;
     // CPUID leaf 0: vendor string in EBX,EDX,ECX.
-    let leaf0 = unsafe { __cpuid(0) };
+    let leaf0 = __cpuid(0);
     let mut vendor = [0u8; 12];
     vendor[0..4].copy_from_slice(&leaf0.ebx.to_le_bytes());
     vendor[4..8].copy_from_slice(&leaf0.edx.to_le_bytes());

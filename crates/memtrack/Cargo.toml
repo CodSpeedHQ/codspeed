@@ -29,7 +29,6 @@ serde_json = { workspace = true }
 serde = { workspace = true }
 runner-shared = { path = "../runner-shared" }
 ipc-channel = { workspace = true }
-static_assertions = "1.1"
 itertools = { workspace = true }
 paste = "1.0.15"
 libbpf-rs = { version = "0.26", features = ["vendored"], optional = true }

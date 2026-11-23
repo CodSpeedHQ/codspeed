@@ -172,18 +172,18 @@ where
     if let [(start, end)] = warmup_timestamps.as_slice() {
         let single_warmup_round_duration_ns = end - start;
         match config.max {
-            Some(RoundOrTime::TimeNs(time_ns)) | Some(RoundOrTime::Both { time_ns, .. }) => {
-                if time_ns <= single_warmup_round_duration_ns {
-                    info!(
-                        "A single warmup execution ({}) exceeded or met max_time ({}). No more rounds will be performed.",
-                        format_ns(single_warmup_round_duration_ns),
-                        format_ns(time_ns)
-                    );
-                    return Ok(WarmupResult::EarlyReturn {
-                        start: *start,
-                        end: *end,
-                    });
-                }
+            Some(RoundOrTime::TimeNs(time_ns)) | Some(RoundOrTime::Both { time_ns, .. })
+                if time_ns <= single_warmup_round_duration_ns =>
+            {
+                info!(
+                    "A single warmup execution ({}) exceeded or met max_time ({}). No more rounds will be performed.",
+                    format_ns(single_warmup_round_duration_ns),
+                    format_ns(time_ns)
+                );
+                return Ok(WarmupResult::EarlyReturn {
+                    start: *start,
+                    end: *end,
+                });
             }
             _ => { /* No max time constraint */ }
         }

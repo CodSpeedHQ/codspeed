@@ -20,11 +20,11 @@ static ACTIVE_BUFFER: LazyLock<Mutex<Option<RollingBuffer>>> = LazyLock::new(|| 
 /// Returns `false` when no buffer is active so the caller can fall back to
 /// plain output.
 pub(super) fn try_push(text: &str) -> bool {
-    if let Ok(mut guard) = ACTIVE_BUFFER.lock() {
-        if let Some(rb) = guard.as_mut() {
-            rb.push_lines(text);
-            return true;
-        }
+    if let Ok(mut guard) = ACTIVE_BUFFER.lock()
+        && let Some(rb) = guard.as_mut()
+    {
+        rb.push_lines(text);
+        return true;
     }
     false
 }
@@ -316,11 +316,11 @@ impl RollingBufferGuard {
         }
 
         // Suspend the group spinner so it doesn't interfere with rolling output
-        if let Ok(mut spinner) = SPINNER.lock() {
-            if let Some(pb) = spinner.take() {
-                pb.suspend(|| eprintln!());
-                pb.finish_and_clear();
-            }
+        if let Ok(mut spinner) = SPINNER.lock()
+            && let Some(pb) = spinner.take()
+        {
+            pb.suspend(|| eprintln!());
+            pb.finish_and_clear();
         }
 
         super::activate_log_deferral();
@@ -342,13 +342,13 @@ impl RollingBufferGuard {
                     if tick_stop.load(Ordering::Relaxed) {
                         break;
                     }
-                    if let Ok(mut guard) = ACTIVE_BUFFER.try_lock() {
-                        if let Some(rb) = guard.as_mut() {
-                            if rb.finished {
-                                break;
-                            }
-                            rb.redraw_title();
+                    if let Ok(mut guard) = ACTIVE_BUFFER.try_lock()
+                        && let Some(rb) = guard.as_mut()
+                    {
+                        if rb.finished {
+                            break;
                         }
+                        rb.redraw_title();
                     }
                 }
             }

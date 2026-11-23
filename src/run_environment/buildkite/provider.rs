@@ -282,7 +282,7 @@ mod tests {
                         assert_eq!(value.as_str().unwrap(), VERSION.to_string());
                         "[version]"
                     }),
-                })
+                });
             },
         );
     }
