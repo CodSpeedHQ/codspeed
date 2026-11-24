@@ -2,6 +2,7 @@ use crate::api_client::CodSpeedAPIClient;
 use crate::executor::ExecutionContext;
 use crate::executor::ExecutorName;
 use crate::executor::Orchestrator;
+use crate::exit_code::auth_failed;
 use crate::run_environment::RunEnvironment;
 use crate::upload::{UploadError, profile_archive::ProfileArchiveContent};
 use crate::{
@@ -147,13 +148,18 @@ async fn retrieve_upload_data(
                     upload_metadata.run_environment_metadata.repository
                 );
 
-                bail!(
+                let error = anyhow!(
                     "Failed to retrieve upload data: {}\n  -> {} {}",
                     status,
                     style("Reason:").bold(),
                     // we have to manually apply the style to the error message, because nesting styles is not supported by the console crate: https://github.com/console-rs/console/issues/106
                     style(error_message).red()
                 );
+                return Err(if status == StatusCode::UNAUTHORIZED {
+                    auth_failed(error)
+                } else {
+                    error
+                });
             }
 
             Ok(response.json().await?)
