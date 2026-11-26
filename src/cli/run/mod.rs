@@ -50,6 +50,7 @@ impl RunArgs {
         use super::experimental::ExperimentalArgs;
         use super::{ProfilerRunArgs, WalltimeRunArgs};
         use crate::RunnerMode;
+        use crate::executor::config::DEFAULT_WALLTIME_SAMPLING_RATE_HZ;
 
         Self {
             shared: ExecAndRunSharedArgs {
@@ -80,6 +81,7 @@ impl RunArgs {
                     walltime: WalltimeRunArgs {
                         walltime_unwinding_mode: None,
                         perf_unwinding_mode: None,
+                        walltime_sampling_rate_hz: DEFAULT_WALLTIME_SAMPLING_RATE_HZ,
                     },
                 },
                 experimental: ExperimentalArgs {
@@ -130,6 +132,11 @@ fn build_orchestrator_config(
         modes,
         instruments,
         walltime_unwinding: args.shared.profiler_run_args.walltime.resolve_unwinding(),
+        walltime_sampling_rate_hz: args
+            .shared
+            .profiler_run_args
+            .walltime
+            .walltime_sampling_rate_hz,
         enable_profiler: args.shared.profiler_run_args.resolve_enable_profiler(),
         walltime_profiler: args.shared.walltime_profiler,
         simulation_tool: args.shared.simulation_tool.unwrap_or_default(),

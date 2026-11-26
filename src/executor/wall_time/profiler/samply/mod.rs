@@ -23,7 +23,6 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use super::NO_BENCHMARKS_DETECTED_WARNING;
-use super::SAMPLING_RATE_HZ;
 use super::WALLTIME_METADATA_CURRENT_VERSION;
 
 const SAMPLY_OUTPUT_FILE_NAME: &str = "samply-profile.json.gz";
@@ -101,7 +100,7 @@ impl Profiler for SamplyProfiler {
             "--no-open".into(),
             "--save-only".into(),
             "--rate".into(),
-            SAMPLING_RATE_HZ.to_string().into(),
+            config.walltime_sampling_rate_hz.to_string().into(),
             "-o".into(),
             output_path.clone().into(),
         ];

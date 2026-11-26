@@ -9,6 +9,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use url::Url;
 
+/// Default walltime profiler sampling rate (Hz). A prime number to avoid
+/// synchronization with periodic tasks.
+pub const DEFAULT_WALLTIME_SAMPLING_RATE_HZ: u32 = 997;
+
 /// A benchmark target from project configuration.
 ///
 /// Defines how a benchmark is executed:
@@ -92,6 +96,8 @@ pub struct OrchestratorConfig {
     pub enable_profiler: bool,
     /// Explicit unwinding settings; None preserves the profiler's automatic selection.
     pub walltime_unwinding: Option<WalltimeUnwinding>,
+    /// Walltime profiler samples per second.
+    pub walltime_sampling_rate_hz: u32,
     /// Profiler override for walltime mode (if None, selected based on the platform)
     pub walltime_profiler: Option<WalltimeProfiler>,
 
@@ -146,6 +152,8 @@ pub struct ExecutorConfig {
     pub enable_profiler: bool,
     /// Explicit unwinding settings; None preserves the profiler's automatic selection.
     pub walltime_unwinding: Option<WalltimeUnwinding>,
+    /// Walltime profiler samples per second.
+    pub walltime_sampling_rate_hz: u32,
 
     pub simulation_tool: SimulationTool,
 
@@ -242,6 +250,7 @@ impl OrchestratorConfig {
             instruments: self.instruments.clone(),
             enable_profiler: self.enable_profiler,
             walltime_unwinding: self.walltime_unwinding,
+            walltime_sampling_rate_hz: self.walltime_sampling_rate_hz,
             simulation_tool: self.simulation_tool,
             skip_run: self.skip_run,
             skip_setup: self.skip_setup,
@@ -276,6 +285,7 @@ impl OrchestratorConfig {
             modes: vec![RunnerMode::Simulation],
             instruments: Instruments::test(),
             walltime_unwinding: None,
+            walltime_sampling_rate_hz: DEFAULT_WALLTIME_SAMPLING_RATE_HZ,
             walltime_profiler: None,
             enable_profiler: false,
             simulation_tool: SimulationTool::default(),

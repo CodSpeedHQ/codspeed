@@ -1,6 +1,8 @@
 use super::experimental::ExperimentalArgs;
 use crate::VERSION;
-use crate::executor::config::{SimulationTool, WalltimeProfiler, WalltimeUnwinding};
+use crate::executor::config::{
+    DEFAULT_WALLTIME_SAMPLING_RATE_HZ, SimulationTool, WalltimeProfiler, WalltimeUnwinding,
+};
 use crate::prelude::*;
 use crate::run_environment::interfaces::RepositoryProvider;
 use crate::runner_mode::{RunnerMode, load_shell_session_mode};
@@ -242,6 +244,17 @@ pub struct WalltimeRunArgs {
     /// Deprecated alias for --walltime-unwinding-mode / CODSPEED_WALLTIME_UNWINDING_MODE.
     #[arg(long, env = "CODSPEED_PERF_UNWINDING_MODE", hide = true, value_parser = parse_walltime_unwinding)]
     pub perf_unwinding_mode: Option<WalltimeUnwinding>,
+
+    /// Walltime profiler samples per second. Higher rates give more samples for
+    /// short functions, at the cost of more profiling overhead.
+    #[arg(
+        long = "walltime-sampling-rate",
+        env = "CODSPEED_WALLTIME_SAMPLING_RATE",
+        value_name = "HZ",
+        default_value_t = DEFAULT_WALLTIME_SAMPLING_RATE_HZ,
+        value_parser = clap::value_parser!(u32).range(1..)
+    )]
+    pub walltime_sampling_rate_hz: u32,
 }
 
 impl WalltimeRunArgs {

@@ -12,7 +12,6 @@ use crate::executor::shared::fifo::FifoBenchmarkData;
 use crate::executor::shared::module_artifacts::save_artifacts;
 use crate::executor::wall_time::profiler::NO_BENCHMARKS_DETECTED_WARNING;
 use crate::executor::wall_time::profiler::Profiler;
-use crate::executor::wall_time::profiler::SAMPLING_RATE_HZ;
 use crate::executor::wall_time::profiler::WALLTIME_METADATA_CURRENT_VERSION;
 use crate::executor::wall_time::profiler::perf::perf_executable::get_working_perf_executable;
 use crate::executor::wall_time::profiler::unwinding::resolve_unwinding;
@@ -123,7 +122,7 @@ impl Profiler for PerfProfiler {
             // Required for matching the markers and URIs to the samples.
             "-k",
             "CLOCK_MONOTONIC",
-            &format!("--freq={SAMPLING_RATE_HZ}"),
+            &format!("--freq={}", config.walltime_sampling_rate_hz),
             "--delay=-1",
             "-g",
             "--user-callchains",
