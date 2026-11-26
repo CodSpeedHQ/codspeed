@@ -10,10 +10,6 @@ mod unwinding;
 
 const WALLTIME_METADATA_CURRENT_VERSION: u64 = 1;
 
-/// Sampling rate (Hz) shared by all walltime profilers. A prime number to
-/// avoid synchronization with periodic tasks.
-pub(super) const SAMPLING_RATE_HZ: u32 = 997;
-
 /// Warning shown when walltime profiling ran but no benchmarks were detected.
 pub(super) const NO_BENCHMARKS_DETECTED_WARNING: &str = "Walltime profiling is enabled, but failed to detect benchmarks. \
      If you wish to disable this warning, set CODSPEED_PROFILER_ENABLED=false";

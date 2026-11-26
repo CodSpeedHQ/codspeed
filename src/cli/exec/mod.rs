@@ -84,6 +84,11 @@ fn build_orchestrator_config(
             telemetry: false,
         },
         walltime_unwinding: args.shared.profiler_run_args.walltime.resolve_unwinding(),
+        walltime_sampling_rate_hz: args
+            .shared
+            .profiler_run_args
+            .walltime
+            .walltime_sampling_rate_hz,
         enable_profiler: args.shared.profiler_run_args.resolve_enable_profiler(),
         walltime_profiler: args.shared.walltime_profiler,
         simulation_tool: args.shared.simulation_tool.unwrap_or_default(),
