@@ -14,9 +14,13 @@ use tokio::net::unix::pipe::Receiver as TokioPipeReader;
 use tokio::net::unix::pipe::Sender as TokioPipeSender;
 use tokio_util::codec::{FramedRead, LengthDelimitedCodec};
 
+fn remove_fifo(path: &Path) {
+    let _ = nix::unistd::unlink(path);
+}
+
 fn create_fifo<P: AsRef<std::path::Path>>(path: P) -> anyhow::Result<()> {
     // Remove the previous FIFO (if it exists)
-    let _ = nix::unistd::unlink(path.as_ref());
+    remove_fifo(path.as_ref());
 
     // Create the FIFO with RWX permissions for the owner
     nix::unistd::mkfifo(path.as_ref(), nix::sys::stat::Mode::S_IRWXU)?;
@@ -79,6 +83,8 @@ impl FifoBenchmarkData {
 }
 
 pub struct RunnerFifo {
+    ctl_path: PathBuf,
+    ack_path: PathBuf,
     ack_fifo: TokioPipeSender,
     ctl_reader: FramedRead<TokioPipeReader, LengthDelimitedCodec>,
 }
@@ -125,6 +131,8 @@ impl RunnerFifo {
         let ctl_reader = FramedRead::new(ctl_fifo, codec);
 
         Ok(Self {
+            ctl_path: ctl_path.to_path_buf(),
+            ack_path: ack_path.to_path_buf(),
             ack_fifo,
             ctl_reader,
         })
@@ -285,6 +293,13 @@ impl RunnerFifo {
     }
 }
 
+impl Drop for RunnerFifo {
+    fn drop(&mut self) {
+        remove_fifo(&self.ctl_path);
+        remove_fifo(&self.ack_path);
+    }
+}
+
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
@@ -320,5 +335,20 @@ mod tests {
             matches!(second, Ok(Ok(FifoCommand::Ack))),
             "recv_cmd should be cancel-safe: expected Ok(Ok(Ack)), got: {second:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn drop_removes_fifos() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let ctl_path = temp_dir.path().join("ctl_fifo");
+        let ack_path = temp_dir.path().join("ack_fifo");
+
+        let fifo = RunnerFifo::open(&ctl_path, &ack_path).unwrap();
+        assert!(ctl_path.exists() && ack_path.exists());
+
+        drop(fifo);
+
+        assert!(!ctl_path.exists(), "ctl FIFO should be removed on drop");
+        assert!(!ack_path.exists(), "ack FIFO should be removed on drop");
     }
 }
