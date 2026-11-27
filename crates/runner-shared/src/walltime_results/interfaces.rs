@@ -18,6 +18,9 @@ pub struct BenchmarkStats {
     pub q1_ns: f64,
     pub median_ns: f64,
     pub q3_ns: f64,
+    /// p1..p99 of the time per iteration: `[24]`, `[49]` and `[74]` equal `q1_ns`, `median_ns` and `q3_ns`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub percentiles_ns: Option<Vec<f64>>,
 
     pub rounds: u64,
     /// Total time in **seconds**
